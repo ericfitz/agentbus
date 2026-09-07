@@ -268,7 +268,8 @@ any. Maintenance writes the capacity warning there and clears it when ordinary
 cleanup can free space again. Nothing is queued, dropped, or fanned out.
 
 **Harness timeouts.** `receive_max_wait_seconds` must stay below the harness
-MCP tool-call timeout; the verified ceiling is an entry criterion below. A
+MCP tool-call timeout; the verified ceiling is recorded under Testing and
+verification. A
 receive whose response is lost is redelivered on the next call because its
 batch is pending.
 
@@ -389,7 +390,7 @@ startup, so a change takes effect as harnesses restart.
 | `send_kib_per_second` | 1024 | 64 | 65536 | Per-sender mutation-byte rate |
 | `receive_default_count` | 100 | 1 | 1000 | Count when `receive` omits it |
 | `receive_max_count` | 1000 | 1 | 10000 | Maximum requested count |
-| `receive_max_wait_seconds` | 60 | 0 | 300 | Maximum requested wait; must stay under the harness tool timeout |
+| `receive_max_wait_seconds` | 60 | 0 | 240 | Maximum requested wait; verified harness ceiling is 300 seconds |
 | `result_default_kib` | 64 | 1 | 4096 | Per-result byte ceiling |
 | `discovery_enabled` | true | | true / false | Enables `discover` |
 | `inspection_command` | `[]` | empty or argv | 64 entries, 32 KiB | Hook executable and literal arguments |
@@ -447,16 +448,30 @@ Code keeps one adapter across `/clear` and shares it with subagents; Codex
 spawns one adapter per thread; the Claude Code SessionStart hook fires on
 startup, `/clear`, and resume.
 
-**Entry criteria before writing-plans**, not yet verified:
+**Entry criteria, verified 2026-09-07** (Claude Code 2.1.263, Codex 0.153.4,
+Go 1.27.1):
 
-1. A SessionStart hook running `agentbus identity` injects its output into the
-   agent's context on startup, `/clear`, and resume in Claude Code, and the
-   Codex equivalent works.
-2. The harness MCP tool-call timeout in Claude Code and Codex, giving
-   `receive_max_wait_seconds` a verified ceiling.
-3. Library choices: the official Go MCP SDK, and a SQLite driver with FTS5
-   compiled in, preferring pure Go to avoid CGO. Embeddings use the standard
-   library HTTP client. No other dependencies.
+1. Hook context injection. A Claude Code SessionStart hook that echoes
+   `Agentbus: call register with name Zebra` was visible to the model on
+   startup and on `--resume`, and a hook that echoes a different name when
+   `source` is `clear` was visible after `/clear` in an interactive session.
+   Codex supports the same `hooks.json` format at `$CODEX_HOME/hooks.json`
+   with a `SessionStart` matcher of `startup|resume|clear`, and the injected
+   line was visible to the model. Codex requires hook trust to be recorded in
+   its config (or `--dangerously-bypass-hook-trust`), which the install notes
+   must mention.
+2. Tool-call timeouts. Claude Code's default MCP tool timeout is 300 seconds
+   (`MCP_TOOL_TIMEOUT` environment variable, or a per-server `timeout` field in
+   the MCP config; progress notifications do not extend it). Codex completed a
+   200-second tool call under its defaults and exposes a per-server
+   `tool_timeout_sec`. Both harnesses returned a 200-second probe result
+   intact with no cancellation. `receive_max_wait_seconds` therefore keeps a
+   default of 60 with a maximum of 240, under the lowest verified ceiling.
+3. Libraries. `modernc.org/sqlite` v1.58.0 creates an FTS5 external-content
+   table, matches on it, and opens WAL mode with `CGO_ENABLED=0`, and reports
+   `page_count`, `freelist_count`, and `page_size`. The official
+   `github.com/modelcontextprotocol/go-sdk` resolves at v1.7.0. These two
+   modules plus the standard library are the dependency set.
 
-A failed check that requires a design change returns to the user with the
-concrete trade-off; it does not authorize silently changing this design.
+Implementation must use the verified versions or newer and re-run the FTS5 and
+WAL check when the driver is upgraded.

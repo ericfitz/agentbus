@@ -71,6 +71,9 @@ func callOK(t *testing.T, p *proc, name string, args map[string]any) string {
 	if err != nil {
 		t.Fatalf("%s: protocol error: %v", name, err)
 	}
+	if len(res.Content) == 0 {
+		t.Fatalf("%s: result has no content", name)
+	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("%s: content[0] is not text: %#v", name, res.Content[0])
@@ -131,6 +134,9 @@ func callSafe(p *proc, name string, args map[string]any) (result map[string]any,
 	res, err := p.cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: protocol error: %w", name, err)
+	}
+	if len(res.Content) == 0 {
+		return nil, "", fmt.Errorf("%s: result has no content", name)
 	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
@@ -274,25 +280,55 @@ func gapsOf(r map[string]any) []any {
 // TestGapAfterAgeEvictionUnderConcurrentSends drives age-based eviction
 // (chunked in 1,000-row transactions per maintenance.go) concurrently with
 // live sends on the same channel, and proves a subscriber whose cursor
-// falls behind the evicted boundary gets gap notices covering exactly the
-// evicted range, then delivery of only the surviving (live) messages, in
-// seq order, with no duplicates.
+// falls behind the evicted boundary gets gap notices that, together with
+// the old-content messages it received before eviction caught up, account
+// for every seq in the pre-eviction backlog exactly once - then delivery of
+// only the surviving (live) messages, in seq order, with no duplicates.
+//
+// Chunked eviction commits its 1,000-row chunks back-to-back with no
+// ordering guarantee against a concurrent poll: a poll landing between two
+// chunk commits can legitimately see a gap for the first chunk PLUS
+// delivery of already-evicted-boundary-adjacent survivors from the second
+// in the very same response (or several such interleavings). So "coverage"
+// here is not "the first gap spans everything" but a set: every seq in
+// (primedCursor, nOld] must be accounted for, exactly once, by either a gap
+// notice or a delivered old- message - see the covered map below. At least
+// one real gap notice must occur (delivery alone must not satisfy
+// coverage), and the aged rows must actually have been deleted from the
+// table by the end (a direct-SQL check), so coverage cannot be satisfied
+// by a run that never actually evicted anything.
 //
 // A foreign lease (holdForeignLease) blocks every process's tick while the
 // subscriber primes its cursor with one acked batch of pre-eviction
 // messages, so eviction can never race ahead of that prime - on a correct
 // implementation it would otherwise be free to start the gap at seq 1
 // instead of the intended boundary, since the tick's startup jitter can be
-// arbitrarily close to zero. Once primed and released, the subscriber acks
-// every batch once any part of the gap has been observed (safe: it can only
-// mean forward progress from there), but leaves a further pre-gap
-// old-content batch unacknowledged (simply redelivered unchanged on later
-// polls - see receiveOnce's pending-batch branch) until the gap actually
-// surfaces, so the test cannot race past the whole backlog before eviction
-// ever runs. Every receive response (including ack calls, which can
-// themselves carry new gaps/messages) is inspected, and gap notices are
-// accumulated into a contiguous coverage range rather than assuming the
-// first one spans every evicted chunk.
+// arbitrarily close to zero.
+//
+// There are no separate "ack" calls: acking is itself just a receive call,
+// so the token from every response is carried into the very next receive's
+// ack argument (or omitted, to deliberately leave a pre-gap old-content
+// batch pending - it is then simply redelivered unchanged on a later poll,
+// per receiveOnce's pending-batch branch, until any part of the gap has
+// actually been observed - preventing the test from draining the whole
+// backlog before eviction ever runs). A redelivered response's gaps are
+// still recorded (a fresh signal: the gap check runs unconditionally on the
+// live cursor, independent of pending state), but its messages are not
+// reprocessed - they are byte-identical to what a prior, non-redelivered
+// response for the same batch already recorded.
+//
+// Coverage marking is a plain idempotent union (covered[seq] = true, never
+// an error to set twice): a gap can legitimately reclaim part of a range
+// this test already saw via an unacked pending batch that eviction then
+// caught up to before the batch was ever acked - receiveOnce's gap check
+// uses the raw (still un-advanced) subscription cursor regardless of
+// whether a stale pending batch for that same range is being redelivered
+// in the very same response, so one response can carry both a gap and
+// (identical, already-recorded) redelivered messages for an overlapping
+// range. What must never happen, and is asserted separately, is a gap
+// starting anywhere other than exactly where the last confirmed coverage
+// left off (checked below) and the final union covering fewer seqs than
+// the whole (ackedCount, nOld] range (checked after the loop).
 func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `{"message_retention_hours":1,"cleanup_interval_seconds":5}`)
@@ -320,14 +356,15 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	// nextGapFrom is set below, once ackedCount is known from the priming
-	// batch; record is defined here (rather than after priming) because the
-	// priming ack's own response must also flow through it - acking is
-	// itself just a receive call, so it can legitimately also carry the
-	// NEXT fresh batch of old content in the same response, not merely
-	// clear the acked one.
-	var nextGapFrom int64
-	gapComplete := false
+	// covered[seq] is set, idempotently (see the func doc), by either a gap
+	// notice or a delivered old- message, for every seq in (ackedCount,
+	// nOld]. ackedCount and nextGapFrom are set below once the priming
+	// batch is known; record is defined first because they - and record
+	// itself - are used by every subsequent receive response, priming's
+	// own ack response included.
+	covered := map[int64]bool{}
+	var ackedCount, nextGapFrom int64 = -1, -1
+	gotGap := false
 	seenLiveSeqs := map[float64]bool{}
 	var deliveredLive []map[string]any
 
@@ -339,16 +376,23 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 			}
 			from, _ := gm["from"].(float64)
 			to, _ := gm["to"].(float64)
-			if int64(from) != nextGapFrom {
-				t.Fatalf("gap notice for dev must extend coverage contiguously: got from=%v, want %d", from, nextGapFrom)
+			f, tt := int64(from), int64(to)
+			if f != nextGapFrom {
+				t.Fatalf("gap notice for dev must start where coverage left off: got from=%v, want %d", from, nextGapFrom)
 			}
-			if int64(to) > nOld {
+			if tt > nOld {
 				t.Fatalf("gap notice for dev covers past the evicted range: to=%v, want <= %d", to, nOld)
 			}
-			nextGapFrom = int64(to) + 1
-			if nextGapFrom == nOld+1 {
-				gapComplete = true
+			for s := f; s <= tt; s++ {
+				covered[s] = true
 			}
+			gotGap = true
+			nextGapFrom = tt + 1
+		}
+		if rr["redelivered"] == true {
+			// Byte-identical repeat of a previously recorded, deliberately
+			// unacknowledged batch - expected, not a duplicate to record again.
+			return
 		}
 		for _, m := range messagesOf(t, rr) {
 			mm, ok := m.(map[string]any)
@@ -356,17 +400,18 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 				t.Fatalf("message is not an object: %#v", m)
 			}
 			content, _ := mm["content"].(string)
+			seq, _ := mm["seq"].(float64)
 			switch {
 			case strings.HasPrefix(content, "live-"):
-				seq, _ := mm["seq"].(float64)
 				if seenLiveSeqs[seq] {
 					t.Fatalf("duplicate live seq %v delivered across receive calls", seq)
 				}
 				seenLiveSeqs[seq] = true
 				deliveredLive = append(deliveredLive, mm)
 			case strings.HasPrefix(content, "old-"):
-				// expected pre-eviction content; only relevant to the acking
-				// decision below.
+				if s := int64(seq); ackedCount >= 0 && s > ackedCount {
+					covered[s] = true
+				}
 			default:
 				t.Fatalf("unexpected message content on dev: %v", mm)
 			}
@@ -381,24 +426,12 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	if len(primed) == 0 || len(gapsOf(primeRR)) != 0 {
 		t.Fatalf("expected a fresh batch of pre-eviction messages with no gap while maintenance is held off: %v", primeRR)
 	}
-	ackedCount := int64(len(primed))
+	ackedCount = int64(len(primed))
 	nextGapFrom = ackedCount + 1
-	primeBatch, _ := primeRR["batch"].(string)
-	if primeBatch == "" {
+	ackToken, _ := primeRR["batch"].(string)
+	if ackToken == "" {
 		t.Fatalf("priming batch missing a batch token: %v", primeRR)
 	}
-	// Acking is itself just a receive call, so this response may also carry
-	// the next fresh batch of old content (not merely clear the acked one) -
-	// route it through record() like any other, rather than asserting it
-	// empty. With the lease still held, it cannot legitimately carry a gap.
-	ackRR, e := a.call(t, "receive", map[string]any{"as": "Sam", "ack": primeBatch})
-	if e != "" {
-		t.Fatal(e)
-	}
-	if len(gapsOf(ackRR)) != 0 {
-		t.Fatalf("ack of the priming batch unexpectedly carried a gap while maintenance is held off: %v", ackRR)
-	}
-	record(ackRR)
 	release()
 
 	b := spawn(t, dir)
@@ -409,36 +442,50 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	const nLive = 50
 	sendErrs := make([]string, nLive)
 	sendProtoErrs := make([]error, nLive)
+	stopSends := make(chan struct{})
+	// Registered before the sender goroutine starts, so a t.Fatal anywhere
+	// below (which unwinds via runtime.Goexit and skips the rest of this
+	// function) still stops it during test teardown, instead of it issuing
+	// sends until proc cleanup tears down process b.
+	t.Cleanup(func() { close(stopSends) })
 	var sendWG sync.WaitGroup
 	sendWG.Add(1)
 	go func() {
 		defer sendWG.Done()
 		for i := 0; i < nLive; i++ {
+			select {
+			case <-stopSends:
+				return
+			default:
+			}
 			// callSafe, not b.call: runs on a worker goroutine (see callSafe's doc).
 			_, e, protoErr := callSafe(b, "send", map[string]any{"as": "Kim", "channel": "dev", "content": fmt.Sprintf("live-%d", i)})
 			sendErrs[i], sendProtoErrs[i] = e, protoErr
 		}
 	}()
 
+	wantCovered := nOld - ackedCount
 	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && !(gapComplete && len(deliveredLive) == nLive) {
-		rr, e := a.call(t, "receive", map[string]any{"as": "Sam", "wait_seconds": 0})
+	for time.Now().Before(deadline) && !(int64(len(covered)) == wantCovered && len(deliveredLive) == nLive) {
+		args := map[string]any{"as": "Sam", "wait_seconds": 0}
+		if ackToken != "" {
+			args["ack"] = ackToken
+		}
+		rr, e := a.call(t, "receive", args)
 		if e != "" {
 			t.Fatal(e)
 		}
 		record(rr)
-		if batch, ok := rr["batch"].(string); ok && batch != "" {
-			// Ack once any part of the gap has been observed (safe: further
-			// progress only); otherwise this is a further pre-gap old-content
-			// batch - leave it unacknowledged (redelivered unchanged next
-			// poll) so the cursor stays pinned at ackedCount.
-			if nextGapFrom > ackedCount+1 || len(gapsOf(rr)) > 0 {
-				ackRR, e := a.call(t, "receive", map[string]any{"as": "Sam", "ack": batch})
-				if e != "" {
-					t.Fatal(e)
-				}
-				record(ackRR)
-			}
+		// Ack (carry the token into the next call) once any part of the gap
+		// has been observed (safe: further progress only) or this response
+		// itself just carried part of it; otherwise this is a further
+		// pre-gap old-content batch - leave it unacknowledged so the cursor
+		// stays pinned and it is simply redelivered unchanged next poll.
+		batch, _ := rr["batch"].(string)
+		if batch != "" && (nextGapFrom > ackedCount+1 || len(gapsOf(rr)) > 0) {
+			ackToken = batch
+		} else {
+			ackToken = ""
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
@@ -454,8 +501,18 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 		}
 	}
 
-	if !gapComplete {
-		t.Fatalf("gap coverage for channel dev never reached seq %d (stopped at %d)", nOld, nextGapFrom-1)
+	if int64(len(covered)) != wantCovered {
+		t.Fatalf("gap+delivery coverage for channel dev incomplete: %d/%d seqs in (%d,%d] accounted for within the deadline", len(covered), wantCovered, ackedCount, nOld)
+	}
+	if !gotGap {
+		t.Fatalf("no gap notice for channel dev was ever observed - coverage must not be satisfiable by delivery alone")
+	}
+	var remaining int64
+	if err := db.QueryRow("SELECT count(*) FROM messages WHERE channel='dev' AND seq<=?", nOld).Scan(&remaining); err != nil {
+		t.Fatalf("count remaining aged rows: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("aged rows were never evicted: %d of %d remain in the messages table", remaining, nOld)
 	}
 	if len(deliveredLive) != nLive {
 		t.Fatalf("expected exactly %d surviving live messages delivered, got %d: %v", nLive, len(deliveredLive), deliveredLive)

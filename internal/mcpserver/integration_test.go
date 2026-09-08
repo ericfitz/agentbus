@@ -160,6 +160,9 @@ func (p *proc) call(t *testing.T, name string, args map[string]any) (map[string]
 	if err != nil {
 		t.Fatalf("%s: protocol error: %v", name, err)
 	}
+	if len(res.Content) == 0 {
+		t.Fatalf("%s: result has no content", name)
+	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("%s: content[0] is not text: %#v", name, res.Content[0])

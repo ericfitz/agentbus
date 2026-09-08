@@ -36,4 +36,13 @@ Pushed to `main`:
 - Deferred review minors moved to
   `docs/superpowers/plans/2026-09-08-agentbus-v2-deferred-minors.md`.
 
-Next planned: Apple Developer ID signing and Homebrew tap publishing.
+## 2026-09-08 (later still): release tooling
+
+Pushed to `main` and tagged `v0.1.1`:
+
+- `release/release.sh`: builds a universal macOS binary, codesigns with the
+  Developer ID, notarizes, creates the GitHub release, and renders
+  `release/agentbus.rb.tmpl` into the `ericfitz/homebrew-tap` formula.
+- `docs/install.md` documents `brew install ericfitz/tap/agentbus`.
+
+Next: run `./release/release.sh v0.1.1` to cut the first Homebrew release.

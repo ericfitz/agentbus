@@ -32,9 +32,10 @@ func (b *Bus) takeLease() bool {
 // Tick runs one maintenance pass if this process holds the lease. Every
 // step is bounded by a context carrying the tick's wall-clock deadline, but
 // SQL statements stay non-context: the deadline is enforced between chunks
-// and for HTTP; SQL lock waits and incremental_vacuum may overrun it,
-// bounded per statement by busy_timeout, which is harmless since every step
-// is idempotent.
+// and for HTTP; a SQL statement may overrun it. busy_timeout (5 s) bounds
+// only how long a statement waits for the lock, not how long it runs once
+// it has it (incremental_vacuum in particular). Harmless: every step is
+// idempotent.
 func (b *Bus) Tick(ctx context.Context) {
 	if !b.takeLease() {
 		return

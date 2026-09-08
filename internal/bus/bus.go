@@ -107,6 +107,26 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A6: user_version records the schema this database was created with.
+	// Read it before touching the file (no DDL, no VACUUM) so an older binary
+	// opening a database a newer binary already stamped fails loudly and
+	// leaves it untouched instead of creating v1 objects in it; only a fresh
+	// (0) database gets stamped.
+	var uv int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
+		db.Close()
+		return nil, err
+	}
+	switch {
+	case uv > schemaVersion:
+		db.Close()
+		return nil, fmt.Errorf("database schema version %d is newer than this binary supports (schema version %d)", uv, schemaVersion)
+	case uv == 0:
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// auto_vacuum only takes effect via VACUUM; WAL mode above already wrote
 	// page 1, so a plain PRAGMA on a fresh file is silently ignored. Convert
 	// once (VACUUM is a no-op cost-wise on an empty/small database) and skip
@@ -129,25 +149,6 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
-	}
-	// A6: user_version records the schema this database was created with.
-	// Read it first so an older binary opening a database a newer binary
-	// already stamped fails loudly instead of silently running against a
-	// schema it doesn't understand; only a fresh (0) database gets stamped.
-	var uv int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
-		db.Close()
-		return nil, err
-	}
-	switch {
-	case uv > schemaVersion:
-		db.Close()
-		return nil, fmt.Errorf("database schema version %d is newer than this binary supports (schema version %d)", uv, schemaVersion)
-	case uv == 0:
-		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			db.Close()
-			return nil, err
-		}
 	}
 	owner, err := randomToken()
 	if err != nil {

@@ -444,10 +444,11 @@ func TestTickSkipsEmbeddingsWhileEmbedSoonHoldsEmbedMu(t *testing.T) {
 	// explicit embedSoon call below is then the one holding embedMu for the
 	// blocked HTTP call.
 	b.embedMu.Lock()
-	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"}); err != nil {
+	_, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	b.embedMu.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
-	b.embedMu.Unlock()
 
 	b.embedSoon()
 	select {

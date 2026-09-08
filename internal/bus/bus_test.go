@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"database/sql"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -133,14 +134,35 @@ func TestOpenRejectsNewerSchemaVersion(t *testing.T) {
 	if _, err := b.db.Exec("PRAGMA user_version = 99"); err != nil {
 		t.Fatal(err)
 	}
+	// Drop a v1 table so the file no longer matches this binary's schema;
+	// a refused Open must leave it exactly as found (no DDL re-creating it).
+	if _, err := b.db.Exec("DROP TABLE leases"); err != nil {
+		t.Fatal(err)
+	}
 	cfg := b.cfg
 	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
+	master := func() string {
+		db, err := sql.Open("sqlite", filepath.Join(cfg.DataDirectory, "agentbus.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var s string
+		if err := db.QueryRow("SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master ORDER BY name)").Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := master()
 	if _, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
 		t.Fatal("Open must reject a database with a newer schema version")
 	} else if !strings.Contains(err.Error(), "99") {
 		t.Fatalf("error must name the found schema version, got %v", err)
+	}
+	if after := master(); after != before {
+		t.Fatalf("refused Open modified the database:\nbefore %s\nafter  %s", before, after)
 	}
 }
 

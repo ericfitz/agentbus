@@ -6,8 +6,9 @@
 //     {Sam, Sam2, Sam3} set, and each can then act as its own owner.
 //  2. TestGapAfterAgeEvictionUnderConcurrentSends - age-based capacity
 //     eviction, chunked in 1,000-row transactions, running concurrently
-//     with live sends; a lagging subscriber gets one gap notice and then
-//     only the surviving messages, in order, with no duplicates.
+//     with live sends; a lagging subscriber gets gap notices covering
+//     exactly the evicted range and then only the surviving messages, in
+//     order, with no duplicates.
 //  3. TestTickDeadlineBoundsBlockedEmbeddingStep - a tick's embedding HTTP
 //     call is bounded by the tick's own deadline (half the cleanup
 //     interval), and the process stays responsive while it's blocked.
@@ -15,9 +16,10 @@
 //     semantically searchable via the post-write immediate pass, and a
 //     backlog of memories is drained by the periodic tick in batches no
 //     larger than the embedding batch size.
-//  5. TestLeaseContentionBetweenProcesses - two processes sharing one
-//     maintenance lease never both do lease-holder work at once, and both
-//     stay responsive while contending for it.
+//  5. TestLeaseContentionBetweenProcesses - while a foreign process holds
+//     the maintenance lease, no real process's tick can do lease-holder
+//     work; once released, some real process's tick does drain the backlog,
+//     and both processes stay responsive throughout.
 //  6. TestSearchFallsBackWhenEmbeddingEndpointFails - a failing embedding
 //     endpoint makes search report semantic_unavailable and still return
 //     text-search hits.
@@ -25,13 +27,16 @@
 // All six spawn real `agentbus mcp` processes (via TestMain's binary and
 // spawn/call from integration_test.go) sharing one on-disk SQLite database,
 // exactly like Task 14. Where a scenario needs pre-aged data (old
-// created_at) or a receipt/lease backlog that no tool call can produce
-// directly, this file opens the same database file with modernc.org/sqlite
-// and writes the rows directly, matching the columns bus package's own
-// insertMessage/schema use - see openDirectDB, seedOldMessages,
-// seedLiveMemory, and seedExpiredReceipts. Every wait polls a deadline (no
-// unbounded waits); every fake HTTP server's blocking gate is released in
-// t.Cleanup so a failing test cannot hang.
+// created_at), a receipt backlog, or a maintenance tick deterministically
+// suppressed around a step it must not race with, this file opens the same
+// database file with modernc.org/sqlite and writes the rows/lease state
+// directly, matching the columns bus package's own insertMessage/schema use
+// - see openDirectDB, holdForeignLease, seedOldMessages, seedLiveMemory, and
+// seedExpiredReceipts. Every wait polls a deadline (no unbounded waits);
+// every fake HTTP server's blocking gate is released in t.Cleanup so a
+// failing test cannot hang; every helper called from a goroutine other than
+// the test's own (callSafe) returns errors instead of calling t.Fatalf,
+// since only the test goroutine may call FailNow.
 package mcpserver
 
 import (
@@ -78,12 +83,13 @@ func callOK(t *testing.T, p *proc, name string, args map[string]any) string {
 
 // openDirectDB opens the same on-disk database file a spawned `agentbus mcp`
 // process uses, with the same connection parameters bus.Open uses (see
-// internal/bus/bus.go), for tests that need to seed rows no tool call can
-// produce (pre-aged messages, expired receipts) or read internal state
-// (lease/session owner tokens) no tool exposes.
+// internal/bus/bus.go, including foreign_keys(1) - the embeddings table has
+// an ON DELETE CASCADE FK to messages), for tests that need to seed rows no
+// tool call can produce (pre-aged messages, expired receipts) or read/write
+// internal state (lease/session owner tokens) no tool exposes.
 func openDirectDB(t *testing.T, dir string) *sql.DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(dir, "agentbus.db") + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	dsn := "file:" + filepath.Join(dir, "agentbus.db") + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open direct db: %v", err)
@@ -92,6 +98,52 @@ func openDirectDB(t *testing.T, dir string) *sql.DB {
 		_ = db.Close()
 	})
 	return db
+}
+
+// holdForeignLease sets the maintenance lease to a fake owner with an
+// expiry far in the future, so takeLease's conditional UPDATE (expires_at <
+// now OR owner=?) cannot succeed for any real process until release is
+// called. Used to deterministically suppress every process's maintenance
+// tick around a step that must not race with it (priming a cursor, an
+// immediate-embedding-pass check) without depending on tick timing/jitter.
+func holdForeignLease(t *testing.T, db *sql.DB) (release func()) {
+	t.Helper()
+	farFuture := time.Now().Add(time.Hour).UnixMilli()
+	if _, err := db.Exec("UPDATE leases SET owner='test-holder', expires_at=? WHERE name='maintenance'", farFuture); err != nil {
+		t.Fatalf("hold foreign lease: %v", err)
+	}
+	return func() {
+		if _, err := db.Exec("UPDATE leases SET owner='', expires_at=0 WHERE name='maintenance'"); err != nil {
+			t.Fatalf("release foreign lease: %v", err)
+		}
+	}
+}
+
+// callSafe is p.call's logic without any t.Fatalf call, for use from a
+// goroutine other than the test's own: Go's testing contract requires
+// FailNow (which t.Fatalf calls) to run only on the test goroutine, so a
+// helper invoked from a worker goroutine must report a protocol-level
+// failure as a returned error instead, for the test goroutine to fail on
+// after collecting it.
+func callSafe(p *proc, name string, args map[string]any) (result map[string]any, errText string, protoErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	res, err := p.cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: protocol error: %w", name, err)
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, "", fmt.Errorf("%s: content[0] is not text: %#v", name, res.Content[0])
+	}
+	if res.IsError {
+		return nil, tc.Text, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &out); err != nil {
+		return nil, "", fmt.Errorf("%s: unmarshal result %q: %w", name, tc.Text, err)
+	}
+	return out, "", nil
 }
 
 // pollUntil calls cond every interval until it returns true or deadline
@@ -119,21 +171,30 @@ func TestConcurrentRegistrationDisambiguatesAcrossProcesses(t *testing.T) {
 	start := make(chan struct{})
 	names := make([]string, len(procs))
 	errs := make([]string, len(procs))
+	protoErrs := make([]error, len(procs))
 	var wg sync.WaitGroup
 	for i, p := range procs {
 		wg.Add(1)
 		go func(i int, p *proc) {
 			defer wg.Done()
 			<-start
-			r, e := p.call(t, "register", map[string]any{"name": "Sam"})
-			errs[i] = e
-			if e == "" {
+			// callSafe, not p.call: this runs on a worker goroutine, and
+			// only the test goroutine may call t.Fatalf (which p.call does
+			// internally on a protocol-level failure).
+			r, e, protoErr := callSafe(p, "register", map[string]any{"name": "Sam"})
+			errs[i], protoErrs[i] = e, protoErr
+			if protoErr == nil && e == "" {
 				names[i], _ = r["as"].(string)
 			}
 		}(i, p)
 	}
 	close(start)
 	wg.Wait()
+	for i, pe := range protoErrs {
+		if pe != nil {
+			t.Fatalf("process %d register: %v", i, pe)
+		}
+	}
 	for i, e := range errs {
 		if e != "" {
 			t.Fatalf("process %d register failed: %s", i, e)
@@ -210,63 +271,28 @@ func gapsOf(r map[string]any) []any {
 	return g
 }
 
-// countSampler polls a channel's live message count on its own direct DB
-// connection so a test can observe the eviction chunking trajectory (no
-// per-chunk log line exists to assert against instead - see maintenance.go).
-type countSampler struct {
-	mu     sync.Mutex
-	counts []int64
-	stop   chan struct{}
-	done   chan struct{}
-}
-
-func startCountSampler(db *sql.DB, channel string) *countSampler {
-	s := &countSampler{stop: make(chan struct{}), done: make(chan struct{})}
-	go func() {
-		defer close(s.done)
-		for {
-			select {
-			case <-s.stop:
-				return
-			default:
-			}
-			var n int64
-			if err := db.QueryRow("SELECT count(*) FROM messages WHERE channel=? AND tombstone=0", channel).Scan(&n); err == nil {
-				s.mu.Lock()
-				s.counts = append(s.counts, n)
-				s.mu.Unlock()
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-	return s
-}
-
-func (s *countSampler) stopAndSnapshot() []int64 {
-	close(s.stop)
-	<-s.done
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]int64, len(s.counts))
-	copy(out, s.counts)
-	return out
-}
-
 // TestGapAfterAgeEvictionUnderConcurrentSends drives age-based eviction
 // (chunked in 1,000-row transactions per maintenance.go) concurrently with
 // live sends on the same channel, and proves a subscriber whose cursor
-// falls behind the evicted boundary gets exactly one gap notice, then
-// delivery of only the surviving (live) messages, in seq order, with no
-// duplicates.
+// falls behind the evicted boundary gets gap notices covering exactly the
+// evicted range, then delivery of only the surviving (live) messages, in
+// seq order, with no duplicates.
 //
-// The subscriber acks only its very first fresh batch of pre-eviction
-// messages, priming its cursor to a known value, then deliberately leaves
-// any further pre-eviction batch unacknowledged (it is simply redelivered
-// unchanged on later polls - see receiveOnce's pending-batch branch) until
-// a gap notice has actually been observed. This makes the assertions exact
-// regardless of the maintenance tick's random startup jitter: whichever
-// poll first happens to run after eviction always reports the gap at
-// exactly (primed cursor)+1.
+// A foreign lease (holdForeignLease) blocks every process's tick while the
+// subscriber primes its cursor with one acked batch of pre-eviction
+// messages, so eviction can never race ahead of that prime - on a correct
+// implementation it would otherwise be free to start the gap at seq 1
+// instead of the intended boundary, since the tick's startup jitter can be
+// arbitrarily close to zero. Once primed and released, the subscriber acks
+// every batch once any part of the gap has been observed (safe: it can only
+// mean forward progress from there), but leaves a further pre-gap
+// old-content batch unacknowledged (simply redelivered unchanged on later
+// polls - see receiveOnce's pending-batch branch) until the gap actually
+// surfaces, so the test cannot race past the whole backlog before eviction
+// ever runs. Every receive response (including ack calls, which can
+// themselves carry new gaps/messages) is inspected, and gap notices are
+// accumulated into a contiguous coverage range rather than assuming the
+// first one spans every evicted chunk.
 func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `{"message_retention_hours":1,"cleanup_interval_seconds":5}`)
@@ -281,6 +307,8 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	setup.close(t)
 
 	db := openDirectDB(t, dir)
+	release := holdForeignLease(t, db)
+
 	const nOld = 2500 // >= 3 chunks of 1,000
 	seedOldMessages(t, db, "dev", nOld, time.Now().Add(-2*time.Hour).UnixMilli())
 
@@ -292,45 +320,37 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 		t.Fatal(e)
 	}
 
-	b := spawn(t, dir)
-	if _, e := b.call(t, "register", map[string]any{"name": "Kim"}); e != "" {
-		t.Fatal(e)
-	}
-
-	const nLive = 50
-	sendErrs := make([]string, nLive)
-	var sendWG sync.WaitGroup
-	sendWG.Add(1)
-	go func() {
-		defer sendWG.Done()
-		for i := 0; i < nLive; i++ {
-			_, e := b.call(t, "send", map[string]any{"as": "Kim", "channel": "dev", "content": fmt.Sprintf("live-%d", i)})
-			sendErrs[i] = e
-		}
-	}()
-
-	sampler := startCountSampler(db, "dev")
-
-	ackedOnce := false
-	ackedCount := int64(0)
-	var gap map[string]any
+	// nextGapFrom is set below, once ackedCount is known from the priming
+	// batch; record is defined here (rather than after priming) because the
+	// priming ack's own response must also flow through it - acking is
+	// itself just a receive call, so it can legitimately also carry the
+	// NEXT fresh batch of old content in the same response, not merely
+	// clear the acked one.
+	var nextGapFrom int64
+	gapComplete := false
 	seenLiveSeqs := map[float64]bool{}
 	var deliveredLive []map[string]any
 
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && !(gap != nil && len(deliveredLive) == nLive) {
-		rr, e := a.call(t, "receive", map[string]any{"as": "Sam", "wait_seconds": 0})
-		if e != "" {
-			t.Fatal(e)
-		}
+	record := func(rr map[string]any) {
 		for _, g := range gapsOf(rr) {
 			gm, ok := g.(map[string]any)
-			if ok && gm["channel"] == "dev" && gap == nil {
-				gap = gm
+			if !ok || gm["channel"] != "dev" {
+				continue
+			}
+			from, _ := gm["from"].(float64)
+			to, _ := gm["to"].(float64)
+			if int64(from) != nextGapFrom {
+				t.Fatalf("gap notice for dev must extend coverage contiguously: got from=%v, want %d", from, nextGapFrom)
+			}
+			if int64(to) > nOld {
+				t.Fatalf("gap notice for dev covers past the evicted range: to=%v, want <= %d", to, nOld)
+			}
+			nextGapFrom = int64(to) + 1
+			if nextGapFrom == nOld+1 {
+				gapComplete = true
 			}
 		}
-		msgs := messagesOf(t, rr)
-		for _, m := range msgs {
+		for _, m := range messagesOf(t, rr) {
 			mm, ok := m.(map[string]any)
 			if !ok {
 				t.Fatalf("message is not an object: %#v", m)
@@ -351,56 +371,91 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 				t.Fatalf("unexpected message content on dev: %v", mm)
 			}
 		}
+	}
+
+	primeRR, e := a.call(t, "receive", map[string]any{"as": "Sam", "wait_seconds": 0})
+	if e != "" {
+		t.Fatal(e)
+	}
+	primed := messagesOf(t, primeRR)
+	if len(primed) == 0 || len(gapsOf(primeRR)) != 0 {
+		t.Fatalf("expected a fresh batch of pre-eviction messages with no gap while maintenance is held off: %v", primeRR)
+	}
+	ackedCount := int64(len(primed))
+	nextGapFrom = ackedCount + 1
+	primeBatch, _ := primeRR["batch"].(string)
+	if primeBatch == "" {
+		t.Fatalf("priming batch missing a batch token: %v", primeRR)
+	}
+	// Acking is itself just a receive call, so this response may also carry
+	// the next fresh batch of old content (not merely clear the acked one) -
+	// route it through record() like any other, rather than asserting it
+	// empty. With the lease still held, it cannot legitimately carry a gap.
+	ackRR, e := a.call(t, "receive", map[string]any{"as": "Sam", "ack": primeBatch})
+	if e != "" {
+		t.Fatal(e)
+	}
+	if len(gapsOf(ackRR)) != 0 {
+		t.Fatalf("ack of the priming batch unexpectedly carried a gap while maintenance is held off: %v", ackRR)
+	}
+	record(ackRR)
+	release()
+
+	b := spawn(t, dir)
+	if _, e := b.call(t, "register", map[string]any{"name": "Kim"}); e != "" {
+		t.Fatal(e)
+	}
+
+	const nLive = 50
+	sendErrs := make([]string, nLive)
+	sendProtoErrs := make([]error, nLive)
+	var sendWG sync.WaitGroup
+	sendWG.Add(1)
+	go func() {
+		defer sendWG.Done()
+		for i := 0; i < nLive; i++ {
+			// callSafe, not b.call: runs on a worker goroutine (see callSafe's doc).
+			_, e, protoErr := callSafe(b, "send", map[string]any{"as": "Kim", "channel": "dev", "content": fmt.Sprintf("live-%d", i)})
+			sendErrs[i], sendProtoErrs[i] = e, protoErr
+		}
+	}()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && !(gapComplete && len(deliveredLive) == nLive) {
+		rr, e := a.call(t, "receive", map[string]any{"as": "Sam", "wait_seconds": 0})
+		if e != "" {
+			t.Fatal(e)
+		}
+		record(rr)
 		if batch, ok := rr["batch"].(string); ok && batch != "" {
-			if gap != nil || !ackedOnce {
-				if !ackedOnce {
-					ackedCount = int64(len(msgs))
-					ackedOnce = true
-				}
-				if _, e := a.call(t, "receive", map[string]any{"as": "Sam", "ack": batch}); e != "" {
+			// Ack once any part of the gap has been observed (safe: further
+			// progress only); otherwise this is a further pre-gap old-content
+			// batch - leave it unacknowledged (redelivered unchanged next
+			// poll) so the cursor stays pinned at ackedCount.
+			if nextGapFrom > ackedCount+1 || len(gapsOf(rr)) > 0 {
+				ackRR, e := a.call(t, "receive", map[string]any{"as": "Sam", "ack": batch})
+				if e != "" {
 					t.Fatal(e)
 				}
+				record(ackRR)
 			}
-			// else: a further pre-gap batch of old messages - leave it
-			// unacknowledged so the cursor stays pinned at ackedCount.
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 	sendWG.Wait()
+	for i, pe := range sendProtoErrs {
+		if pe != nil {
+			t.Fatalf("live send %d: %v", i, pe)
+		}
+	}
 	for i, e := range sendErrs {
 		if e != "" {
 			t.Fatalf("live send %d: %s", i, e)
 		}
 	}
 
-	// The 1,000-row-per-transaction chunk bound itself is asserted exactly
-	// and without a timing race in package bus's own
-	// TestDeleteChunkCapsAtCleanupChunk (internal/bus/maintenance_test.go),
-	// which calls deleteChunk directly. From outside the process, three
-	// back-to-back chunk commits on a small local database complete faster
-	// than any external polling interval can reliably observe (verified:
-	// even a 10ms sampler here routinely missed intermediate commits and
-	// saw a single >1,000 drop between samples that came from two merged
-	// chunks, not one oversized transaction) - so this sampler is kept only
-	// as an informational log, not a hard assertion, to avoid a flaky false
-	// failure on a correct implementation.
-	samples := sampler.stopAndSnapshot()
-	var maxDrop int64
-	for i := 1; i < len(samples); i++ {
-		if d := samples[i-1] - samples[i]; d > maxDrop {
-			maxDrop = d
-		}
-	}
-	t.Logf("channel dev message-count samples=%d, largest observed inter-sample drop=%d (chunk-size exactness is covered by TestDeleteChunkCapsAtCleanupChunk)", len(samples), maxDrop)
-
-	if gap == nil {
-		t.Fatalf("no gap notice for channel dev observed within the deadline")
-	}
-	if gap["from"] != float64(ackedCount+1) {
-		t.Fatalf("gap.from = %v, want %v (primed cursor %d + 1)", gap["from"], ackedCount+1, ackedCount)
-	}
-	if gap["to"] != float64(nOld) {
-		t.Fatalf("gap.to = %v, want %v (all %d seeded old messages were evicted)", gap["to"], nOld, nOld)
+	if !gapComplete {
+		t.Fatalf("gap coverage for channel dev never reached seq %d (stopped at %d)", nOld, nextGapFrom-1)
 	}
 	if len(deliveredLive) != nLive {
 		t.Fatalf("expected exactly %d surviving live messages delivered, got %d: %v", nLive, len(deliveredLive), deliveredLive)
@@ -632,13 +687,23 @@ func TestTickDeadlineBoundsBlockedEmbeddingStep(t *testing.T) {
 	if e := callOK(t, a, "list_channels", map[string]any{"as": "Sam"}); e != "" {
 		t.Fatalf("process unresponsive while the tick's embedding step is blocked: %s", e)
 	}
+	respondedWhileBlocked := time.Now()
 
 	if !pollUntil(time.Now().Add(6*time.Second), 50*time.Millisecond, func() bool { return len(fake.canceledSnapshot()) > 0 }) {
 		t.Fatalf("tick's embedding request was never canceled by the tick deadline within 6s")
 	}
 	canceled := fake.canceledSnapshot()[0]
 
-	if elapsed := canceled.Sub(entered); elapsed < 1500*time.Millisecond || elapsed > 6*time.Second {
+	// The responsiveness check above must have completed strictly before
+	// the blocked request was released, or it doesn't actually prove the
+	// process answered tool calls WHILE genuinely blocked.
+	if !respondedWhileBlocked.Before(canceled) {
+		t.Fatalf("responsiveness check (completed at %v) did not finish before the blocked embedding request was released at %v", respondedWhileBlocked, canceled)
+	}
+
+	// The promised deadline is exactly half the interval (2.5s here); allow
+	// scheduling slack but not a full extra interval (5s).
+	if elapsed := canceled.Sub(entered); elapsed < 1500*time.Millisecond || elapsed > 4*time.Second {
 		t.Fatalf("tick embedding step ran for %s, want roughly the ~2.5s half-interval deadline", elapsed)
 	}
 
@@ -656,18 +721,77 @@ func TestTickDeadlineBoundsBlockedEmbeddingStep(t *testing.T) {
 
 // ---- Scenario 4: immediate embedding pass and tick-driven drain ----
 
+// collectSemanticContents pages through search(mode: "semantic") via its
+// continuation token and returns the set of every hit's content, so a
+// caller can compare it against an expected set instead of trusting a bare
+// non-empty hit list. Bounded at 20 pages so a product bug that never stops
+// paging fails the test instead of looping forever.
+func collectSemanticContents(t *testing.T, p *proc, as, query string) map[string]bool {
+	t.Helper()
+	got := map[string]bool{}
+	cursor := ""
+	for page := 0; page < 20; page++ {
+		args := map[string]any{"as": as, "query": query, "mode": "semantic", "count": 100}
+		if cursor != "" {
+			args["cursor"] = cursor
+		}
+		r, e := p.call(t, "search", args)
+		if e != "" {
+			t.Fatal(e)
+		}
+		if r["semantic_unavailable"] == true {
+			t.Fatalf("semantic search unexpectedly unavailable: %v", r)
+		}
+		hits, _ := r["hits"].([]any)
+		for _, h := range hits {
+			hm, ok := h.(map[string]any)
+			if !ok {
+				t.Fatalf("hit is not an object: %#v", h)
+			}
+			content, _ := hm["content"].(string)
+			got[content] = true
+		}
+		next, _ := r["next"].(string)
+		if next == "" {
+			return got
+		}
+		cursor = next
+	}
+	t.Fatalf("search(mode: semantic) never stopped paging (20 pages, %d contents seen)", len(got))
+	return got
+}
+
 // TestEmbeddingImmediatePassAndTickDrain covers both embedding triggers
 // documented in maintenance.go/embed.go: (a) Send's post-write embedSoon
 // pass makes a single new memory searchable within ~2s, and (b) a backlog
 // built up while the endpoint is unreachable is drained by the periodic
 // tick, one request per batch of at most embedBatchSize (64) inputs.
+//
+// Part (a) holds every process's maintenance tick off with a foreign lease
+// (holdForeignLease), so a jittered Tick can never mask a broken embedSoon
+// by doing the embedding work itself. Its search query is deliberately
+// different text from the memory's content: search always makes its own
+// query-embedding HTTP request in semantic mode, so if the query text
+// equaled the content text, seeing that text at the fake endpoint would not
+// distinguish "embedSoon embedded the content" from "search embedded its
+// own query" - the latter would false-pass even if embedSoon were broken.
 func TestEmbeddingImmediatePassAndTickDrain(t *testing.T) {
 	dir := t.TempDir()
+
+	setup := spawn(t, dir)
+	if _, e := setup.call(t, "register", map[string]any{"name": "Setup"}); e != "" {
+		t.Fatal(e)
+	}
+	setup.close(t)
+
+	db := openDirectDB(t, dir)
+	release := holdForeignLease(t, db)
+
 	fake := newFakeEmbedServer(t, 0)
 	// send_messages_per_second/send_kib_per_second raised above their
-	// defaults (100/1024): this test sends 131 messages in quick
-	// succession, which the default send rate limit would otherwise reject
-	// with rate_limited - a concern orthogonal to what this scenario tests.
+	// defaults (100/1024): part (b) sends 130 messages in quick succession,
+	// which the default send rate limit would otherwise reject with
+	// rate_limited - a concern orthogonal to what this scenario tests.
 	writeConfig(t, dir, fmt.Sprintf(`{"cleanup_interval_seconds":5,"send_messages_per_second":1000,"send_kib_per_second":65536,"embedding_endpoint":%q,"embedding_model":"test"}`, fake.url()))
 
 	a := spawn(t, dir)
@@ -679,14 +803,16 @@ func TestEmbeddingImmediatePassAndTickDrain(t *testing.T) {
 	}
 
 	// (a) immediate pass: one send should be searchable in semantic mode
-	// within 2s, and the fake endpoint must have seen its text.
-	const immediateText = "immediate-pass-memory-content"
-	if _, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "mem", "content": immediateText}); e != "" {
+	// within 2s (via embedSoon alone - the tick is held off), and the fake
+	// endpoint must have completed a request containing the content itself.
+	const immediateContent = "immediate-pass-memory-content-alpha"
+	const immediateQuery = "unrelated-search-probe-text-beta"
+	if _, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "mem", "content": immediateContent}); e != "" {
 		t.Fatal(e)
 	}
 	var immediateResult map[string]any
 	found := pollUntil(time.Now().Add(2*time.Second), 100*time.Millisecond, func() bool {
-		r, e := a.call(t, "search", map[string]any{"as": "Sam", "query": immediateText, "mode": "semantic"})
+		r, e := a.call(t, "search", map[string]any{"as": "Sam", "query": immediateQuery, "mode": "semantic"})
 		if e != "" {
 			t.Fatal(e)
 		}
@@ -703,17 +829,21 @@ func TestEmbeddingImmediatePassAndTickDrain(t *testing.T) {
 	sawImmediate := false
 	for _, req := range fake.completedSnapshot() {
 		for _, in := range req.Input {
-			if in == immediateText {
+			if in == immediateContent {
 				sawImmediate = true
 			}
 		}
 	}
 	if !sawImmediate {
-		t.Fatalf("fake embeddings endpoint never completed a request containing the immediate-pass text")
+		t.Fatalf("fake embeddings endpoint never completed a request containing the memory's own content (with the tick held off, only the query-embedding request(s) may have completed)")
 	}
+	release()
 
 	// (b) drain: block the endpoint, send 130 memories (2 batches of 64 +
-	// 2), unblock, and wait for the tick to drain the backlog.
+	// 2), unblock, and wait for the (now-free) tick to drain the backlog -
+	// verified by paging semantic search results until every drain-N
+	// memory's content is present, not merely "a request was sent" (which
+	// doesn't prove the embedding was actually persisted).
 	fake.block()
 	const n = 130
 	want := make(map[string]bool, n)
@@ -726,52 +856,37 @@ func TestEmbeddingImmediatePassAndTickDrain(t *testing.T) {
 	}
 	fake.unblock()
 
-	snapshot := func() (got map[string]bool, maxBatch int) {
-		got = map[string]bool{}
-		for _, req := range fake.completedSnapshot() {
-			if len(req.Input) > maxBatch {
-				maxBatch = len(req.Input)
-			}
-			for _, in := range req.Input {
-				if want[in] {
-					got[in] = true
-				}
-			}
-		}
-		return got, maxBatch
-	}
 	var got map[string]bool
-	var maxBatch int
-	pollUntil(time.Now().Add(12*time.Second), 200*time.Millisecond, func() bool {
-		got, maxBatch = snapshot()
-		return len(got) == n
-	})
-	if maxBatch > 64 {
-		t.Fatalf("an embedding request batch size of %d exceeds embedBatchSize (64)", maxBatch)
-	}
-	if len(got) != n {
-		var missing []string
+	pollUntil(time.Now().Add(12*time.Second), 300*time.Millisecond, func() bool {
+		got = collectSemanticContents(t, a, "Sam", "drain-backlog-probe")
 		for text := range want {
 			if !got[text] {
-				missing = append(missing, text)
+				return false
 			}
 		}
+		return true
+	})
+	var missing []string
+	for text := range want {
+		if !got[text] {
+			missing = append(missing, text)
+		}
+	}
+	if len(missing) > 0 {
 		if len(missing) > 5 {
 			missing = missing[:5]
 		}
-		t.Fatalf("drain incomplete: %d/%d texts embedded; missing e.g. %v", len(got), n, missing)
+		t.Fatalf("drain incomplete: search never returned all %d drain memories; missing e.g. %v", n, missing)
 	}
 
-	r, e := a.call(t, "search", map[string]any{"as": "Sam", "query": "drain", "mode": "semantic", "count": 200})
-	if e != "" {
-		t.Fatal(e)
+	maxBatch := 0
+	for _, req := range fake.completedSnapshot() {
+		if len(req.Input) > maxBatch {
+			maxBatch = len(req.Input)
+		}
 	}
-	if r["semantic_unavailable"] == true {
-		t.Fatalf("semantic search unexpectedly unavailable after drain: %v", r)
-	}
-	hits, _ := r["hits"].([]any)
-	if len(hits) == 0 {
-		t.Fatalf("expected drained memories to be searchable: %v", r)
+	if maxBatch > 64 {
+		t.Fatalf("an embedding request batch size of %d exceeds embedBatchSize (64)", maxBatch)
 	}
 }
 
@@ -807,48 +922,33 @@ func seedExpiredReceipts(t *testing.T, db *sql.DB, n int) {
 
 // TestLeaseContentionBetweenProcesses proves the maintenance lease
 // (internal/bus/maintenance.go's takeLease, a single conditional UPDATE on
-// the leases table) is exclusive across real OS processes, not just within
-// one: two processes register (so their session rows' owner column, which
-// equals each process's private Bus.owner token, lets this test tell them
-// apart), a backlog of expired receipts is seeded so a tick has visible
-// work, and the leases table's owner is sampled throughout - it must never
-// hold any value other than "" or one of the two known owner tokens (the
-// schema's single-row lease makes simultaneous ownership structurally
-// impossible; there is no per-tick success log line to assert against - see
-// maintenance.go). The functional proof that some tick actually ran is the
-// seeded receipts being cleaned up; both processes must also answer tool
-// calls throughout.
+// the leases table) actually gates real processes' maintenance work, not
+// just that its own row can't hold two owners at once (a sampler observing
+// only the lease row proves nothing: a process whose Tick never even calls
+// takeLease would leave it empty and still drain the seeded backlog,
+// passing such a check vacuously).
 //
-// Note: unlike Task 14's header comment (which correctly says lease
-// contention is covered by this follow-up task), nothing here claims both
-// processes are guaranteed to win the lease at some point - takeLease lets
-// the same owner renew on every tick, so one process winning it every time
-// is a legal outcome, not a bug.
+// holdForeignLease sets the lease to a foreign owner with an expiry far in
+// the future before either process is spawned, so takeLease cannot succeed
+// for either of them; a backlog of expired receipts is seeded, and the test
+// asserts the backlog survives at least two tick intervals completely
+// untouched while both processes stay responsive. The lease is then
+// released, and the backlog must drain within a couple more intervals -
+// this is the test's functional proof that some real process's tick can
+// take the lease and do the work once it's actually available, closing the
+// loop the vacuous-pass check above would have missed.
 func TestLeaseContentionBetweenProcesses(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `{"cleanup_interval_seconds":5}`)
 
-	a := spawn(t, dir)
-	if _, e := a.call(t, "register", map[string]any{"name": "P1"}); e != "" {
+	setup := spawn(t, dir)
+	if _, e := setup.call(t, "register", map[string]any{"name": "Setup"}); e != "" {
 		t.Fatal(e)
 	}
-	db := openDirectDB(t, dir)
-	var ownerA string
-	if err := db.QueryRow("SELECT owner FROM sessions WHERE sender=?", "P1").Scan(&ownerA); err != nil {
-		t.Fatalf("read process A owner token: %v", err)
-	}
+	setup.close(t)
 
-	b := spawn(t, dir)
-	if _, e := b.call(t, "register", map[string]any{"name": "P2"}); e != "" {
-		t.Fatal(e)
-	}
-	var ownerB string
-	if err := db.QueryRow("SELECT owner FROM sessions WHERE sender=?", "P2").Scan(&ownerB); err != nil {
-		t.Fatalf("read process B owner token: %v", err)
-	}
-	if ownerA == ownerB || ownerA == "" || ownerB == "" {
-		t.Fatalf("two independently spawned processes must have distinct nonempty owner tokens: %q %q", ownerA, ownerB)
-	}
+	db := openDirectDB(t, dir)
+	release := holdForeignLease(t, db)
 
 	const nReceipts = 1500 // >= 2 chunks of 1,000, so cleanup is visible work
 	seedExpiredReceipts(t, db, nReceipts)
@@ -863,73 +963,47 @@ func TestLeaseContentionBetweenProcesses(t *testing.T) {
 		t.Fatalf("seed did not land: have %d receipts, want %d", n, nReceipts)
 	}
 
-	type sample struct {
-		owner string
+	a := spawn(t, dir)
+	if _, e := a.call(t, "register", map[string]any{"name": "P1"}); e != "" {
+		t.Fatal(e)
 	}
-	var mu sync.Mutex
-	var samples []sample
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			var owner string
-			if err := db.QueryRow("SELECT owner FROM leases WHERE name='maintenance'").Scan(&owner); err == nil {
-				mu.Lock()
-				samples = append(samples, sample{owner})
-				mu.Unlock()
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}()
+	b := spawn(t, dir)
+	if _, e := b.call(t, "register", map[string]any{"name": "P2"}); e != "" {
+		t.Fatal(e)
+	}
 
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && receiptCount() > 0 {
+	// >= 2 tick intervals (cleanup_interval_seconds: 5) while a valid
+	// foreign lease is held: no process's tick can run maintenance, so
+	// every seeded receipt must survive untouched. Both processes must
+	// stay responsive throughout.
+	suppressDeadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(suppressDeadline) {
 		if e := callOK(t, a, "list_channels", map[string]any{"as": "P1"}); e != "" {
-			t.Fatalf("process A unresponsive during lease contention: %s", e)
+			t.Fatalf("process A unresponsive while a foreign lease is held: %s", e)
 		}
 		if e := callOK(t, b, "list_channels", map[string]any{"as": "P2"}); e != "" {
-			t.Fatalf("process B unresponsive during lease contention: %s", e)
+			t.Fatalf("process B unresponsive while a foreign lease is held: %s", e)
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	close(stop)
-	<-done
+	if n := receiptCount(); n != nReceipts {
+		t.Fatalf("a process ran maintenance while a valid foreign lease was held: %d/%d receipts remain", n, nReceipts)
+	}
 
+	release()
+
+	drainDeadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(drainDeadline) && receiptCount() > 0 {
+		if e := callOK(t, a, "list_channels", map[string]any{"as": "P1"}); e != "" {
+			t.Fatalf("process A unresponsive after the lease was released: %s", e)
+		}
+		if e := callOK(t, b, "list_channels", map[string]any{"as": "P2"}); e != "" {
+			t.Fatalf("process B unresponsive after the lease was released: %s", e)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 	if n := receiptCount(); n != 0 {
-		t.Fatalf("expired receipts were never cleaned up by either process's tick within the deadline: %d remain", n)
-	}
-
-	mu.Lock()
-	sawA, sawB := false, false
-	for _, s := range samples {
-		if s.owner != "" && s.owner != ownerA && s.owner != ownerB {
-			t.Fatalf("lease owner %q matches neither known process owner token", s.owner)
-		}
-		if s.owner == ownerA {
-			sawA = true
-		}
-		if s.owner == ownerB {
-			sawB = true
-		}
-	}
-	sampleCount := len(samples)
-	mu.Unlock()
-	if sampleCount == 0 {
-		t.Fatalf("no lease samples collected")
-	}
-	t.Logf("lease samples=%d; process A held the lease at some point=%v; process B held it=%v", sampleCount, sawA, sawB)
-
-	if e := callOK(t, a, "list_channels", map[string]any{"as": "P1"}); e != "" {
-		t.Fatalf("process A unresponsive after lease contention: %s", e)
-	}
-	if e := callOK(t, b, "list_channels", map[string]any{"as": "P2"}); e != "" {
-		t.Fatalf("process B unresponsive after lease contention: %s", e)
+		t.Fatalf("expired receipts were never cleaned up after the lease was released: %d remain", n)
 	}
 }
 

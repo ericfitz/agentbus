@@ -80,6 +80,25 @@ type subRow struct {
 	pendingEnd   int64
 }
 
+// A batch token carries the include_own flag it was created with (":o1"/":o0"
+// suffix, no new column) so redelivery can replay the ORIGINAL selection
+// predicate instead of whatever include_own the redelivering call happens to
+// pass. Ack matching still compares the whole token string, unaffected.
+func makeBatchToken(includeOwn bool) (string, error) {
+	tok, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if includeOwn {
+		return tok + ":o1", nil
+	}
+	return tok + ":o0", nil
+}
+
+func tokenIncludesOwn(token string) bool {
+	return strings.HasSuffix(token, ":o1")
+}
+
 func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 	if err := b.auth(as); err != nil {
 		return ReceiveResult{}, err
@@ -237,21 +256,19 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			inScope = append(inScope, s)
 		}
 	}
-	// own applies the CURRENT call's include_own preference to both queries.
-	// The original batch's own-filter setting at creation is not stored, so
-	// redelivery cannot reproduce it exactly; reapplying the current one is
-	// safe because it can only add or drop the sender's OWN rows, never an
-	// external one, whereas dropping the filter entirely (as redelivery
-	// briefly did) let unfiltered own rows crowd an external message out of
-	// the byte ceiling below.
-	own := ""
-	if !in.IncludeOwn {
-		own = " AND sender<>?"
+	// ownClause excludes the sender's own messages unless includeOwn is set.
+	ownClause := func(includeOwn bool) string {
+		if includeOwn {
+			return ""
+		}
+		return " AND sender<>?"
 	}
 	// buildBounded reproduces "the same batch": the seq range fixed at
 	// creation, with no count re-filtering from the current call (in.Count
-	// can differ between the original delivery and this redelivery).
-	buildBounded := func(set []subRow) (string, []any) {
+	// can differ between the original delivery and this redelivery), and the
+	// own filter the caller passes here (its meaning depends on which of
+	// creation's or the current call's include_own the caller decodes).
+	buildBounded := func(set []subRow, own string) (string, []any) {
 		var conds []string
 		var a []any
 		for _, s := range set {
@@ -264,6 +281,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 		return q, a
 	}
+	ownNew := ownClause(in.IncludeOwn)
 	buildNew := func(set []subRow) (string, []any) {
 		var conds []string
 		var a []any
@@ -271,8 +289,8 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			conds = append(conds, "(channel=? AND seq>?)")
 			a = append(a, s.channel, s.cursor)
 		}
-		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq LIMIT ?"
-		if own != "" {
+		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + ownNew + " ORDER BY seq LIMIT ?"
+		if ownNew != "" {
 			a = append(a, as)
 		}
 		a = append(a, in.Count)
@@ -282,7 +300,11 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 
 	switch {
 	case len(pending) > 0:
-		q, a := buildBounded(pending)
+		// Replay the ORIGINAL include_own the batch was created with, decoded
+		// from the shared token (all channels in one pending batch always
+		// share one token), not whatever this call's in.IncludeOwn happens to
+		// be: the caller cannot change what a batch already means.
+		q, a := buildBounded(pending, ownClause(tokenIncludesOwn(pending[0].pendingToken)))
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
@@ -295,8 +317,8 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		// re-stamp each channel's pending_end_seq to the highest seq actually
 		// redelivered (falling back to its cursor, i.e. nothing new, if this
 		// round shows it none at all), whether that's lower than before because
-		// the byte ceiling cut the tail or because the own filter now excludes
-		// rows it previously included.
+		// the byte ceiling cut the tail or because a message in range was
+		// tombstoned (superseded) since the original delivery.
 		shown := map[string]int64{}
 		for _, m := range res.Messages {
 			shown[m.Channel] = m.Seq
@@ -320,7 +342,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 		res.Messages = trimBytes(msgs, limit)
 		if len(res.Messages) > 0 {
-			tok, err := randomToken()
+			tok, err := makeBatchToken(in.IncludeOwn)
 			if err != nil {
 				return res, internal(err)
 			}

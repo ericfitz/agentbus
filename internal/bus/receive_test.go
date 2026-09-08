@@ -208,10 +208,10 @@ func TestReceiveAckOfOutOfFilterPendingDoesNotLeakIntoNewSelection(t *testing.T)
 	}
 }
 
-// Redelivery must reapply the current call's include_own filter rather than
-// dropping it: own messages ahead of an external one in seq order must not
-// crowd the external message out from under the byte ceiling.
-func TestReceiveRedeliveryAppliesCurrentOwnFilterAndNeverSkipsExternal(t *testing.T) {
+// (i) The controller's original small-scale repro: own messages ahead of an
+// external one in seq order must not crowd the external message out from
+// under the byte ceiling, and acking the redelivered batch must not skip it.
+func TestReceiveRedeliveryPreservesOriginalIncludeOwnAndNeverSkipsExternal(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	b.cfg.ResultDefaultKiB = 1
 	for i := 0; i < 5; i++ {
@@ -224,7 +224,7 @@ func TestReceiveRedeliveryAppliesCurrentOwnFilterAndNeverSkipsExternal(t *testin
 	}
 	r2, err := b.Receive(kim, ReceiveInput{})
 	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "external" {
-		t.Fatalf("redelivery must reapply the own filter and still show the external message: %+v %v", r2, err)
+		t.Fatalf("redelivery must still show the external message: %+v %v", r2, err)
 	}
 	r3, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch})
 	if err != nil || len(r3.Messages) != 0 {
@@ -232,65 +232,90 @@ func TestReceiveRedeliveryAppliesCurrentOwnFilterAndNeverSkipsExternal(t *testin
 	}
 }
 
-// A redelivery that the 4 MiB ceiling genuinely trims must re-stamp
-// pending_end_seq to what it actually showed, so a later ack cannot skip an
-// undisclosed tail. Rows are inserted directly (not via Send) to build a
-// multi-megabyte backlog without the send rate limiter rejecting the burst.
-func TestReceiveRedeliveryReStampsPendingEndSeqWhenTrimmed(t *testing.T) {
+// (ii) A batch created with include_own=true, redelivered by a call that now
+// passes include_own=false, must still show the own message: the ORIGINAL
+// membership wins over whatever the redelivering call requests.
+func TestReceiveRedeliveryPreservesOriginalIncludeOwnRegardlessOfCurrentCall(t *testing.T) {
+	b, _, kim := setupTwo(t)
+	b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
+	r1, err := b.Receive(kim, ReceiveInput{IncludeOwn: true})
+	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "mine" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	r2, err := b.Receive(kim, ReceiveInput{}) // include_own now false (default)
+	if err != nil || !r2.Redelivered || len(r2.Messages) != 1 || r2.Messages[0].Content != "mine" {
+		t.Fatalf("redelivery must replay the batch's original include_own=true, not this call's false: %+v %v", r2, err)
+	}
+}
+
+// (iii) A channel legitimately trimmed out of a multi-channel batch entirely
+// (zero rows contributed) must not be blocked by that batch's pending state:
+// once the batch (which never touched it) is acked, its own messages must
+// still be delivered as new.
+func TestReceivePendingBatchDoesNotBlockAChannelTrimmedOutOfItEntirely(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	big := string(make([]byte, 200*1024)) // 200 KiB each; ~30 exceeds the 4 MiB ceiling
-	tx, err := b.db.Begin()
+	b.CreateChannel(sam, "ops", "ordinary")
+	b.Subscribe(kim, "ops", "now")
+	b.Send(sam, SendInput{Channel: "dev", Content: "d1"})
+	b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
+	// count=1 trims the merged dev+ops candidate set down to just dev's
+	// earlier-seq message; ops never contributes to this batch at all.
+	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
+	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "d1" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	var opsPending string
+	if err := b.db.QueryRow("SELECT pending_token FROM subscriptions WHERE sender=? AND channel='ops'", kim).Scan(&opsPending); err != nil {
+		t.Fatal(err)
+	}
+	if opsPending != "" {
+		t.Fatalf("ops must not have been given a pending token it never contributed to: %q", opsPending)
+	}
+	if _, err := b.Receive(kim, ReceiveInput{Ack: r1.Batch}); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || len(r2.Messages) != 1 || r2.Messages[0].Content != "o1" {
+		t.Fatalf("ops's message must still be delivered as new after dev's batch is acked: %+v %v", r2, err)
+	}
+}
+
+// A redelivery whose bound now includes a tombstoned (superseded) message
+// must re-stamp pending_end_seq to what it actually showed, so a later ack
+// cannot skip past a message that was never actually redelivered.
+func TestReceiveRedeliveryReStampsPendingEndSeqWhenAMessageIsTombstoned(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.Send(sam, SendInput{Channel: "dev", Content: "keep"})
+	res2, err := b.Send(sam, SendInput{Channel: "dev", Content: "superseded"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 29; i++ {
-		if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,?,?,?,?,?)",
-			kim, "test", b.nowMs(), "", big, len(big)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,?,?,?,?,?)",
-		sam, "test", b.nowMs(), "", "external", 8); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Creation: own filter off excludes kim's 29 rows, so only "external"
-	// qualifies and pending_end_seq is pinned to just that one row.
-	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
-	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "external" {
+	r1, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || len(r1.Messages) != 2 {
 		t.Fatalf("%+v %v", r1, err)
 	}
-	// Redelivery with include_own now true: the bound (pending_end_seq) still
-	// covers all 30 rows, and the 29 now-unfiltered ~200 KiB own rows exceed
-	// the 4 MiB ceiling before reaching "external" (last by seq).
-	r2, err := b.Receive(kim, ReceiveInput{IncludeOwn: true})
-	if err != nil || !r2.Redelivered || len(r2.Messages) == 0 {
+	if _, err := b.db.Exec("UPDATE messages SET tombstone=1 WHERE seq=?", res2.Seq); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || !r2.Redelivered || len(r2.Messages) != 1 || r2.Messages[0].Content != "keep" {
 		t.Fatalf("%+v %v", r2, err)
 	}
-	for _, m := range r2.Messages {
-		if m.Content == "external" {
-			t.Fatalf("test setup invalid: external message was not actually trimmed out")
-		}
-	}
-	lastShown := r2.Messages[len(r2.Messages)-1].Seq
 	var pendingEnd int64
 	if err := b.db.QueryRow("SELECT pending_end_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&pendingEnd); err != nil {
 		t.Fatal(err)
 	}
-	if pendingEnd != lastShown {
-		t.Fatalf("pending_end_seq must be re-stamped to what was actually shown: got %d want %d", pendingEnd, lastShown)
+	if pendingEnd != r2.Messages[0].Seq {
+		t.Fatalf("pending_end_seq must be re-stamped to what was actually shown: got %d want %d", pendingEnd, r2.Messages[0].Seq)
 	}
-	if _, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch, IncludeOwn: true}); err != nil {
+	if _, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch}); err != nil {
 		t.Fatal(err)
 	}
 	var cursor int64
 	if err := b.db.QueryRow("SELECT cursor_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&cursor); err != nil {
 		t.Fatal(err)
 	}
-	if cursor != lastShown {
-		t.Fatalf("ack must advance only to what was shown, never past the undisclosed tail: cursor=%d want %d", cursor, lastShown)
+	if cursor != r2.Messages[0].Seq {
+		t.Fatalf("ack must advance only to what was shown: got %d want %d", cursor, r2.Messages[0].Seq)
 	}
 }

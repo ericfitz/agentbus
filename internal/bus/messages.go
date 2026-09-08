@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 )
 
 type Ref struct {
@@ -86,15 +85,34 @@ func envelopeBytes(m Message) int {
 
 var refKinds = map[string]bool{"url": true, "unix_path": true, "windows_path": true}
 
-func (b *Bus) validateSend(as string, in SendInput) (kind string, err error) {
-	if in.Channel == "" || in.Content == "" {
-		return "", errf("validation", false, "channel and content are required")
-	}
-	for _, r := range in.Refs {
+// validateRefs checks ref shape only: no mutable-state read. Shared by
+// validateSendShape and EditMemory's own pre-receipt shape check.
+func validateRefs(refs []Ref) error {
+	for _, r := range refs {
 		if !refKinds[r.Kind] || r.Value == "" {
-			return "", errf("validation", false, "ref kind must be url, unix_path, or windows_path with a nonempty value")
+			return errf("validation", false, "ref kind must be url, unix_path, or windows_path with a nonempty value")
 		}
 	}
+	return nil
+}
+
+// validateSendShape checks in without touching mutable state: required
+// fields and ref kinds. It runs before the idempotency receipt lookup (R2)
+// so a keyed retry is judged by its own payload, not by a downstream lookup
+// that can fail for reasons unrelated to whether this exact payload was
+// already accepted (e.g. its channel or reply_to target being evicted since).
+func validateSendShape(in SendInput) error {
+	if in.Channel == "" || in.Content == "" {
+		return errf("validation", false, "channel and content are required")
+	}
+	return validateRefs(in.Refs)
+}
+
+// validateSendRefs checks the mutable state a send depends on: the channel
+// must exist (its kind decides memory vs ordinary), and reply_to, if set,
+// must name a real message. Kept separate from validateSendShape so it runs
+// only after the idempotency receipt lookup (R2).
+func (b *Bus) validateSendRefs(in SendInput) (kind string, err error) {
 	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", errf("not_found", false, "channel %q does not exist; create it first", in.Channel)
@@ -110,11 +128,49 @@ func (b *Bus) validateSend(as string, in SendInput) (kind string, err error) {
 			return "", errf("not_found", false, "reply_to %d does not exist", *in.ReplyTo)
 		}
 	}
-	probe := Message{Channel: in.Channel, Sender: as, Context: strings.Repeat("x", 128), CreatedAt: 1 << 62, Type: in.Type, Content: in.Content, ReplyTo: in.ReplyTo, Metadata: in.Metadata, Refs: in.Refs}
-	if envelopeBytes(probe) > b.cfg.MaxMessageKiB*1024 {
-		return "", errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
-	}
 	return kind, nil
+}
+
+// upperBoundSeqDigits is one more than int64's 19-digit maximum, for margin.
+// upperBoundCreatedAtDigits is a Unix millisecond timestamp's width until
+// the year 2286.
+const (
+	upperBoundSeqDigits       = 20
+	upperBoundCreatedAtDigits = 13
+)
+
+// envelopeUpperBound measures the worst-case wire size of a message before
+// it is written. seq and created_at are assigned by SQLite/the clock at
+// insert time, so real values aren't known yet; they are sized to their
+// maximum digit width instead. memory_id and revision are omitempty pointer
+// fields that are only ever set on a memory-channel write (memoryKind),
+// so they're sized the same way, but only then. Sender, context, channel,
+// type, content, metadata, and refs are all real values already known at
+// call time, so no padding is needed for them (R4).
+func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) int {
+	m := Message{
+		Channel:  in.Channel,
+		Sender:   sender,
+		Context:  context,
+		Type:     in.Type,
+		Content:  in.Content,
+		ReplyTo:  in.ReplyTo,
+		Metadata: in.Metadata,
+		Refs:     in.Refs,
+	}
+	size := envelopeBytes(m)
+	// Seq and CreatedAt are always-present int fields; the zero value above
+	// already contributes one digit ("0") each, so add the rest of their
+	// worst-case width.
+	size += (upperBoundSeqDigits - 1) + (upperBoundCreatedAtDigits - 1)
+	if memoryKind {
+		// memory_id and revision are absent (omitempty) above, so account for
+		// the full `"memory_id":<digits>` and `"revision":<digits>` text
+		// (field name, quotes, colon, leading comma) plus worst-case width.
+		size += len(`,"memory_id":`) + upperBoundSeqDigits
+		size += len(`,"revision":`) + upperBoundSeqDigits
+	}
+	return size
 }
 
 // insertMessage writes one row inside tx and returns its seq. For memory channels
@@ -153,9 +209,14 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 	return seq, nil
 }
 
-func (b *Bus) senderContext(as string) (string, error) {
+// senderContext reads a session's registered context, owner-qualified (R3)
+// so it always reflects this process's own registration, never a
+// replacement's after a name takeover. It runs against either b.db or a
+// *sql.Tx (queryRower); every write path reads it on the write transaction,
+// after that transaction's own auth(tx, as) check.
+func (b *Bus) senderContext(q queryRower, as string) (string, error) {
 	var c string
-	if err := b.db.QueryRow("SELECT context FROM sessions WHERE sender=?", as).Scan(&c); err != nil {
+	if err := q.QueryRow("SELECT context FROM sessions WHERE sender=? AND owner=?", as, b.owner).Scan(&c); err != nil {
 		return "", err
 	}
 	return c, nil
@@ -174,21 +235,27 @@ func receiptResult(raw json.RawMessage) (SendResult, error) {
 func (b *Bus) inspect(kind, as string, payload any) error { return nil }
 
 func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return SendResult{}, err
 	}
-	kind, err := b.validateSend(as, in)
-	if err != nil {
+	if err := validateSendShape(in); err != nil {
 		return SendResult{}, err
 	}
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
 
-	// Cheap read-only replay check before paying for the hook/capacity work below.
+	// Cheap read-only replay check before any mutable-state lookup (R2): a
+	// keyed retry must replay its stored result even if the channel or
+	// reply_to it named has since been evicted, rather than failing not_found.
 	if prev, hit, err := b.checkReceipt(b.db, as, key, in); err != nil {
 		return SendResult{}, err
 	} else if hit {
 		return receiptResult(prev)
+	}
+
+	kind, err := b.validateSendRefs(in)
+	if err != nil {
+		return SendResult{}, err
 	}
 
 	if err := b.inspect("send", as, in); err != nil {
@@ -204,6 +271,13 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	}
 	defer tx.Rollback()
 
+	// Re-verify ownership on the transaction that is about to write (R3): a
+	// process stalled past the 30s heartbeat window may have lost this name
+	// to a newer registration between the preflight check above and here.
+	if err := b.auth(tx, as); err != nil {
+		return SendResult{}, err
+	}
+
 	// Re-check inside the transaction: closes the race where two sends with the
 	// same key both passed the read-only check above concurrently.
 	if prev, hit, err := b.checkReceipt(tx, as, key, in); err != nil {
@@ -212,17 +286,28 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 		return receiptResult(prev)
 	}
 
-	// Charge the rate limit only for a send that has cleared the hook and
-	// capacity checks and is about to be accepted; a receipt replay never
-	// reaches this line, so replays are free.
-	if !b.limits.allow(as, envelopeBytes(Message{Content: in.Content, Metadata: in.Metadata, Refs: in.Refs}), b.Now()) {
-		return SendResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
-	}
-
-	context, err := b.senderContext(as)
+	context, err := b.senderContext(tx, as)
 	if err != nil {
 		return SendResult{}, internal(err)
 	}
+
+	// Authoritative envelope-size gate (R4): measured with the real sender,
+	// owner-qualified context, channel, and type, plus a fixed worst-case
+	// width for the fields SQLite/the clock assign at insert time.
+	size := envelopeUpperBound(as, context, in, kind == "memory")
+	if size > b.cfg.MaxMessageKiB*1024 {
+		return SendResult{}, errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
+	}
+
+	// Charge the rate limit only for a send that has cleared the hook and
+	// capacity checks and is about to be accepted; a receipt replay never
+	// reaches this line, so replays are free. Charged with the same size
+	// used for the gate above (R4), not a partial one that omits
+	// channel/sender/context/type.
+	if !b.limits.allow(as, size, b.Now()) {
+		return SendResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
+	}
+
 	seq, err := b.insertMessage(tx, as, context, in, kind)
 	if err != nil {
 		return SendResult{}, internal(err)
@@ -244,7 +329,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 }
 
 func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Message, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
 	if count <= 0 {
@@ -289,12 +374,34 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	return msgs, nil
 }
 
-// trimToBytes keeps whole items up to limit bytes as measured by size, always
-// at least one. Shared by trimBytes (messages) and search's SearchHit paging.
+// trimFramingBytes and trimResultFramingBytes are generous, fixed allowances
+// for the JSON framing a trimmed result sits inside: trimFramingBytes covers
+// one record's own array punctuation (comma, whitespace), and
+// trimResultFramingBytes covers the enclosing result object's other fields
+// (batch, instruction, gaps, notice, next, search score, ...). Without them,
+// a limit measured only against record bodies can produce a serialized
+// result that exceeds the caller's actual byte ceiling (#27).
+const (
+	trimFramingBytes       = 32
+	trimResultFramingBytes = 512
+	// trimHardCeilingBytes is the absolute cap on any trimmed result,
+	// regardless of what limit a caller (or misconfiguration) asks for.
+	trimHardCeilingBytes = 4 << 20
+)
+
+// trimToBytes keeps whole items up to limit bytes as measured by size plus
+// framing allowances, clamped to the 4 MiB hard ceiling. Shared by trimBytes
+// (messages) and search's SearchHit paging.
+//
+// The first item is always kept even if it alone exceeds the limit: a legal
+// max_message_kib record above result_default_kib must still be
+// deliverable, or a receiver could never make progress past it. This is
+// deliberate, not a bug.
 func trimToBytes[T any](items []T, size func(T) int, limit int) []T {
-	total := 0
+	limit = min(limit, trimHardCeilingBytes)
+	total := trimResultFramingBytes
 	for i, it := range items {
-		total += size(it)
+		total += size(it) + trimFramingBytes
 		if total > limit && i > 0 {
 			return items[:i]
 		}

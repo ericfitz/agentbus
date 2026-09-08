@@ -53,6 +53,28 @@ func TestMemoryEditIdempotent(t *testing.T) {
 	}
 }
 
+// R2(a): a keyed edit's receipt lookup must precede the live-revision
+// lookup, so a retry replays the stored result even if the memory has since
+// been deleted, instead of failing not_found.
+func TestEditReceiptReplaysAfterMemoryDeleted(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
+	in := EditInput{ID: *c.MemoryID, Content: "v2", IdempotencyKey: "e1"}
+	e1, err := b.EditMemory(sam, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DeleteMemory(sam, *c.MemoryID, ""); err != nil {
+		t.Fatal(err)
+	}
+	e2, err := b.EditMemory(sam, in)
+	if err != nil || e2 != e1 {
+		t.Fatalf("keyed edit retry after delete must replay the stored result: e1=%+v e2=%+v err=%v", e1, e2, err)
+	}
+}
+
 func TestMemoryRevisionsDeliverOnceWithCurrentContent(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")

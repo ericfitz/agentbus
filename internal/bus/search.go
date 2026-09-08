@@ -120,7 +120,7 @@ func (b *Bus) textSearch(in SearchInput, limit int) ([]SearchHit, error) {
 }
 
 func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return SearchResult{}, err
 	}
 	if strings.TrimSpace(in.Query) == "" {

@@ -39,7 +39,7 @@ type ReceiveResult struct {
 }
 
 func (b *Bus) Subscribe(as, channel, from string) error {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
 	if from == "" {
@@ -48,8 +48,17 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	if from != "now" && from != "oldest" {
 		return errf("validation", false, "from must be now or oldest")
 	}
+	tx, err := b.db.Begin()
+	if err != nil {
+		return internal(err)
+	}
+	defer tx.Rollback()
+	// Re-verify ownership on the transaction that is about to write (R3).
+	if err := b.auth(tx, as); err != nil {
+		return err
+	}
 	var evicted int64
-	if err := b.db.QueryRow("SELECT evicted_before_seq FROM channels WHERE name=?", channel).Scan(&evicted); err != nil {
+	if err := tx.QueryRow("SELECT evicted_before_seq FROM channels WHERE name=?", channel).Scan(&evicted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return errf("not_found", false, "channel %q does not exist", channel)
 		}
@@ -58,19 +67,32 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	var cursor int64
 	if from == "oldest" {
 		cursor = max(evicted-1, 0)
-	} else if err := b.db.QueryRow("SELECT coalesce(max(seq),0) FROM messages").Scan(&cursor); err != nil {
+	} else if err := tx.QueryRow("SELECT coalesce(max(seq),0) FROM messages").Scan(&cursor); err != nil {
 		return internal(err)
 	}
-	_, err := b.db.Exec("INSERT OR IGNORE INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,?,?)", as, channel, cursor, b.nowMs())
-	return internal(err)
+	if _, err := tx.Exec("INSERT OR IGNORE INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,?,?)", as, channel, cursor, b.nowMs()); err != nil {
+		return internal(err)
+	}
+	return internal(tx.Commit())
 }
 
 func (b *Bus) Unsubscribe(as, channel string) error {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
-	_, err := b.db.Exec("DELETE FROM subscriptions WHERE sender=? AND channel=?", as, channel)
-	return internal(err)
+	tx, err := b.db.Begin()
+	if err != nil {
+		return internal(err)
+	}
+	defer tx.Rollback()
+	// Re-verify ownership on the transaction that is about to write (R3).
+	if err := b.auth(tx, as); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel=?", as, channel); err != nil {
+		return internal(err)
+	}
+	return internal(tx.Commit())
 }
 
 type subRow struct {
@@ -100,7 +122,7 @@ func tokenIncludesOwn(token string) bool {
 }
 
 func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return ReceiveResult{}, err
 	}
 	if in.Count <= 0 {
@@ -148,6 +170,14 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		return res, internal(err)
 	}
 	defer tx.Rollback()
+
+	// Re-verify ownership on every iteration of the long-poll (R3): a
+	// process stalled past the 30s heartbeat window may have lost this name
+	// to a newer registration between Receive's preflight check and this
+	// particular poll, and each poll opens its own transaction here.
+	if err := b.auth(tx, as); err != nil {
+		return res, err
+	}
 
 	// Load every subscription for this sender, not just ones matching the
 	// channels filter: a pending batch is redelivered unconditionally (spec

@@ -164,6 +164,62 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	}
 }
 
+// R6a: editing a memory must remove the old revision's embedding vector
+// rather than waiting for the FK cascade, which only fires at purge, up to
+// 72h later. embeddings must hold live revisions only.
+func TestEditMemoryRemovesOldEmbedding(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings WHERE seq=?", c.Seq).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatal("expected an embedding for the original revision before editing")
+	}
+	if _, err := b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "roses are blue"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings WHERE seq=?", c.Seq).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("old revision's embedding must be removed on edit")
+	}
+}
+
+// R6a: deleting a memory must remove its embedding vector the same way.
+func TestDeleteMemoryRemovesEmbedding(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DeleteMemory(sam, *c.MemoryID, ""); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings WHERE seq=?", c.Seq).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("deleted memory's embedding must be removed")
+	}
+}
+
 func TestSemanticFallsBackWhenEndpointDown(t *testing.T) {
 	srv := fakeEmbeddings(t)
 	b := newEmbedBus(t, srv.URL)

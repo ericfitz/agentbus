@@ -63,8 +63,10 @@ func TestHistoryBeforeKeepsRowsNearestCursor(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	b.CreateChannel(sam, "dev", "ordinary")
-	// Content sized so each envelope is ~397 bytes: 2 fit in a 1 KiB page, 3 don't.
-	content := strings.Repeat("x", 300)
+	// Content sized so each envelope is ~197 bytes; with trimToBytes's fixed
+	// per-record and per-result framing allowance (#27), 2 fit in a 1 KiB
+	// page and 3 don't.
+	content := strings.Repeat("x", 100)
 	for i := 1; i <= 5; i++ {
 		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: content}); err != nil {
 			t.Fatal(err)
@@ -111,5 +113,47 @@ func TestSendOnMemoryChannelCreatesMemory(t *testing.T) {
 	h, _ := b.History(sam, "mem", nil, nil, 10)
 	if h[0].Revision == nil || *h[0].Revision != 1 {
 		t.Fatalf("%+v", h[0])
+	}
+}
+
+// R2(b): a keyed send's receipt lookup must precede the reply_to lookup, so
+// a retry replays the stored result even if the message it replied to has
+// since been evicted, instead of failing not_found.
+func TestSendReceiptReplaysAfterReplyToEvicted(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "dev", "ordinary")
+	base, err := b.Send(sam, SendInput{Channel: "dev", Content: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := SendInput{Channel: "dev", Content: "reply", ReplyTo: &base.Seq, IdempotencyKey: "k1"}
+	r1, err := b.Send(sam, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate capacity eviction of the replied-to row.
+	if _, err := b.db.Exec("DELETE FROM messages WHERE seq=?", base.Seq); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := b.Send(sam, in)
+	if err != nil || r2.Seq != r1.Seq {
+		t.Fatalf("keyed retry after reply_to eviction must replay the stored result: r1=%+v r2=%+v err=%v", r1, r2, err)
+	}
+}
+
+// R4: max_message_kib must be checked against the real registered context,
+// not a small placeholder, so a long context that pushes the envelope over
+// the limit is rejected even though the content alone would fit.
+func TestSendRejectsWhenContextPushesEnvelopeOverLimit(t *testing.T) {
+	b := newTestBus(t)
+	r, err := b.Register("Sam", "", strings.Repeat("c", 70000), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sam := r.Sender
+	b.CreateChannel(sam, "dev", "ordinary")
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "short"}); err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("send must reject when the registered context pushes the envelope over max_message_kib: %v", err)
 	}
 }

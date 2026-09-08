@@ -23,7 +23,7 @@ type EditResult struct {
 }
 
 func (b *Bus) GetMemory(as string, id int64) (Message, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return Message{}, err
 	}
 	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? AND tombstone=0", id)
@@ -56,36 +56,33 @@ func liveRevision(q queryRower, id int64) (seq, revision int64, channel string, 
 }
 
 // EditMemory tombstones a memory's current revision and inserts the next one
-// in a single transaction. Ordering mirrors Send: the receipt check, hook,
-// and capacity check all run before any transaction is opened so a later
-// task's external hook and eviction do not run under the writer lock; the
-// receipt check and live-revision lookup are then repeated inside the
-// transaction against the committed state before charging the rate limit
-// and writing.
+// in a single transaction. Ordering: auth and payload-shape validation (no
+// mutable-state reads) come first, then the idempotency receipt lookup, and
+// only then the mutable live-revision lookup that learns the memory's
+// channel (R2) — a keyed retry must replay its stored result even if the
+// memory has since been deleted, rather than failing not_found. The hook and
+// capacity check run before any transaction is opened so a later task's
+// external hook and eviction do not run under the writer lock; the receipt
+// check, ownership check, and live-revision lookup are then repeated inside
+// the transaction against the committed state before charging the rate
+// limit and writing.
 func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return EditResult{}, err
 	}
 	if in.Content == "" {
 		return EditResult{}, errf("validation", false, "content is required")
 	}
-
-	// Read-only lookup to learn the channel for validateSend; repeated inside
-	// the transaction below so the tombstone/insert pair is computed against
-	// the committed state.
-	_, _, channel, err := liveRevision(b.db, in.ID)
-	if err != nil {
-		return EditResult{}, err
-	}
-	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs}
-	if _, err := b.validateSend(as, send); err != nil {
+	if err := validateRefs(in.Refs); err != nil {
 		return EditResult{}, err
 	}
 
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
 
-	// Cheap read-only replay check before paying for the hook/capacity work below.
+	// Cheap read-only replay check before any mutable-state lookup (R2): a
+	// keyed retry must replay its stored result even if the memory it named
+	// has since been deleted, rather than failing not_found.
 	if prev, hit, err := b.checkReceipt(b.db, as, key, in); err != nil {
 		return EditResult{}, err
 	} else if hit {
@@ -95,6 +92,16 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 		}
 		return r, nil
 	}
+
+	// Mutable-state lookup, now safely after the receipt check: learn the
+	// channel from the memory's current live revision. Repeated inside the
+	// transaction below so the tombstone/insert pair is computed against the
+	// committed state.
+	_, _, channel, err := liveRevision(b.db, in.ID)
+	if err != nil {
+		return EditResult{}, err
+	}
+	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs}
 
 	if err := b.inspect("edit_memory", as, in); err != nil {
 		return EditResult{}, err
@@ -108,6 +115,13 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 		return EditResult{}, internal(err)
 	}
 	defer tx.Rollback()
+
+	// Re-verify ownership on the transaction that is about to write (R3): a
+	// process stalled past the 30s heartbeat window may have lost this name
+	// to a newer registration between the preflight check above and here.
+	if err := b.auth(tx, as); err != nil {
+		return EditResult{}, err
+	}
 
 	// Re-check inside the transaction: closes the race where two edits with
 	// the same key both passed the read-only check above concurrently.
@@ -128,18 +142,34 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 		return EditResult{}, err
 	}
 
+	context, err := b.senderContext(tx, as)
+	if err != nil {
+		return EditResult{}, internal(err)
+	}
+
+	// Authoritative envelope-size gate (R4), measured with the real sender,
+	// owner-qualified context, channel, and type, plus a fixed worst-case
+	// width for the fields SQLite/the clock assign at insert time.
+	size := envelopeUpperBound(as, context, send, true)
+	if size > b.cfg.MaxMessageKiB*1024 {
+		return EditResult{}, errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
+	}
+
 	// Charge the rate limit only for an edit that has cleared the hook and
 	// capacity checks and is about to be accepted; a receipt replay never
-	// reaches this line, so replays are free.
-	if !b.limits.allow(as, envelopeBytes(Message{Content: in.Content, Metadata: in.Metadata, Refs: in.Refs}), b.Now()) {
+	// reaches this line, so replays are free. Charged with the same size
+	// used for the gate above (R4).
+	if !b.limits.allow(as, size, b.Now()) {
 		return EditResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
 	}
 
 	if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), curSeq); err != nil {
 		return EditResult{}, internal(err)
 	}
-	context, err := b.senderContext(as)
-	if err != nil {
+	// The old revision's embedding vector is now stale; remove it rather
+	// than waiting for the FK cascade, which only fires at purge, up to 72h
+	// later (R6a). embeddings holds live revisions only.
+	if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", curSeq); err != nil {
 		return EditResult{}, internal(err)
 	}
 	seq, err := b.insertMessage(tx, as, context, send, "ordinary")
@@ -162,12 +192,12 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 
 // DeleteMemory tombstones a memory's live revision without inserting a new
 // one. Ordering mirrors EditMemory: the receipt check and hook run before any
-// transaction is opened, then both the receipt check and the live-revision
-// lookup are repeated inside the transaction against committed state before
-// charging the rate limit and writing. Delete never inserts, so it never
-// calls checkCapacity.
+// transaction is opened, then ownership, the receipt check, and the
+// live-revision lookup are repeated inside the transaction against
+// committed state before charging the rate limit and writing. Delete never
+// inserts, so it never calls checkCapacity.
 func (b *Bus) DeleteMemory(as string, id int64, key string) error {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
 	payload := map[string]any{"delete": id}
@@ -189,6 +219,11 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 		return internal(err)
 	}
 	defer tx.Rollback()
+
+	// Re-verify ownership on the transaction that is about to write (R3).
+	if err := b.auth(tx, as); err != nil {
+		return err
+	}
 
 	// Re-check inside the transaction: closes the race where two deletes with
 	// the same key both passed the read-only check above concurrently.
@@ -223,6 +258,12 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 	}
 	if n == 0 {
 		return errf("not_found", false, "memory %d has no live revision", id)
+	}
+	// The deleted revision's embedding vector is now stale; remove it rather
+	// than waiting for the FK cascade, which only fires at purge, up to 72h
+	// later (R6a).
+	if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", seq); err != nil {
+		return internal(err)
 	}
 	if err := b.storeReceipt(tx, as, key, payload, nil); err != nil {
 		return internal(err)

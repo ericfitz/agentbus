@@ -103,13 +103,17 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	return reg, nil
 }
 
-// auth succeeds only for a live session row registered by this process.
-func (b *Bus) auth(as string) error {
+// auth succeeds only for a live session row registered by this process. It
+// runs against either b.db (a cheap preflight check) or a *sql.Tx, so every
+// mutating transaction can re-verify ownership immediately after opening:
+// a process that stalls past the 30s heartbeat window may have lost its
+// name to a newer registration between a preflight check and the write.
+func (b *Bus) auth(q queryRower, as string) error {
 	if as == "" {
 		return errf("validation", false, "as is required: pass the display name returned by register")
 	}
 	var n int
-	if err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND owner=?", as, b.owner).Scan(&n); err != nil {
+	if err := q.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND owner=?", as, b.owner).Scan(&n); err != nil {
 		return internal(err)
 	}
 	if n == 0 {
@@ -128,7 +132,7 @@ func (b *Bus) Heartbeat() error {
 }
 
 func (b *Bus) Discover(as string) ([]Session, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
 	if !b.cfg.DiscoveryEnabled {

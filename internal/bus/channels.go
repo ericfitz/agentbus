@@ -13,7 +13,7 @@ type Channel struct {
 }
 
 func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return Channel{}, err
 	}
 	if err := validateName(name); err != nil {
@@ -27,6 +27,10 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 		return Channel{}, internal(err)
 	}
 	defer tx.Rollback()
+	// Re-verify ownership on the transaction that is about to write (R3).
+	if err := b.auth(tx, as); err != nil {
+		return Channel{}, err
+	}
 	var existing string
 	err = tx.QueryRow("SELECT kind FROM channels WHERE name=?", name).Scan(&existing)
 	switch {
@@ -51,7 +55,7 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 }
 
 func (b *Bus) ListChannels(as string) ([]Channel, error) {
-	if err := b.auth(as); err != nil {
+	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
 	rows, err := b.db.Query(`SELECT c.name, c.kind,

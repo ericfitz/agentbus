@@ -35,7 +35,7 @@ func TestRegisterRejectsBadNames(t *testing.T) {
 func TestStaleOwnerLosesName(t *testing.T) {
 	b := newTestBus(t)
 	b.Register("Sam", "", "", true)
-	if err := b.auth("Sam"); err != nil {
+	if err := b.auth(b.db, "Sam"); err != nil {
 		t.Fatal(err)
 	}
 	// Another process, 31 seconds later, registers Sam.
@@ -47,14 +47,48 @@ func TestStaleOwnerLosesName(t *testing.T) {
 	if r.Sender != "Sam" {
 		t.Fatalf("stale Sam not reclaimed: %s", r.Sender)
 	}
-	if err := b.auth("Sam"); err == nil || !strings.Contains(err.Error(), "not_registered") {
+	if err := b.auth(b.db, "Sam"); err == nil || !strings.Contains(err.Error(), "not_registered") {
 		t.Fatalf("stale process still authorized: %v", err)
 	}
 	if err := b.Heartbeat(); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.auth("Sam"); err == nil {
+	if err := b.auth(b.db, "Sam"); err == nil {
 		t.Fatal("heartbeat must not revive a lost name")
+	}
+}
+
+// R3: every mutating operation must re-verify ownership on the transaction
+// that writes, not rely solely on a preflight check, so a process that has
+// lost its name to a newer registration (after a 30s heartbeat lapse)
+// cannot keep mutating state as the replaced owner.
+func TestMutationsRejectAfterOwnerTakeover(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe(sam, "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another process, 31 seconds later, reclaims the stale "Sam" name.
+	other, _ := Open(b.cfg, b.log)
+	defer other.Close()
+	later := b.Now().Add(31 * time.Second)
+	other.Now = func() time.Time { return later }
+	if r, err := other.Register("Sam", "", "", true); err != nil || r.Sender != "Sam" {
+		t.Fatalf("takeover failed: %+v %v", r, err)
+	}
+
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "x"}); err == nil || !strings.Contains(err.Error(), "not_registered") {
+		t.Fatalf("Send after takeover must be not_registered: %v", err)
+	}
+	if _, err := b.Receive(sam, ReceiveInput{}); err == nil || !strings.Contains(err.Error(), "not_registered") {
+		t.Fatalf("Receive after takeover must be not_registered: %v", err)
+	}
+	if err := b.Subscribe(sam, "dev", "now"); err == nil || !strings.Contains(err.Error(), "not_registered") {
+		t.Fatalf("Subscribe after takeover must be not_registered: %v", err)
 	}
 }
 

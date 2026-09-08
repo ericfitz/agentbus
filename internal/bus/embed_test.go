@@ -220,6 +220,112 @@ func TestDeleteMemoryRemovesEmbedding(t *testing.T) {
 	}
 }
 
+// R6b: an HTTP call that started before an edit/delete must not persist a
+// vector for a seq that is no longer a live memory revision by the time the
+// store transaction runs, and the returned count must exclude it.
+func TestEmbedBatchSkipsSeqTombstonedDuringHTTPCall(t *testing.T) {
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(reached)
+		<-release
+		var req struct {
+			Input []string `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		var data []map[string]any
+		for i := range req.Input {
+			data = append(data, map[string]any{"index": i, "embedding": []float64{1, 0, 0}})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+
+	// Hold embedMu so Send's own background embedSoon pass no-ops; the test
+	// drives embedBatch directly so it controls exactly when the HTTP call
+	// starts relative to the delete below.
+	b.embedMu.Lock()
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	b.embedMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := b.embedBatch(context.Background())
+		done <- result{n, err}
+	}()
+	<-reached // the batch's HTTP call is now blocked mid-flight
+	if err := b.DeleteMemory(sam, *c.MemoryID, ""); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	r := <-done
+	if r.err != nil || r.n != 0 {
+		t.Fatalf("expected 0 inserted for a seq tombstoned mid-call, got n=%d err=%v", r.n, r.err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings WHERE seq=?", c.Seq).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("embedding for a seq tombstoned during the HTTP call must not be inserted")
+	}
+}
+
+// R7: embed must reject a malformed response rather than silently store a
+// bad or missing vector.
+func TestEmbedRejectsMalformedResponses(t *testing.T) {
+	texts := []string{"a", "b"}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"duplicate index", `{"data":[{"index":0,"embedding":[1,0,0]},{"index":0,"embedding":[0,1,0]}]}`},
+		{"missing index", `{"data":[{"index":0,"embedding":[1,0,0]}]}`},
+		{"empty vector", `{"data":[{"index":0,"embedding":[1,0,0]},{"index":1,"embedding":[]}]}`},
+		{"dimension mismatch", `{"data":[{"index":0,"embedding":[1,0,0]},{"index":1,"embedding":[1,0]}]}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(c.body))
+			}))
+			defer srv.Close()
+			e := &embedder{endpoint: srv.URL, model: "m", client: &http.Client{}}
+			if _, err := e.embed(context.Background(), texts); err == nil {
+				t.Fatalf("%s: expected an error", c.name)
+			}
+		})
+	}
+}
+
+// R7: Search in semantic mode must fall back to text with
+// SemanticUnavailable when the endpoint returns a malformed response for the
+// query embedding.
+func TestSemanticFallsBackOnMalformedEmbeddingResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"index":0,"embedding":[]}]}`))
+	}))
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+	b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	r, err := b.Search(sam, SearchInput{Query: "roses", Mode: "semantic"})
+	if err != nil || !r.SemanticUnavailable || len(r.Hits) != 1 {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
 func TestSemanticFallsBackWhenEndpointDown(t *testing.T) {
 	srv := fakeEmbeddings(t)
 	b := newEmbedBus(t, srv.URL)

@@ -91,13 +91,36 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 	if len(out.Data) != len(texts) {
 		return nil, fmt.Errorf("embeddings endpoint returned %d vectors for %d inputs", len(out.Data), len(texts))
 	}
+	// Validate strictly: each index in range exactly once, every vector
+	// nonempty, and all vectors the same dimension. A malformed response
+	// (duplicate/missing index, empty or ragged vector) must error rather
+	// than silently persist a bad or zero vector (R7).
 	vecs = make([][]float32, len(texts))
+	seen := make([]bool, len(texts))
+	dim := -1
 	for _, d := range out.Data {
 		if d.Index < 0 || d.Index >= len(texts) {
 			return nil, fmt.Errorf("embedding index %d out of range", d.Index)
 		}
+		if seen[d.Index] {
+			return nil, fmt.Errorf("embedding index %d returned more than once", d.Index)
+		}
+		seen[d.Index] = true
+		if len(d.Embedding) == 0 {
+			return nil, fmt.Errorf("embedding index %d is empty", d.Index)
+		}
+		if dim == -1 {
+			dim = len(d.Embedding)
+		} else if len(d.Embedding) != dim {
+			return nil, fmt.Errorf("embedding index %d has dimension %d, want %d", d.Index, len(d.Embedding), dim)
+		}
 		normalize(d.Embedding)
 		vecs[d.Index] = d.Embedding
+	}
+	for i, ok := range seen {
+		if !ok {
+			return nil, fmt.Errorf("embedding index %d missing from response", i)
+		}
 	}
 	return vecs, nil
 }
@@ -143,7 +166,11 @@ func decodeVec(b []byte) []float32 {
 }
 
 // embedBatch embeds up to embedBatchSize live memory revisions lacking a row for
-// the configured model, after deleting rows from other models.
+// the configured model, after deleting rows from other models. The HTTP call
+// can outlive an edit/delete of the memory it's embedding, so each insert is
+// conditioned on the seq still being a live memory revision at commit time
+// (R6b); the returned count is the number of rows actually inserted, which
+// can be less than the number requested.
 func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 	if b.embedder == nil {
 		return 0, nil
@@ -187,13 +214,22 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 		return 0, internal(err)
 	}
 	defer tx.Rollback()
+	var inserted int64
 	for i, s := range seqs {
-		if _, err := tx.Exec("INSERT OR REPLACE INTO embeddings(seq,model,vector) VALUES(?,?,?)", s, b.embedder.model, encodeVec(vecs[i])); err != nil {
+		res, err := tx.Exec(`INSERT OR REPLACE INTO embeddings(seq,model,vector)
+		  SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE seq=? AND memory_id IS NOT NULL AND tombstone=0)`,
+			s, b.embedder.model, encodeVec(vecs[i]), s)
+		if err != nil {
 			return 0, internal(err)
 		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, internal(err)
+		}
+		inserted += n
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, internal(err)
 	}
-	return len(seqs), nil
+	return int(inserted), nil
 }

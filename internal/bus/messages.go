@@ -260,13 +260,6 @@ func receiptResult(raw json.RawMessage) (SendResult, error) {
 	return res, nil
 }
 
-// Temporary stub for a hook that a later task replaces: Task 11 (inspect).
-// inspectCalls lets tests assert the hook is (or isn't) reached (C1).
-func (b *Bus) inspect(kind, as string, payload any) error {
-	b.inspectCalls.Add(1)
-	return nil
-}
-
 func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return SendResult{}, err

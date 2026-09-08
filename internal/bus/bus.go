@@ -38,17 +38,26 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 		return nil, err
 	}
 	path := filepath.Join(cfg.DataDirectory, "agentbus.db")
-	fresh := false
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		fresh = true
-	}
 	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	if fresh {
+	// auto_vacuum only takes effect via VACUUM; WAL mode above already wrote
+	// page 1, so a plain PRAGMA on a fresh file is silently ignored. Convert
+	// once (VACUUM is a no-op cost-wise on an empty/small database) and skip
+	// on later opens once the mode has stuck.
+	var av int
+	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&av); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if av != 2 {
 		if _, err := db.Exec("PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
+			db.Close()
+			return nil, err
+		}
+		if _, err := db.Exec("VACUUM"); err != nil {
 			db.Close()
 			return nil, err
 		}

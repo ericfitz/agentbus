@@ -17,7 +17,11 @@ func newTestBus(t *testing.T) *Bus {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { b.Close() })
+	t.Cleanup(func() {
+		if err := b.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return b
 }
 
@@ -26,6 +30,10 @@ func TestOpenCreatesSchemaWithFTSAndWAL(t *testing.T) {
 	var jm string
 	if err := b.db.QueryRow("PRAGMA journal_mode").Scan(&jm); err != nil || jm != "wal" {
 		t.Fatalf("journal_mode=%q err=%v", jm, err)
+	}
+	var av int
+	if err := b.db.QueryRow("PRAGMA auto_vacuum").Scan(&av); err != nil || av != 2 {
+		t.Fatalf("auto_vacuum=%d err=%v", av, err)
 	}
 	for _, tbl := range []string{"channels", "sessions", "subscriptions", "messages", "messages_fts", "embeddings", "receipts", "leases", "notices"} {
 		var n int
@@ -52,7 +60,9 @@ func TestReopenKeepsData(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := b.cfg
-	b.Close()
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
 	b2, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

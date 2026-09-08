@@ -3,6 +3,7 @@ package bus
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -84,8 +85,11 @@ func (b *Bus) validateSend(as string, in SendInput) (kind string, err error) {
 			return "", errf("validation", false, "ref kind must be url, unix_path, or windows_path with a nonempty value")
 		}
 	}
-	if err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); err != nil {
+	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
+	case errors.Is(err, sql.ErrNoRows):
 		return "", errf("not_found", false, "channel %q does not exist; create it first", in.Channel)
+	case err != nil:
+		return "", internal(err)
 	}
 	if in.ReplyTo != nil {
 		var n int
@@ -213,12 +217,15 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	if err != nil {
 		return nil, internal(err)
 	}
+	// Trim while still in fetch order, so the rows kept are those nearest the
+	// caller's cursor (before/after), not an arbitrary end of the page.
+	msgs = trimBytes(msgs, b.cfg.ResultDefaultKiB*1024)
 	if order == "DESC" {
 		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 			msgs[i], msgs[j] = msgs[j], msgs[i]
 		}
 	}
-	return trimBytes(msgs, b.cfg.ResultDefaultKiB*1024), nil
+	return msgs, nil
 }
 
 // trimBytes keeps whole records up to limit bytes, always at least one.

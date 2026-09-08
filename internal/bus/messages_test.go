@@ -59,6 +59,29 @@ func TestSendAndHistory(t *testing.T) {
 	}
 }
 
+func TestHistoryBeforeKeepsRowsNearestCursor(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "dev", "ordinary")
+	// Content sized so each envelope is ~397 bytes: 2 fit in a 1 KiB page, 3 don't.
+	content := strings.Repeat("x", 300)
+	for i := 1; i <= 5; i++ {
+		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: content}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.cfg.ResultDefaultKiB = 1
+	before := int64(6)
+	h, err := b.History(sam, "dev", &before, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rows nearest `before` (seq 6) must be kept, not the oldest ones.
+	if len(h) != 2 || h[0].Seq != 4 || h[1].Seq != 5 {
+		t.Fatalf("expected rows adjacent to before=6 ([4 5]), got %+v", h)
+	}
+}
+
 func TestSendValidation(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")

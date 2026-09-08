@@ -1,5 +1,10 @@
 package bus
 
+import (
+	"database/sql"
+	"errors"
+)
+
 type Channel struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
@@ -28,7 +33,7 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	case err == nil && existing != kind:
 		return Channel{}, errf("conflict", false, "channel %q exists with kind %s", name, existing)
 	case err == nil:
-	default:
+	case errors.Is(err, sql.ErrNoRows):
 		var latest int64
 		if err := tx.QueryRow("SELECT coalesce(max(seq),0) FROM messages").Scan(&latest); err != nil {
 			return Channel{}, internal(err)
@@ -36,6 +41,8 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 		if _, err := tx.Exec("INSERT INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,?,0)", name, kind, latest); err != nil {
 			return Channel{}, internal(err)
 		}
+	default:
+		return Channel{}, internal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		return Channel{}, internal(err)

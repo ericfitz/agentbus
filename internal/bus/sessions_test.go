@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,18 @@ func TestRegisterRejectsBadNames(t *testing.T) {
 		if _, err := b.Register(n, "", "", true); err == nil {
 			t.Fatalf("accepted %q", n)
 		}
+	}
+}
+
+// M12.2: context is bounded to 1024 bytes so one register call cannot make
+// discover/list results exceed the 4 MiB hard ceiling.
+func TestRegisterRejectsOversizedContext(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("Sam", "", strings.Repeat("c", 1024), true); err != nil {
+		t.Fatalf("1024-byte context must be accepted: %v", err)
+	}
+	if _, err := b.Register("Kim", "", strings.Repeat("c", 1025), true); err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("1025-byte context must be rejected as validation: %v", err)
 	}
 }
 
@@ -150,5 +163,34 @@ func TestDiscoverListsLiveSessions(t *testing.T) {
 	b.cfg.DiscoveryEnabled = false
 	if _, err := b.Discover("Sam"); err == nil {
 		t.Fatal("discover must fail when disabled")
+	}
+}
+
+// M12.2: Discover must trim to a whole-record prefix against
+// result_default_kib rather than returning an unbounded array.
+func TestDiscoverTrimsToWholeRecordPrefix(t *testing.T) {
+	b := newTestBus(t)
+	b.cfg.ResultDefaultKiB = 1 // 1 KiB
+	var as string
+	for i := 0; i < 30; i++ {
+		r, err := b.Register("Sam", "", strings.Repeat("c", 60), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		as = r.Sender
+	}
+	s, err := b.Discover(as)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s) == 0 || len(s) >= 30 {
+		t.Fatalf("want a whole-record prefix strictly between 0 and 30, got %d", len(s))
+	}
+	j, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j) > b.cfg.ResultDefaultKiB*1024+trimFramingBytes {
+		t.Fatalf("serialized discover result (%d bytes) exceeds result_default_kib plus one record's framing", len(j))
 	}
 }

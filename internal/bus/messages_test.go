@@ -1,6 +1,8 @@
 package bus
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -28,6 +30,33 @@ func TestCreateChannelIdempotentAndConflict(t *testing.T) {
 	}
 	if _, err := b.CreateChannel("", "x", "ordinary"); err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatal("missing as must be validation error")
+	}
+}
+
+// M12.2: ListChannels must trim to a whole-record prefix against
+// result_default_kib rather than returning an unbounded array.
+func TestListChannelsTrimsToWholeRecordPrefix(t *testing.T) {
+	b := newTestBus(t)
+	b.cfg.ResultDefaultKiB = 1 // 1 KiB
+	sam := reg(t, b, "Sam")
+	for i := 0; i < 30; i++ {
+		if _, err := b.CreateChannel(sam, fmt.Sprintf("channel-with-a-longish-name-%04d", i), "ordinary"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chans, err := b.ListChannels(sam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chans) == 0 || len(chans) >= 30 {
+		t.Fatalf("want a whole-record prefix strictly between 0 and 30, got %d", len(chans))
+	}
+	j, err := json.Marshal(chans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j) > b.cfg.ResultDefaultKiB*1024+trimFramingBytes {
+		t.Fatalf("serialized list_channels result (%d bytes) exceeds result_default_kib plus one record's framing", len(j))
 	}
 }
 
@@ -144,10 +173,14 @@ func TestSendReceiptReplaysAfterReplyToEvicted(t *testing.T) {
 
 // R4: max_message_kib must be checked against the real registered context,
 // not a small placeholder, so a long context that pushes the envelope over
-// the limit is rejected even though the content alone would fit.
+// the limit is rejected even though the content alone would fit. M12.2
+// bounds context to 1024 bytes, so this now uses a tiny max_message_kib
+// (1 KiB) instead of an oversized context to still exercise "the real,
+// bounded context is counted rather than a placeholder".
 func TestSendRejectsWhenContextPushesEnvelopeOverLimit(t *testing.T) {
 	b := newTestBus(t)
-	r, err := b.Register("Sam", "", strings.Repeat("c", 70000), true)
+	b.cfg.MaxMessageKiB = 1 // 1 KiB: small enough that even a max-length (1024-byte) context alone pushes the envelope over
+	r, err := b.Register("Sam", "", strings.Repeat("c", 1024), true)
 	if err != nil {
 		t.Fatal(err)
 	}

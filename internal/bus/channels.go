@@ -2,6 +2,7 @@ package bus
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 )
 
@@ -54,9 +55,23 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	return Channel{Name: name, Kind: kind}, nil
 }
 
+// channelBytes measures the serialized size of a Channel; it holds only
+// strings and ints, so json.Marshal cannot fail.
+func channelBytes(c Channel) int {
+	j, _ := json.Marshal(c)
+	return len(j)
+}
+
 func (b *Bus) ListChannels(as string) ([]Channel, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
-	return b.listChannels(b.db)
+	chans, err := b.listChannels(b.db)
+	if err != nil {
+		return nil, err
+	}
+	// listChannels is also StatusReport's source (the local, human-facing
+	// status command, not an MCP tool result), so trimming happens here,
+	// not inside the shared query.
+	return trimToBytes(chans, channelBytes, min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes)), nil
 }

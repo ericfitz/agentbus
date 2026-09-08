@@ -114,10 +114,53 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 	return filepath.Base(cwd)
 }
 
+// wrapSchemaErrorsInEnvelope normalizes go-sdk's own JSON-schema validation
+// failures (a missing required field, a wrong-typed argument) into the same
+// {code,message,retryable} JSON envelope every bus.Error already produces.
+// AddTool's generated handler validates/unmarshals arguments before a tool's
+// own code ever runs; when that fails it sets CallToolResult.IsError with
+// plain SDK error text as content, not our envelope — so without this,
+// agents see two different error shapes depending on which validation step
+// rejected the call. A result whose text is already a JSON object with a
+// "code" field (a real bus.Error) is left untouched.
+func wrapSchemaErrorsInEnvelope(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		res, err := next(ctx, method, req)
+		if method != "tools/call" || err != nil {
+			return res, err
+		}
+		ctr, ok := res.(*mcp.CallToolResult)
+		if !ok || !ctr.IsError || len(ctr.Content) == 0 {
+			return res, err
+		}
+		tc, ok := ctr.Content[0].(*mcp.TextContent)
+		if !ok {
+			return res, err
+		}
+		var probe struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal([]byte(tc.Text), &probe) == nil && probe.Code != "" {
+			return res, err // already a bus.Error envelope
+		}
+		envelope, marshalErr := json.Marshal(map[string]any{
+			"code":      "validation",
+			"message":   tc.Text,
+			"retryable": false,
+		})
+		if marshalErr != nil {
+			return res, err
+		}
+		ctr.Content[0] = &mcp.TextContent{Text: string(envelope)}
+		return ctr, err
+	}
+}
+
 // newServer is NewServer plus an optional logger, used by Run so a Getwd
 // failure is recorded in the log instead of silently defaulting.
 func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "agentbus", Version: Version}, nil)
+	s.AddReceivingMiddleware(wrapSchemaErrorsInEnvelope)
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
@@ -191,6 +234,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	b, err := bus.Open(cfg, log)
 	if err != nil {
+		log.Error("bus open failed", "err", err)
 		return err
 	}
 	defer func() {

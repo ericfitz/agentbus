@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -161,5 +163,81 @@ func TestDefaultContextUsesCwdBasenameWhenNoError(t *testing.T) {
 	got := defaultContextFor("/foo/bar", nil, nil)
 	if got != "bar" {
 		t.Fatalf("want bar, got %q", got)
+	}
+}
+
+// TestRunLogsBusOpenFailure covers the M12.1-3 amendment's logging minor:
+// once OpenLog has succeeded, a subsequent bus.Open failure must be
+// recorded in the log file, not silently discarded.
+func TestRunLogsBusOpenFailure(t *testing.T) {
+	dir := t.TempDir()
+	// agentbus.db as a directory makes bus.Open fail after OpenLog succeeds.
+	if err := os.Mkdir(filepath.Join(dir, "agentbus.db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.DataDirectory = dir
+
+	if err := Run(context.Background(), cfg); err == nil {
+		t.Fatal("expected Run to fail")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "agentbus.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "bus open failed") {
+		t.Fatalf("expected the bus.Open failure to be logged, got %q", data)
+	}
+}
+
+// assertValidationEnvelope requires res to be a tool error whose content is
+// the {code,message,retryable} JSON envelope with code "validation".
+func assertValidationEnvelope(t *testing.T, res *mcp.CallToolResult) {
+	t.Helper()
+	if !res.IsError {
+		t.Fatalf("expected a tool error, got %+v", res)
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	var envelope struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		t.Fatalf("error content is not a JSON envelope: %s (%v)", text, err)
+	}
+	if envelope.Code != "validation" {
+		t.Fatalf("want code validation, got %q (content %q)", envelope.Code, text)
+	}
+}
+
+// TestSchemaValidationFailuresGetJSONEnvelope covers M12.3: the SDK's own
+// typed-argument validation (missing required field, wrong-typed field)
+// must produce the same JSON envelope as a bus.Error, via
+// wrapSchemaErrorsInEnvelope, not go-sdk's plain validation text.
+func TestSchemaValidationFailuresGetJSONEnvelope(t *testing.T) {
+	cs := testSession(t)
+
+	_, res := call(t, cs, "register", map[string]any{}) // missing required "name"
+	assertValidationEnvelope(t, res)
+
+	sam, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": sam["as"], "name": "dev", "kind": "ordinary"})
+	_, res = call(t, cs, "history", map[string]any{"as": sam["as"], "channel": "dev", "count": "not-a-number"}) // wrong-typed
+	assertValidationEnvelope(t, res)
+}
+
+// TestRealBusErrorsPassThroughUnwrapped confirms wrapSchemaErrorsInEnvelope
+// leaves an already-enveloped bus.Error untouched (it must not double-wrap
+// or otherwise alter a real bus error's code, such as not_registered).
+func TestRealBusErrorsPassThroughUnwrapped(t *testing.T) {
+	cs := testSession(t)
+	_, res := call(t, cs, "list_channels", map[string]any{"as": "Nobody"})
+	if !res.IsError {
+		t.Fatal("expected a tool error")
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "not_registered") {
+		t.Fatalf("real bus error must pass through with its own code, got %s", text)
 	}
 }

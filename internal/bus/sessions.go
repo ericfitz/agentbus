@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -39,8 +40,28 @@ func validateName(name string) error {
 	return nil
 }
 
+// validateContext bounds context to 1024 UTF-8 bytes with no control
+// characters. The spec does not set a bound on context; this cap is a
+// controller ruling (M12.2) so a single register call cannot make
+// discover/list results exceed the 4 MiB hard ceiling — recorded here as
+// human-visible per the review process.
+func validateContext(context string) error {
+	if len(context) > 1024 {
+		return errf("validation", false, "context must be at most 1024 bytes")
+	}
+	for _, r := range context {
+		if unicode.IsControl(r) {
+			return errf("validation", false, "context must not contain control characters")
+		}
+	}
+	return nil
+}
+
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
 	if err := validateName(name); err != nil {
+		return Registration{}, err
+	}
+	if err := validateContext(context); err != nil {
 		return Registration{}, err
 	}
 	now := b.nowMs()
@@ -109,7 +130,28 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)
 	}
+	// Pending is bounded by the number of subscriptions, not by anything a
+	// caller controls, but a session resuming thousands of subscriptions
+	// could still exceed the hard ceiling; trim it to the same whole-record
+	// budget as ListChannels/Discover. No separate reserve is subtracted
+	// for Sender/Resumed: Sender is bounded to 128 bytes (validateName) and
+	// Resumed is a bool, both negligible next to the ceiling.
+	reg.Pending = trimToBytes(reg.Pending, pendingBytes, min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes))
 	return reg, nil
+}
+
+// pendingBytes measures the serialized size of a PendingChannel; it holds
+// only a string and an int, so json.Marshal cannot fail.
+func pendingBytes(p PendingChannel) int {
+	j, _ := json.Marshal(p)
+	return len(j)
+}
+
+// sessionBytes measures the serialized size of a Session; it holds only
+// strings and ints, so json.Marshal cannot fail.
+func sessionBytes(s Session) int {
+	j, _ := json.Marshal(s)
+	return len(j)
 }
 
 // auth succeeds only for a live session row registered by this process. It
@@ -147,5 +189,9 @@ func (b *Bus) Discover(as string) ([]Session, error) {
 	if !b.cfg.DiscoveryEnabled {
 		return nil, errf("validation", false, "discovery is disabled by configuration")
 	}
-	return b.liveSessions(b.db)
+	sessions, err := b.liveSessions(b.db)
+	if err != nil {
+		return nil, err
+	}
+	return trimToBytes(sessions, sessionBytes, min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes)), nil
 }

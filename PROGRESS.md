@@ -21,3 +21,19 @@ Pushed to `main` (fast-forward of `docs/v2-design`, 49 commits):
 - **Tests**: unit suites per package plus multi-process stdio integration
   scenarios, including the spec-required scenarios the plan omitted
   (`internal/mcpserver/integration_more_test.go`).
+
+## 2026-09-08 (later): rename, version, init
+
+Pushed to `main`:
+
+- Repository renamed to `ericfitz/agentbus` (module path
+  `github.com/ericfitz/agentbus`); merged branch `docs/v2-design` deleted.
+- `agentbus version`, an ldflags-settable version variable, and tag
+  `v0.1.0`.
+- `agentbus init` (repo identity; `--global` for harness bootstrap via
+  `claude mcp add` / `codex mcp add`, hook merge, Codex prompt file) and an
+  `init` MCP prompt that Claude Code exposes as `/agentbus:init`.
+- Deferred review minors moved to
+  `docs/superpowers/plans/2026-09-08-agentbus-v2-deferred-minors.md`.
+
+Next planned: Apple Developer ID signing and Homebrew tap publishing.

@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/bus"
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // Status opens the bus, prints a human-readable status report to out, and

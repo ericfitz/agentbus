@@ -1,4 +1,4 @@
-# agentbus-local
+# agentbus
 
 A local message bus and shared memory service for coding agents: a single Go
 binary, one SQLite file, no separate server to run. It speaks MCP over stdio

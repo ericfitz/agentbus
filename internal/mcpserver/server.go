@@ -11,12 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/bus"
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const Version = "0.1.0"
+// Version is the release version. Release builds override it with
+// -ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>".
+var Version = "0.1.0"
 
 type registerIn struct {
 	Name    string `json:"name" jsonschema:"persistent identity name, for example Sam"`

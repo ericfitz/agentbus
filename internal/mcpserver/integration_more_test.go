@@ -55,7 +55,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/bus"
+	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )

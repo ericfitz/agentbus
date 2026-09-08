@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 	_ "modernc.org/sqlite"
 )
 

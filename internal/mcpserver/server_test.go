@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/bus"
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

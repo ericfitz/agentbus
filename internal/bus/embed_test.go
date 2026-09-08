@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // fakeEmbeddings maps each input to a 3-vector from a fixed table; unknown text gets a zero-ish vector.

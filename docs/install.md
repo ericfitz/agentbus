@@ -111,6 +111,8 @@ separate process has no other way to learn it.
 
 ## Operating
 
+- `agentbus version` prints the version. Release builds set it with
+  `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
 - `agentbus identity` prints the one-line registration prompt for the current
   directory. It's also what the SessionStart hooks above run.
 - `agentbus status` shows live identities, channels, usage against budget,

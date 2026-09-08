@@ -8,7 +8,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // rotatingWriter appends to path and rotates to path.1 .. path.(keep-1) when

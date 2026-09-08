@@ -1,4 +1,4 @@
-module github.com/ericfitz/agentbus-local
+module github.com/ericfitz/agentbus
 
 go 1.27.1
 

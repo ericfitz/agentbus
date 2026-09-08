@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // limiter holds per-sender token buckets for count and bytes, one-second burst.

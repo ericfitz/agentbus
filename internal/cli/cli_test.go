@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {

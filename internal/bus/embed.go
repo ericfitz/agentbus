@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ericfitz/agentbus-local/internal/config"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // newTestBus opens a bus on a fresh temp directory with default config.

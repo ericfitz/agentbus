@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ericfitz/agentbus-local/internal/cli"
-	"github.com/ericfitz/agentbus-local/internal/config"
-	"github.com/ericfitz/agentbus-local/internal/mcpserver"
+	"github.com/ericfitz/agentbus/internal/cli"
+	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <mcp|status|reset|identity> [--config path]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <mcp|status|reset|identity|version> [--config path]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -44,6 +44,9 @@ func run(cmd string, args []string) int {
 		if err := mcpserver.Run(context.Background(), cfg); err != nil {
 			return 1
 		}
+		return 0
+	case "version":
+		fmt.Println(mcpserver.Version)
 		return 0
 	case "identity":
 		cwd, err := os.Getwd()

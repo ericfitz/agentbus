@@ -1,8 +1,10 @@
 # ADR 0003: v2 implementation deviations
 
-Status: Proposed — controller rulings made during implementation on
-2026-09-08; awaiting human approval. [ADR 0001](0001-discussion-decisions.md)
-and [ADR 0002](0002-v2-decisions.md) stand unless the user approves these.
+Status: Accepted 2026-09-08 (human approval by the user). The user approved
+all 15 controller rulings below as changes to this ADR. Where they conflict
+with the v2 spec, [ADR 0001](0001-discussion-decisions.md), or
+[ADR 0002](0002-v2-decisions.md), this ADR supersedes; neither the spec nor
+ADR 0002 is edited.
 
 ## Context
 
@@ -10,9 +12,10 @@ During task-by-task implementation and review of the v2 design (spec:
 docs/superpowers/specs/2026-09-07-agentbus-local-design-v2.md), the
 controller ruled on several points where an implementer's or reviewer's
 finding required a product decision rather than a pure bug fix. Each ruling
-below was made to keep implementation moving without blocking on the human;
-none has been explicitly approved. If the user rejects one, the linked
-behavior needs a follow-up fix.
+below was made to keep implementation moving without blocking on the human
+and was then presented to the user, who approved every one on 2026-09-08.
+The "cost if wrong" notes are kept as the record of what a later reversal
+would require.
 
 ## Rulings
 
@@ -80,31 +83,34 @@ behavior needs a follow-up fix.
    different resolution (for example, a distinct "record too large for
    this budget" error) instead of being delivered.
 
-5. **Search ranks the top 1000 candidates and pages that fixed list, rather
-   than paging over a call-by-call recomputed ranking.**
-   What: `search` selects the best-ranked 1000 matches once, and cursor
-   paging with `count`/`cursor` moves through that fixed set; a corpus with
-   more than 1000 matches has candidates beyond rank 1000 that are never
-   reachable through paging.
+5. **Search ranks at most the top 1000 candidates per call.**
+   What: every `search` call (first page or a `cursor` continuation)
+   re-runs the query, ranks at most 1000 candidates, and applies the
+   cursor as a numeric offset into that call's ranking. A corpus with more
+   than 1000 matches has candidates beyond rank 1000 that are never
+   reachable through paging. Pages are not a snapshot: a write between two
+   calls can shift a hit across a page boundary, so a hit may repeat or be
+   skipped across pages under concurrent writes.
    Why: this is the plan's originally specified `searchPageMax` ceiling,
-   carried through implementation; recomputing full ranking on every page
-   call was judged unnecessary cost for the same result in the common case.
-   Cost if wrong: if the human wants every match reachable through paging
-   regardless of corpus size, search's ranking/paging needs to either raise
-   or remove the 1000-candidate ceiling, at the cost of recomputing (or
-   otherwise re-deriving) ranking across a larger or unbounded candidate
-   set per page.
+   carried through implementation; persisting a per-cursor snapshot was
+   judged unnecessary cost for the common case (memory sets far below 1000
+   hits, few concurrent writers).
+   Cost if wrong: if the human wants every match reachable, or stable pages
+   under concurrent writes, search needs a higher or no candidate ceiling
+   and/or a persisted per-cursor result set.
 
 6. **The maintenance tick's per-step deadline is best-effort for SQL, not a
    hard bound.**
    What: the tick's wall-clock deadline (half the configured cleanup
    interval) is enforced between chunks and for the HTTP embedding call.
    SQL statements themselves are not made context-aware: a lock wait or an
-   `incremental_vacuum` call can still run past the deadline, bounded only
-   by `busy_timeout` (5 s) per statement — not a guaranteed ≤5 s overrun,
-   since a capacity sweep can reacquire the writer for vacuum before its
-   own next deadline check. This is harmless for correctness since every
-   tick step is idempotent and safe to interrupt or repeat.
+   `incremental_vacuum` call can still run past the deadline. `busy_timeout`
+   (5 s) bounds only how long a statement waits for the database lock, not
+   how long it executes once it holds it, so the overrun is not bounded to
+   5 s (a long vacuum, or a capacity sweep that reacquires the writer for
+   vacuum before its own next deadline check, can exceed it). This is
+   harmless for correctness since every tick step is idempotent and safe
+   to interrupt or repeat.
    Why: converting every SQL call in the tick to a context-aware/cancelable
    form was judged more implementation cost than the actual risk (an
    occasional, bounded overrun on an idempotent background step) justified.
@@ -128,3 +134,111 @@ behavior needs a follow-up fix.
    already called for. If the human considers this out of scope for the
    plan as written, the task (and its tests) can be reverted without
    affecting any product code path.
+
+8. **Send, EditMemory, and DeleteMemory run in a fixed order: receipt lookup
+   first, hook and eviction outside any transaction, rate charge after
+   acceptance.**
+   What: each mutating call does auth and payload-shape validation, then the
+   idempotency receipt lookup (a replay returns the stored result here,
+   before any lookup of mutable state such as the channel, `reply_to`, or
+   the live memory), then the inspection hook, then capacity eviction in
+   its own transactions, and only then opens the immediate write transaction,
+   where it re-runs auth, re-checks the receipt, charges the rate limiter,
+   inserts, stores the receipt, and commits.
+   Why: the plan's sequence ran inline eviction and the hook inside the
+   write transaction, which deadlocks eviction against its own transaction
+   and holds the writer lock for the hook's whole runtime, contradicting the
+   spec's "serial within a process, concurrent across processes". Receipt
+   lookup before mutable reads keeps a keyed retry replayable after the
+   thing it named was edited, deleted, or evicted. Charging the token bucket
+   after acceptance matches the spec's "accepted-operation rate".
+   Cost if wrong: two concurrent same-key calls can both pass the outer
+   receipt check; the in-transaction re-check (and ruling 14) closes that.
+   Rejected operations are free, which is trivial.
+
+9. **Over-cap `wait_seconds` on `receive` is clamped, not rejected.**
+   What: a `wait_seconds` above `receive_max_wait_seconds` is silently
+   reduced to the cap; a negative value is still a validation error.
+   Why: consistent with how `count` is clamped in `receive` and `history`.
+   Cost if wrong: a silent clamp instead of a loud error; trivial.
+
+10. **Redelivery replays the original batch membership and re-stamps pending
+    endpoints.**
+    What: a batch token carries the `include_own` flag it was created with
+    (a `:o0`/`:o1` suffix on the token), so redelivering an unacknowledged
+    batch replays exactly the rows originally selected, ignoring the current
+    call's `count` and `include_own`. If a redelivery has to be trimmed at
+    the byte ceiling, every contributing subscription's `pending_end_seq` is
+    re-stamped to the highest seq actually redelivered (a channel with no
+    redelivered rows gets its cursor), so the next ack advances only past
+    what was delivered.
+    Why: the spec says redelivery returns "the same batch"; the plan's
+    range-based redelivery under the current call's ceiling could omit an
+    external message while the ack advanced past it (loss), and honoring the
+    current `include_own` could drop or resurface own messages.
+    Cost if wrong: none for external rows; own rows can only be affected by
+    the original flag, which is preserved.
+
+11. **`receive` reports at most 256 gap and 256 expired notices per call and
+    delivers no messages while gap notices remain unreported.**
+    What: `gaps` and `expired` are each bounded to 256 entries per call.
+    Expiry deletes and gap cursor advances apply only to the reported
+    entries; the rest surface on later calls. While any gap notice is
+    deferred, the call returns metadata only (reported gaps, expired,
+    notice) with no messages and no batch token; delivery resumes once the
+    gap backlog drains. Deferred expiries do not block delivery (an
+    expired-but-unreported subscription is simply not touched).
+    Why: unbounded notice lists made a metadata-only result able to exceed
+    the 4 MiB hard cap on its own, and a subscription whose gap was not yet
+    reported could still contribute messages, so an ack could advance past
+    the unreported gap permanently. With both bounds the worst-case
+    metadata reserve leaves over 2 MiB of headroom under the hard cap.
+    Cost if wrong: an agent with more than 256 gapped or expired channels
+    learns about them over several calls.
+
+12. **`agentbus mcp` may write one line to stderr on a fatal configuration
+    error.**
+    What: when the config cannot be loaded or the bus cannot be opened at
+    startup, the process writes a single `agentbus: <error>` line to stderr
+    and exits (also logging to the log file if it opened). Stdout is never
+    touched, so the MCP transport is not corrupted.
+    Why: the error occurs before any log file can exist.
+    Cost if wrong: one stderr line.
+
+13. **`embedding_api_key_file` readability is checked when the embedder is
+    constructed, not at config load.**
+    What: config load only resolves the path; a missing or unreadable key
+    file fails `Open` (embedder construction) instead of `Load`.
+    Why: the plan's own config test sets a nonexistent key file and requires
+    `Load` to succeed.
+    Cost if wrong: a bad key path fails at `Open` instead of at config load.
+
+14. **Keyed idempotent operations serialize per (sender, key) within a
+    process; inspection hook execution serializes per process.**
+    What: `send`, `edit_memory`, and `delete_memory` with a non-empty
+    `idempotency_key` take a process-local mutex keyed by (sender, key),
+    held from the preflight receipt read through commit; unkeyed operations
+    are unaffected. Hook runs take a bus-level mutex held only for the
+    hook's runtime, never while a SQLite write transaction is open. The
+    hook's `allow` field must be present and boolean; a missing or null
+    value is treated as a malformed response (`inspection_unavailable`).
+    Why: two concurrent identical-key calls could both miss the preflight
+    receipt and both run the hook; the spec requires hook execution to be
+    serial within a process. Decoding `allow` as a plain bool made `{}` and
+    `null` silently decode to a non-retryable rejection.
+    Cost if wrong: keyed operations serialize within a process, which is
+    cheap since they are rare retries; the keyed-mutex map is never pruned.
+
+15. **Process rulings with no product effect.**
+    What: no new worktree was created (the branch was already isolated);
+    every error the plan's code dropped is handled; helpers are shared
+    rather than duplicated (`trimBytes`, `scanMessages`, and `status`
+    reusing the bus's list calls); `cmd.WaitDelay` is set in the hook runner
+    and the `embedRequestTimeout` typo is fixed; go-sdk's indirect requires
+    in `go.mod` are accepted as within "exactly two direct dependencies";
+    reviewer-driven test fixes were applied; and Task 16 observes chunking
+    and lease contention at the database level (the tick logs no per-chunk
+    or lease lines, and a single owner renewing the lease indefinitely is
+    legal since the lease bounds duplicated effort, not fairness).
+    Why: each was a reviewer or preflight finding whose fix was mechanical.
+    Cost if wrong: none.

@@ -40,6 +40,21 @@ func validateName(name string) error {
 	return nil
 }
 
+// validateParent bounds parent to 512 UTF-8 bytes with no control
+// characters. Unlike name, parent MAY contain '/': it is itself a display
+// name such as "Sam/impl".
+func validateParent(parent string) error {
+	if len(parent) > 512 {
+		return errf("validation", false, "parent must be at most 512 bytes")
+	}
+	for _, r := range parent {
+		if unicode.IsControl(r) {
+			return errf("validation", false, "parent must not contain control characters")
+		}
+	}
+	return nil
+}
+
 // validateContext bounds context to 1024 UTF-8 bytes with no control
 // characters. The spec does not set a bound on context; this cap is a
 // controller ruling (M12.2) so a single register call cannot make
@@ -59,6 +74,9 @@ func validateContext(context string) error {
 
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
 	if err := validateName(name); err != nil {
+		return Registration{}, err
+	}
+	if err := validateParent(parent); err != nil {
 		return Registration{}, err
 	}
 	if err := validateContext(context); err != nil {
@@ -134,8 +152,10 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	// caller controls, but a session resuming thousands of subscriptions
 	// could still exceed the hard ceiling; trim it to the same whole-record
 	// budget as ListChannels/Discover. No separate reserve is subtracted
-	// for Sender/Resumed: Sender is bounded to 128 bytes (validateName) and
-	// Resumed is a bool, both negligible next to the ceiling.
+	// for Sender/Resumed: Sender is bounded by parent (validateParent, <=512
+	// bytes) + "/" + name (validateName, <=128 bytes) + a small numeric
+	// disambiguation suffix, and Resumed is a bool, both negligible next to
+	// the ceiling.
 	reg.Pending = trimToBytes(reg.Pending, pendingBytes, min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes))
 	return reg, nil
 }

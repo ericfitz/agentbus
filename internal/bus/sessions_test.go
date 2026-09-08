@@ -45,6 +45,24 @@ func TestRegisterRejectsOversizedContext(t *testing.T) {
 	}
 }
 
+// M12.2 amendment: parent is a display name, so it may contain '/' (unlike
+// name), but is bounded to 512 bytes with no control characters.
+func TestRegisterRejectsOversizedOrControlParent(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("impl", "Sam/team", "", true); err != nil {
+		t.Fatalf("parent containing '/' must be accepted: %v", err)
+	}
+	if _, err := b.Register("impl", strings.Repeat("p", 512), "", true); err != nil {
+		t.Fatalf("512-byte parent must be accepted: %v", err)
+	}
+	if _, err := b.Register("impl", strings.Repeat("p", 513), "", true); err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("513-byte parent must be rejected as validation: %v", err)
+	}
+	if _, err := b.Register("impl", "bad\x00parent", "", true); err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("control character in parent must be rejected as validation: %v", err)
+	}
+}
+
 func TestStaleOwnerLosesName(t *testing.T) {
 	b := newTestBus(t)
 	b.Register("Sam", "", "", true)

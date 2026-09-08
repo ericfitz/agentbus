@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <mcp|status|reset|identity|version> [--config path]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|status|reset|identity|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -42,6 +42,20 @@ func run(cmd string, args []string) int {
 			return 1
 		}
 		if err := mcpserver.Run(context.Background(), cfg); err != nil {
+			return 1
+		}
+		return 0
+	case "init":
+		fs := flag.NewFlagSet("agentbus init", flag.ContinueOnError)
+		var o cli.InitOptions
+		fs.BoolVar(&o.Global, "global", false, "configure the harnesses on this machine even when inside a git repository")
+		fs.StringVar(&o.Harness, "harness", "", "configure only this harness (claude or codex), even if it is not detected")
+		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
+		if err := fs.Parse(args); err != nil {
+			return 2
+		}
+		if err := cli.Init(o, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}
 		return 0

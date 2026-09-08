@@ -9,6 +9,42 @@ CGO_ENABLED=0 go build -o agentbus .
 Run this from the repository root. Put the resulting binary somewhere on your
 `PATH` (for example `~/.local/bin/agentbus`) so harnesses can find it by name.
 
+## Bootstrap with `agentbus init`
+
+Once per machine, from any directory outside a git repository (or with
+`--global` from inside one):
+
+```sh
+agentbus init --global
+```
+
+For each harness it finds (`~/.claude` or `~/.codex` exists), it registers
+the MCP server through the harness's own CLI (`claude mcp add -s user`,
+`codex mcp add`), merges an `agentbus identity` SessionStart hook into
+`~/.claude/settings.json` or `~/.codex/hooks.json` (backing the file up to
+`.bak` first), and for Codex sets `tool_timeout_sec = 300` and writes the
+`~/.codex/prompts/agentbus.md` custom prompt. `--harness claude` or
+`--harness codex` configures only that harness, even if it is not detected.
+`--dry-run` prints what would change without writing. Restart the harness
+afterwards.
+
+Then, inside each repository:
+
+```sh
+agentbus init
+```
+
+This writes the repository's identity file (`.local/agentbus.json`, from the
+repository directory's name), adds `.local/` to `.gitignore` if it is not
+already ignored, and prints the registration line. From inside a session
+the same thing is one command: `/agentbus:init` in Claude Code (an MCP
+prompt the server advertises, so nothing is installed for it) or
+`/prompts:agentbus init` in Codex (from the custom prompt file above; Codex
+does not surface MCP prompts yet). Either way the agent runs `agentbus
+init` and then calls `register` in the current session.
+
+The sections below describe what `init` sets up, for doing it by hand.
+
 ## Configuration (optional)
 
 Default path: `~/.config/agentbus/config.json`. No file means defaults.
@@ -38,7 +74,7 @@ variable, or a per-server `timeout` field in the MCP config), Codex exposes
 `tool_timeout_sec`. Agentbus itself bounds `receive_max_wait_seconds` to a
 maximum of 240 seconds (default 60).
 
-## Per-repo identity (optional)
+## Per-repo identity (what `agentbus init` writes)
 
 `.local/agentbus.json` in the repository (git-ignored), holding one field:
 
@@ -51,7 +87,7 @@ directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
 the repository directory's basename.
 
-## Claude Code
+## Claude Code (manual setup)
 
 The harness's MCP server entry must be named `agentbus`, since the harness
 prefixes that name onto every tool: tools appear as `mcp__agentbus__<tool>`
@@ -75,7 +111,7 @@ with subagents. Tell a subagent its parent's display name in its prompt and
 have it call `register` with `parent` set, then pass its own returned `as` on
 every later call.
 
-## Codex
+## Codex (manual setup)
 
 `~/.codex/config.toml`:
 
@@ -111,6 +147,8 @@ separate process has no other way to learn it.
 
 ## Operating
 
+- `agentbus init` bootstraps a repository; `agentbus init --global`
+  bootstraps the harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
 - `agentbus identity` prints the one-line registration prompt for the current

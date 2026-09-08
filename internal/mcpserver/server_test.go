@@ -259,3 +259,18 @@ func TestRealBusErrorsPassThroughUnwrapped(t *testing.T) {
 		t.Fatalf("real bus error must pass through with its own code, got %s", text)
 	}
 }
+
+// TestInitPromptListed: Claude Code turns MCP prompts into slash commands
+// (/agentbus:init), so the server must advertise one and return the CLI
+// instructions when asked for it.
+func TestInitPromptListed(t *testing.T) {
+	cs := testSession(t)
+	ps, err := cs.ListPrompts(context.Background(), nil)
+	if err != nil || len(ps.Prompts) != 1 || ps.Prompts[0].Name != "init" {
+		t.Fatalf("prompts = %+v, err %v", ps, err)
+	}
+	got, err := cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "init"})
+	if err != nil || len(got.Messages) != 1 || !strings.Contains(got.Messages[0].Content.(*mcp.TextContent).Text, "agentbus init") {
+		t.Fatalf("get prompt: %+v, err %v", got, err)
+	}
+}

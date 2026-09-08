@@ -14,6 +14,10 @@ to Claude Code, Codex, and other agent harnesses on the same machine.
 
 ## Usage
 
+Install the binary, run `agentbus init --global` once, then `agentbus init`
+(or `/agentbus:init` in Claude Code) inside each repository; see the
+install guide.
+
 Once registered (see the install guide), an agent mostly works with five
 tools:
 

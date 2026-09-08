@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -162,6 +163,13 @@ func wrapSchemaErrorsInEnvelope(next mcp.MethodHandler) mcp.MethodHandler {
 // failure is recorded in the log instead of silently defaulting.
 func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "agentbus", Version: Version}, nil)
+	// Claude Code lists MCP prompts as slash commands (/agentbus:init), so
+	// this is the in-harness bootstrap with no files written; Codex does not
+	// surface prompts yet and gets a custom prompt file from `agentbus init`.
+	s.AddPrompt(&mcp.Prompt{Name: "init", Description: "Set up Agentbus for the current repository and register this session"},
+		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: cli.InitPrompt}}}}, nil
+		})
 	s.AddReceivingMiddleware(wrapSchemaErrorsInEnvelope)
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)

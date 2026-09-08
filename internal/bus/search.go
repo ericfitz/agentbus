@@ -208,7 +208,10 @@ func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, 
 	if err != nil {
 		return nil, err
 	}
-	vecRows, err := b.db.Query("SELECT seq, vector FROM embeddings WHERE model=?", b.embedder.model)
+	filters, fargs := searchFilters(in)
+	candidateWhere := " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0 AND m.memory_id IS NOT NULL" + filters
+
+	vecRows, err := b.db.Query("SELECT e.seq, e.vector"+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -228,9 +231,7 @@ func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, 
 	}
 	vecRows.Close()
 
-	filters, fargs := searchFilters(in)
-	q := "SELECT " + qualifiedColumns("m") + " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0 AND m.memory_id IS NOT NULL" + filters
-	rows, err := b.db.Query(q, append([]any{b.embedder.model}, fargs...)...)
+	rows, err := b.db.Query("SELECT "+qualifiedColumns("m")+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -247,7 +248,12 @@ func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, 
 		}
 		hits = append(hits, SearchHit{Message: m, Score: dot(qv[0], decodeVec(vec))})
 	}
-	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].Score == hits[j].Score {
+			return hits[i].Seq < hits[j].Seq
+		}
+		return hits[i].Score > hits[j].Score
+	})
 	if len(hits) > searchPageMax {
 		hits = hits[:searchPageMax]
 	}

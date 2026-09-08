@@ -114,10 +114,26 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	if len(r.Hits) == 0 || r.Hits[0].Content != "roses are red" {
 		t.Fatalf("fusion must rank the text+semantic match first: %+v", r.Hits)
 	}
+	// Two identical-content memories tie on score; the order must be stable
+	// across calls (tie-break on seq), not whatever an unstable sort emits.
+	b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	if n, err = b.embedBatch(context.Background()); err != nil || n != 1 {
+		t.Fatalf("expected to embed the duplicate, n=%d err=%v", n, err)
+	}
+	first, _ := b.Search(sam, SearchInput{Query: "roses are red", Mode: "semantic"})
+	second, _ := b.Search(sam, SearchInput{Query: "roses are red", Mode: "semantic"})
+	if len(first.Hits) < 2 || len(first.Hits) != len(second.Hits) {
+		t.Fatalf("expected at least 2 tied hits: %+v", first.Hits)
+	}
+	for i := range first.Hits {
+		if first.Hits[i].Seq != second.Hits[i].Seq {
+			t.Fatalf("tie order must be stable across calls: %+v vs %+v", first.Hits, second.Hits)
+		}
+	}
 	// Model change: old rows orphaned and re-embedded.
 	b.cfg.EmbeddingModel = "fake-2"
 	b.embedder.model = "fake-2"
-	if n, _ = b.embedBatch(context.Background()); n != 3 {
+	if n, _ = b.embedBatch(context.Background()); n != 4 {
 		t.Fatalf("model change must re-embed, got %d", n)
 	}
 	var stale int

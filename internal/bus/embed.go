@@ -76,7 +76,7 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 			err = cerr
 		}
 	}()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("embeddings endpoint returned %s", resp.Status)
 	}
 	var out struct {

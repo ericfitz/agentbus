@@ -9,8 +9,9 @@
 // live process's registration out from under it, and clean stdio framing
 // (the transport owns stdout; diagnostics go only to the log file). Time-
 // dependent behavior (age cleanup, expiry, tombstone purge) is covered by
-// the fake-clock tests in package bus. Lease contention and other
-// spec-required scenarios not listed above are covered by a follow-up task.
+// the fake-clock tests in package bus. Lease contention and the other
+// spec-required scenarios not listed above are covered by
+// integration_more_test.go, in this same package.
 package mcpserver
 
 import (

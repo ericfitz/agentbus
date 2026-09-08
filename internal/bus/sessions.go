@@ -147,21 +147,5 @@ func (b *Bus) Discover(as string) ([]Session, error) {
 	if !b.cfg.DiscoveryEnabled {
 		return nil, errf("validation", false, "discovery is disabled by configuration")
 	}
-	rows, err := b.db.Query("SELECT sender, context, registered_at FROM sessions WHERE heartbeat >= ? ORDER BY sender", b.nowMs()-attachmentExpiryMs)
-	if err != nil {
-		return nil, internal(err)
-	}
-	defer rows.Close()
-	out := []Session{}
-	for rows.Next() {
-		var s Session
-		if err := rows.Scan(&s.Sender, &s.Context, &s.RegisteredAt); err != nil {
-			return nil, internal(err)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, internal(err)
-	}
-	return out, nil
+	return b.liveSessions(b.db)
 }

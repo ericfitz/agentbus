@@ -58,24 +58,5 @@ func (b *Bus) ListChannels(as string) ([]Channel, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
-	rows, err := b.db.Query(`SELECT c.name, c.kind,
-	  (SELECT count(*) FROM messages m WHERE m.channel=c.name AND m.tombstone=0),
-	  (SELECT coalesce(max(seq),0) FROM messages m WHERE m.channel=c.name)
-	  FROM channels c ORDER BY c.name`)
-	if err != nil {
-		return nil, internal(err)
-	}
-	defer rows.Close()
-	out := []Channel{}
-	for rows.Next() {
-		var c Channel
-		if err := rows.Scan(&c.Name, &c.Kind, &c.Messages, &c.LatestSeq); err != nil {
-			return nil, internal(err)
-		}
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, internal(err)
-	}
-	return out, nil
+	return b.listChannels(b.db)
 }

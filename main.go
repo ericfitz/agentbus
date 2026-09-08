@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ericfitz/agentbus-local/internal/cli"
 	"github.com/ericfitz/agentbus-local/internal/config"
 	"github.com/ericfitz/agentbus-local/internal/mcpserver"
 )
@@ -29,7 +30,7 @@ func loadConfig(args []string) (config.Config, error) {
 	return cfg, err
 }
 
-// run dispatches a subcommand. Later tasks add cases.
+// run dispatches a subcommand.
 func run(cmd string, args []string) int {
 	switch cmd {
 	case "mcp":
@@ -41,6 +42,39 @@ func run(cmd string, args []string) int {
 			return 1
 		}
 		if err := mcpserver.Run(context.Background(), cfg); err != nil {
+			return 1
+		}
+		return 0
+	case "identity":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		if err := cli.Identity(cwd, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "status":
+		cfg, err := loadConfig(args)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		if err := cli.Status(cfg, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "reset":
+		cfg, err := loadConfig(args)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		if err := cli.Reset(cfg, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}
 		return 0

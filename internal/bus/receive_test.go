@@ -283,39 +283,61 @@ func TestReceivePendingBatchDoesNotBlockAChannelTrimmedOutOfItEntirely(t *testin
 // A redelivery whose bound now includes a tombstoned (superseded) message
 // must re-stamp pending_end_seq to what it actually showed, so a later ack
 // cannot skip past a message that was never actually redelivered.
+// Covers both re-stamp cases in one pending, multi-channel batch: dev keeps
+// one surviving message (pending_end_seq pulled back to it), while ops's
+// entire share is tombstoned away (pending_end_seq falls back to its own
+// cursor_seq, i.e. nothing pending) — both under the same shared token.
 func TestReceiveRedeliveryReStampsPendingEndSeqWhenAMessageIsTombstoned(t *testing.T) {
 	b, sam, kim := setupTwo(t)
+	b.CreateChannel(sam, "ops", "ordinary")
+	b.Subscribe(kim, "ops", "now")
 	b.Send(sam, SendInput{Channel: "dev", Content: "keep"})
 	res2, err := b.Send(sam, SendInput{Channel: "dev", Content: "superseded"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	opsRes, err := b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	r1, err := b.Receive(kim, ReceiveInput{})
-	if err != nil || len(r1.Messages) != 2 {
+	if err != nil || len(r1.Messages) != 3 {
 		t.Fatalf("%+v %v", r1, err)
 	}
-	if _, err := b.db.Exec("UPDATE messages SET tombstone=1 WHERE seq=?", res2.Seq); err != nil {
+	if _, err := b.db.Exec("UPDATE messages SET tombstone=1 WHERE seq IN (?, ?)", res2.Seq, opsRes.Seq); err != nil {
 		t.Fatal(err)
 	}
 	r2, err := b.Receive(kim, ReceiveInput{})
-	if err != nil || !r2.Redelivered || len(r2.Messages) != 1 || r2.Messages[0].Content != "keep" {
+	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "keep" {
 		t.Fatalf("%+v %v", r2, err)
 	}
-	var pendingEnd int64
-	if err := b.db.QueryRow("SELECT pending_end_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&pendingEnd); err != nil {
+	var devPendingEnd, opsPendingEnd, opsCursor int64
+	if err := b.db.QueryRow("SELECT pending_end_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&devPendingEnd); err != nil {
 		t.Fatal(err)
 	}
-	if pendingEnd != r2.Messages[0].Seq {
-		t.Fatalf("pending_end_seq must be re-stamped to what was actually shown: got %d want %d", pendingEnd, r2.Messages[0].Seq)
+	if devPendingEnd != r2.Messages[0].Seq {
+		t.Fatalf("dev's pending_end_seq must be re-stamped to what was actually shown: got %d want %d", devPendingEnd, r2.Messages[0].Seq)
+	}
+	if err := b.db.QueryRow("SELECT pending_end_seq, cursor_seq FROM subscriptions WHERE sender=? AND channel='ops'", kim).Scan(&opsPendingEnd, &opsCursor); err != nil {
+		t.Fatal(err)
+	}
+	if opsPendingEnd != opsCursor {
+		t.Fatalf("ops's entire share was trimmed away: pending_end_seq must fall back to cursor_seq: got %d want %d", opsPendingEnd, opsCursor)
 	}
 	if _, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch}); err != nil {
 		t.Fatal(err)
 	}
-	var cursor int64
-	if err := b.db.QueryRow("SELECT cursor_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&cursor); err != nil {
+	var devCursor, opsCursorAfter int64
+	if err := b.db.QueryRow("SELECT cursor_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&devCursor); err != nil {
 		t.Fatal(err)
 	}
-	if cursor != r2.Messages[0].Seq {
-		t.Fatalf("ack must advance only to what was shown: got %d want %d", cursor, r2.Messages[0].Seq)
+	if devCursor != r2.Messages[0].Seq {
+		t.Fatalf("ack must advance dev only to what was shown: got %d want %d", devCursor, r2.Messages[0].Seq)
+	}
+	if err := b.db.QueryRow("SELECT cursor_seq FROM subscriptions WHERE sender=? AND channel='ops'", kim).Scan(&opsCursorAfter); err != nil {
+		t.Fatal(err)
+	}
+	if opsCursorAfter != opsCursor {
+		t.Fatalf("ack must not move ops's cursor at all: got %d want %d", opsCursorAfter, opsCursor)
 	}
 }

@@ -1,0 +1,23 @@
+# Progress
+
+What has been pushed to `origin/main`. Machine-local resume state lives in
+the untracked `HANDOFF.md`.
+
+## 2026-09-08: agentbus v2 implementation
+
+Pushed to `main` (fast-forward of `docs/v2-design`, 49 commits):
+
+- **v2 implementation** per
+  `docs/superpowers/specs/2026-09-07-agentbus-local-design-v2.md` and the
+  plan in `docs/superpowers/plans/2026-09-07-agentbus-v2.md`: SQLite-backed
+  bus (`internal/bus`), MCP server (`internal/mcpserver`), CLI
+  (`internal/cli`), config (`internal/config`). Direct dependencies are
+  `modernc.org/sqlite` and `github.com/modelcontextprotocol/go-sdk` only;
+  builds and tests under `CGO_ENABLED=0`, `-race` clean.
+- **ADR 0003** (`docs/adr/0003-v2-implementation-deviations.md`): the 15
+  implementation rulings, accepted by the user on 2026-09-08; supersedes the
+  spec and ADR 0002 where they conflict.
+- **Install docs** (`docs/install.md`) for Claude Code and Codex.
+- **Tests**: unit suites per package plus multi-process stdio integration
+  scenarios, including the spec-required scenarios the plan omitted
+  (`internal/mcpserver/integration_more_test.go`).

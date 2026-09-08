@@ -142,8 +142,11 @@ func TestReceiveLongPollPreservesAckIgnored(t *testing.T) {
 // truncate it, and acking it in full must leave nothing behind.
 func TestReceiveRedeliveryIgnoresCountAndByteLimits(t *testing.T) {
 	b, sam, kim := setupTwo(t)
+	// Each message is ~200 bytes of content, so 10 of them exceed the 1 KiB
+	// limit set below by several times over: the old (broken) behavior of
+	// trimming redelivery to result_default_kib would visibly cut this batch.
 	for i := 0; i < 10; i++ {
-		b.Send(sam, SendInput{Channel: "dev", Content: "x"})
+		b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 200))})
 	}
 	r1, err := b.Receive(kim, ReceiveInput{Count: 100})
 	if err != nil || len(r1.Messages) != 10 {
@@ -176,5 +179,31 @@ func TestReceivePendingBypassesChannelsFilter(t *testing.T) {
 	r2, err := b.Receive(kim, ReceiveInput{Channels: []string{"ops"}})
 	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "a" {
 		t.Fatalf("pending dev batch must be redelivered even when filtering to ops: %+v %v", r2, err)
+	}
+}
+
+// Acking a pending batch that a channels-filtered call surfaced must not then
+// pull that same, now-unfiltered, out-of-filter channel into new selection.
+func TestReceiveAckOfOutOfFilterPendingDoesNotLeakIntoNewSelection(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.CreateChannel(sam, "ops", "ordinary")
+	b.Subscribe(kim, "ops", "now")
+	b.Send(sam, SendInput{Channel: "dev", Content: "a"})
+	r1, err := b.Receive(kim, ReceiveInput{Channels: []string{"dev"}})
+	if err != nil || len(r1.Messages) != 1 {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	b.Send(sam, SendInput{Channel: "dev", Content: "a2"})
+	b.Send(sam, SendInput{Channel: "ops", Content: "b"})
+	r2, err := b.Receive(kim, ReceiveInput{Ack: r1.Batch, Channels: []string{"ops"}})
+	if err != nil || len(r2.Messages) != 1 || r2.Messages[0].Content != "b" {
+		t.Fatalf("ack of an out-of-filter batch must not admit dev into ops-filtered selection: %+v %v", r2, err)
+	}
+	var pending string
+	if err := b.db.QueryRow("SELECT pending_token FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending != "" {
+		t.Fatalf("dev must not have gotten a new pending pair from an ops-filtered call: %q", pending)
 	}
 }

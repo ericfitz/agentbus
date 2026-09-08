@@ -228,10 +228,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 	}
 
-	var pending []subRow
+	var pending, inScope []subRow
 	for _, s := range subs {
 		if s.pendingToken != "" {
 			pending = append(pending, s)
+		}
+		if inFilter(s.channel) {
+			inScope = append(inScope, s)
 		}
 	}
 	// buildBounded reproduces exactly "the same batch": the seq range fixed at
@@ -279,8 +282,8 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		res.Batch = pending[0].pendingToken
 		res.Redelivered = true
 		res.Instruction = fmt.Sprintf("This batch was delivered before and not acknowledged. Pass ack=%q on your next receive to advance past it.", res.Batch)
-	case len(subs) > 0:
-		q, a := buildNew(subs)
+	case len(inScope) > 0:
+		q, a := buildNew(inScope)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err

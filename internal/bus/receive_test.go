@@ -128,3 +128,53 @@ func TestReceiveWaitSecondsClampedNotRejected(t *testing.T) {
 		t.Fatalf("over-cap wait must be clamped, not rejected: %+v %v %v", r, err, time.Since(start))
 	}
 }
+
+func TestReceiveLongPollPreservesAckIgnored(t *testing.T) {
+	b, _, kim := setupTwo(t)
+	r, err := b.Receive(kim, ReceiveInput{Ack: "stale", WaitSeconds: 1})
+	if err != nil || !r.AckIgnored || len(r.Messages) != 0 {
+		t.Fatalf("stale ack must survive an empty long poll: %+v %v", r, err)
+	}
+}
+
+// A redelivered batch is bounded solely by the seq range fixed at creation:
+// a smaller count or a shrunk result_default_kib on a later call must not
+// truncate it, and acking it in full must leave nothing behind.
+func TestReceiveRedeliveryIgnoresCountAndByteLimits(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	for i := 0; i < 10; i++ {
+		b.Send(sam, SendInput{Channel: "dev", Content: "x"})
+	}
+	r1, err := b.Receive(kim, ReceiveInput{Count: 100})
+	if err != nil || len(r1.Messages) != 10 {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	b.cfg.ResultDefaultKiB = 1
+	r2, err := b.Receive(kim, ReceiveInput{Count: 2})
+	if err != nil || len(r2.Messages) != 10 || !r2.Redelivered || r2.Batch != r1.Batch {
+		t.Fatalf("redelivery must ignore a smaller count and a shrunk byte limit: %+v %v", r2, err)
+	}
+	r3, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch})
+	if err != nil || len(r3.Messages) != 0 {
+		t.Fatalf("acking a fully-redelivered batch must leave nothing behind: %+v %v", r3, err)
+	}
+}
+
+// A pending batch is redelivered regardless of the channels filter: step 3
+// (redeliver pending) is unconditional and takes priority over step 4 (new
+// selection), even when the filter names only a different channel.
+func TestReceivePendingBypassesChannelsFilter(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.CreateChannel(sam, "ops", "ordinary")
+	b.Subscribe(kim, "ops", "now")
+	b.Send(sam, SendInput{Channel: "dev", Content: "a"})
+	r1, err := b.Receive(kim, ReceiveInput{Channels: []string{"dev"}})
+	if err != nil || len(r1.Messages) != 1 || r1.Batch == "" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	b.Send(sam, SendInput{Channel: "ops", Content: "b"})
+	r2, err := b.Receive(kim, ReceiveInput{Channels: []string{"ops"}})
+	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "a" {
+		t.Fatalf("pending dev batch must be redelivered even when filtering to ops: %+v %v", r2, err)
+	}
+}

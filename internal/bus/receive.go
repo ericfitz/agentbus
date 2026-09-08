@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// redeliveryHardCeilingBytes bounds a redelivered batch's own size, independent
+// of result_default_kib (which can change between calls and must not shrink
+// "the same batch").
+const redeliveryHardCeilingBytes = 4 * 1024 * 1024
+
 type ReceiveInput struct {
 	Ack         string   `json:"ack,omitempty"`
 	Count       int      `json:"count,omitempty"`
@@ -93,8 +98,18 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 	}
 	// Wall-clock deadline: b.Now may be a test clock that does not advance.
 	deadline := time.Now().Add(time.Duration(in.WaitSeconds) * time.Second)
+	first := true
+	ackIgnored := false
 	for {
 		res, err := b.receiveOnce(as, in)
+		if first {
+			ackIgnored = res.AckIgnored
+			first = false
+		} else {
+			// The ack, if any, was only ever applied on the first pass; carry its
+			// AckIgnored verdict forward so a later empty poll doesn't lose it.
+			res.AckIgnored = ackIgnored
+		}
 		if err != nil || len(res.Messages) > 0 || len(res.Gaps) > 0 || len(res.Expired) > 0 || in.WaitSeconds == 0 {
 			return res, err
 		}
@@ -115,17 +130,24 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	}
 	defer tx.Rollback()
 
-	q := "SELECT channel, cursor_seq, last_activity, pending_token, pending_end_seq FROM subscriptions WHERE sender=?"
-	args := []any{as}
-	if len(in.Channels) > 0 {
-		q += " AND channel IN (?" + strings.Repeat(",?", len(in.Channels)-1) + ")"
-		for _, c := range in.Channels {
-			args = append(args, c)
-		}
-	}
-	rows, err := tx.Query(q+" ORDER BY channel", args...)
+	// Load every subscription for this sender, not just ones matching the
+	// channels filter: a pending batch is redelivered unconditionally (spec
+	// step 3), regardless of which channels this call asked about, so a
+	// subscription outside the filter must still be seen when it has one.
+	rows, err := tx.Query("SELECT channel, cursor_seq, last_activity, pending_token, pending_end_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
 	if err != nil {
 		return res, internal(err)
+	}
+	inFilter := func(ch string) bool {
+		if len(in.Channels) == 0 {
+			return true
+		}
+		for _, c := range in.Channels {
+			if c == ch {
+				return true
+			}
+		}
+		return false
 	}
 	var subs []subRow
 	idle := int64(b.cfg.CursorIdleHours) * 3_600_000
@@ -135,6 +157,11 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		if err := rows.Scan(&s.channel, &s.cursor, &last, &s.pendingToken, &s.pendingEnd); err != nil {
 			rows.Close()
 			return res, internal(err)
+		}
+		// Outside the filter with nothing pending: not involved in this call,
+		// leave it untouched (no activity touch, no expiry check).
+		if !inFilter(s.channel) && s.pendingToken == "" {
+			continue
 		}
 		if last < now-idle {
 			res.Expired = append(res.Expired, s.channel)
@@ -207,21 +234,30 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			pending = append(pending, s)
 		}
 	}
-	own := ""
-	if !in.IncludeOwn {
-		own = " AND sender<>?"
-	}
-	build := func(set []subRow, bounded bool) (string, []any) {
+	// buildBounded reproduces exactly "the same batch": the seq range fixed at
+	// creation, with no count/own re-filtering from the current call — those
+	// belong only to new selection (in.Count and in.IncludeOwn can differ
+	// between the original delivery and this redelivery).
+	buildBounded := func(set []subRow) (string, []any) {
 		var conds []string
 		var a []any
 		for _, s := range set {
-			if bounded {
-				conds = append(conds, "(channel=? AND seq>? AND seq<=?)")
-				a = append(a, s.channel, s.cursor, s.pendingEnd)
-			} else {
-				conds = append(conds, "(channel=? AND seq>?)")
-				a = append(a, s.channel, s.cursor)
-			}
+			conds = append(conds, "(channel=? AND seq>? AND seq<=?)")
+			a = append(a, s.channel, s.cursor, s.pendingEnd)
+		}
+		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0 ORDER BY seq"
+		return q, a
+	}
+	buildNew := func(set []subRow) (string, []any) {
+		var conds []string
+		var a []any
+		for _, s := range set {
+			conds = append(conds, "(channel=? AND seq>?)")
+			a = append(a, s.channel, s.cursor)
+		}
+		own := ""
+		if !in.IncludeOwn {
+			own = " AND sender<>?"
 		}
 		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq LIMIT ?"
 		if own != "" {
@@ -234,17 +270,17 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 
 	switch {
 	case len(pending) > 0:
-		q, a := build(pending, true)
+		q, a := buildBounded(pending)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
 		}
-		res.Messages = trimBytes(msgs, limit)
+		res.Messages = trimBytes(msgs, redeliveryHardCeilingBytes)
 		res.Batch = pending[0].pendingToken
 		res.Redelivered = true
 		res.Instruction = fmt.Sprintf("This batch was delivered before and not acknowledged. Pass ack=%q on your next receive to advance past it.", res.Batch)
 	case len(subs) > 0:
-		q, a := build(subs, false)
+		q, a := buildNew(subs)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err

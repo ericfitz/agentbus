@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,8 +175,14 @@ func (c *Config) validate() error {
 	if len(enc) > 32*1024 {
 		return errors.New("inspection_command exceeds 32 KiB encoded")
 	}
-	if c.EmbeddingEndpoint != "" && c.EmbeddingModel == "" {
-		return errors.New("embedding_model is required when embedding_endpoint is set")
+	if c.EmbeddingEndpoint != "" {
+		if c.EmbeddingModel == "" {
+			return errors.New("embedding_model is required when embedding_endpoint is set")
+		}
+		u, err := url.Parse(c.EmbeddingEndpoint)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("embedding_endpoint: must be an absolute URL with scheme and host, got %q", c.EmbeddingEndpoint)
+		}
 	}
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":

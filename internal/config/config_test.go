@@ -52,6 +52,14 @@ func TestRejectsEndpointWithoutModel(t *testing.T) {
 	}
 }
 
+func TestRejectsNonURLEndpoint(t *testing.T) {
+	p := write(t, t.TempDir(), `{"embedding_endpoint": "not-a-url", "embedding_model": "m"}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "embedding_endpoint") {
+		t.Fatalf("want embedding_endpoint URL error, got %v", err)
+	}
+}
+
 func TestDataDirEnvOverrideAndTilde(t *testing.T) {
 	p := write(t, t.TempDir(), `{"data_directory": "~/x"}`)
 	t.Setenv("AGENTBUS_DATA_DIR", "")

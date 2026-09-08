@@ -227,6 +227,24 @@ func TestSchemaValidationFailuresGetJSONEnvelope(t *testing.T) {
 	assertValidationEnvelope(t, res)
 }
 
+// TestOversizedArgumentErrorIsBoundedOverMCP reproduces F1 at the MCP layer:
+// an oversized caller-controlled argument (here search's cursor) must not
+// make the serialized tool error result itself blow past the result
+// budgets it exists to enforce.
+func TestOversizedArgumentErrorIsBoundedOverMCP(t *testing.T) {
+	cs := testSession(t)
+	sam, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	big := strings.Repeat("x", 5*1024*1024) // >4 MiB
+	_, res := call(t, cs, "search", map[string]any{"as": sam["as"], "query": "widget", "cursor": big})
+	if !res.IsError {
+		t.Fatal("expected an error for a non-numeric oversized cursor")
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if n := len(text); n > 8*1024 {
+		t.Fatalf("serialized error result is %d bytes, want <= 8 KiB", n)
+	}
+}
+
 // TestRealBusErrorsPassThroughUnwrapped confirms wrapSchemaErrorsInEnvelope
 // leaves an already-enveloped bus.Error untouched (it must not double-wrap
 // or otherwise alter a real bus error's code, such as not_registered).

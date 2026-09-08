@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -97,6 +98,31 @@ func Load(path string) (Config, string, error) {
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&c); err != nil {
 			return c, path, fmt.Errorf("%s: %w", path, err)
+		}
+		// The config file must hold exactly one JSON object: Decoder.Decode
+		// only reads one value and, unlike json.Unmarshal, silently ignores
+		// anything after it. A second Decode on the same stream must find
+		// nothing but EOF, else there is trailing content (another object,
+		// junk, ...).
+		var trailing json.RawMessage
+		if err := dec.Decode(&trailing); err != io.EOF {
+			return c, path, fmt.Errorf("%s: must contain exactly one JSON object", path)
+		}
+		// A top-level `null`, or `null` for a non-nullable setting, decodes
+		// into &c above with no error (encoding/json leaves a non-pointer
+		// struct field unchanged for a null literal), silently keeping
+		// defaults. Re-parse into a raw map to reject both explicitly: a
+		// nil map means the top-level value was null (or not an object,
+		// already rejected by the strict Decode above), and any raw field
+		// value that is exactly the null literal names a null setting.
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil || raw == nil {
+			return c, path, fmt.Errorf("%s: must be a JSON object, not null", path)
+		}
+		for key, v := range raw {
+			if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return c, path, fmt.Errorf("%s: %q must not be null", path, key)
+			}
 		}
 	}
 	if err := c.validate(); err != nil {

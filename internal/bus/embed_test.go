@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus-local/internal/config"
 )
@@ -226,6 +228,8 @@ func TestDeleteMemoryRemovesEmbedding(t *testing.T) {
 func TestEmbedBatchSkipsSeqTombstonedDuringHTTPCall(t *testing.T) {
 	reached := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(reached)
 		<-release
@@ -240,6 +244,11 @@ func TestEmbedBatchSkipsSeqTombstonedDuringHTTPCall(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	defer srv.Close()
+	// Guarantee the handler unblocks even if an assertion below fails
+	// (t.Fatal) before the normal release point below: deferred LIFO, this
+	// runs BEFORE srv.Close (which waits for in-flight requests), so a
+	// failure path cannot hang the test forever.
+	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
 	b.CreateChannel(sam, "mem", "memory")
@@ -263,12 +272,21 @@ func TestEmbedBatchSkipsSeqTombstonedDuringHTTPCall(t *testing.T) {
 		n, err := b.embedBatch(context.Background())
 		done <- result{n, err}
 	}()
-	<-reached // the batch's HTTP call is now blocked mid-flight
+	select { // the batch's HTTP call is now blocked mid-flight
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedBatch's HTTP call never reached the handler")
+	}
 	if err := b.DeleteMemory(sam, *c.MemoryID, ""); err != nil {
 		t.Fatal(err)
 	}
-	close(release)
-	r := <-done
+	releaseHandler()
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedBatch did not return after the handler was released")
+	}
 	if r.err != nil || r.n != 0 {
 		t.Fatalf("expected 0 inserted for a seq tombstoned mid-call, got n=%d err=%v", r.n, r.err)
 	}

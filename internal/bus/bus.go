@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,12 +71,38 @@ func (b *Bus) lockKey(sender, key string) func() {
 	return mu.Unlock
 }
 
+// SQLiteDSN builds the "file:" URI DSN for the agentbus.db file inside
+// dataDir, using net/url so a directory name containing '?', '#', or '%'
+// (which change a naively-concatenated DSN's meaning: '?' starts query
+// parameters, '#' a fragment) is properly percent-encoded into the URI's
+// path component instead. Exported so tests that open the same on-disk
+// file directly (bypassing Open) build an identical, correct DSN. The
+// connection parameters (_txlock, _pragma...) are fixed and go in
+// RawQuery verbatim: modernc.org/sqlite parses each _pragma value as a
+// literal "PRAGMA ..." statement via url.ParseQuery, which treats "(" and
+// ")" as ordinary query characters, so they must not be escaped here.
+func SQLiteDSN(dataDir string) (string, error) {
+	path := filepath.Join(dataDir, "agentbus.db")
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	u := url.URL{
+		Scheme:   "file",
+		Path:     abs,
+		RawQuery: "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
+	}
+	return u.String(), nil
+}
+
 func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o700); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(cfg.DataDirectory, "agentbus.db")
-	dsn := "file:" + path + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -103,9 +130,24 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+	// A6: user_version records the schema this database was created with.
+	// Read it first so an older binary opening a database a newer binary
+	// already stamped fails loudly instead of silently running against a
+	// schema it doesn't understand; only a fresh (0) database gets stamped.
+	var uv int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
 		db.Close()
 		return nil, err
+	}
+	switch {
+	case uv > schemaVersion:
+		db.Close()
+		return nil, fmt.Errorf("database schema version %d is newer than this binary supports (schema version %d)", uv, schemaVersion)
+	case uv == 0:
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	owner, err := randomToken()
 	if err != nil {

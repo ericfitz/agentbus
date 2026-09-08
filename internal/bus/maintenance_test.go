@@ -2,10 +2,13 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -175,6 +178,54 @@ func TestCapacitySweepOnlyWhenOverBudget(t *testing.T) {
 	}
 }
 
+// A5: evictToBudget's sweep loop must also stop when ctx is done, not only
+// when the wall-clock deadline passes; otherwise Tick on a canceled ctx (a
+// client disconnect mid-sweep) still runs a full chunk-and-vacuum cycle
+// before the next deadline check catches it. A canceled ctx with a distant
+// deadline and data that would otherwise require a multi-chunk sweep to
+// reach target must make evictToBudget return immediately, deleting
+// nothing, rather than relying on timing to observe "mid-sweep".
+func TestEvictToBudgetStopsPromptlyWhenCtxDone(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	const total = 3000 // several cleanupChunk(1000)-sized chunks
+	tx, err := b.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < total; i++ {
+		if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,'ctx',?,'','x',1)",
+			sam, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	b.budgetOverride = 1 // unreachable target: an unbounded sweep would evict everything
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // done before the sweep starts, standing in for "canceled mid-sweep"
+
+	start := time.Now()
+	if err := b.evictToBudget(ctx, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("evictToBudget with a done ctx took %v, want < 1s", elapsed)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE channel='dev'").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != total {
+		t.Fatalf("evictToBudget must not delete anything once ctx is done: %d of %d rows remain", n, total)
+	}
+}
+
 // T10.2: every cleanup statement deletes at most cleanupChunk rows per
 // transaction. Exercise deleteChunk directly, the primitive shared by the
 // stale-sessions and receipts Tick steps.
@@ -322,11 +373,18 @@ func TestTickDoesNotReapSubscriptionsBeforeReceiveReportsExpiry(t *testing.T) {
 // shutdown does not race the goroutine into a closed DB.
 func TestCloseWaitsForBackgroundEmbedding(t *testing.T) {
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-release
 		w.WriteHeader(500)
 	}))
 	defer srv.Close()
+	// Guarantee the handler unblocks even if an assertion below fails
+	// (t.Fatal) before the normal release point: deferred LIFO, this runs
+	// BEFORE srv.Close (which waits for in-flight requests), so a failure
+	// path cannot hang the test forever.
+	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
 	b.CreateChannel(sam, "mem", "memory")
@@ -343,12 +401,68 @@ func TestCloseWaitsForBackgroundEmbedding(t *testing.T) {
 		t.Fatal("Close returned before the background embedding pass finished")
 	case <-time.After(50 * time.Millisecond):
 	}
-	close(release)
+	releaseHandler()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close did not return after the background pass finished")
 	}
+}
+
+// A4: Tick's embeddings step must not run concurrently with a background
+// embedSoon pass (they can otherwise both call the embedding endpoint for
+// overlapping batches, doubling HTTP cost for no benefit). With a blocked
+// fake endpoint, trigger embedSoon then Tick and assert only one request
+// reaches the handler while it's held open.
+func TestTickSkipsEmbeddingsWhileEmbedSoonHoldsEmbedMu(t *testing.T) {
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		close(reached)
+		<-release
+		var req struct {
+			Input []string `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		var data []map[string]any
+		for i := range req.Input {
+			data = append(data, map[string]any{"index": i, "embedding": []float64{1, 0, 0}})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer srv.Close()
+	defer releaseHandler()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+
+	// Hold embedMu while sending so Send's own embedSoon call no-ops; the
+	// explicit embedSoon call below is then the one holding embedMu for the
+	// blocked HTTP call.
+	b.embedMu.Lock()
+	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"}); err != nil {
+		t.Fatal(err)
+	}
+	b.embedMu.Unlock()
+
+	b.embedSoon()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedSoon's HTTP call never reached the handler")
+	}
+
+	b.Tick(context.Background())
+	if n := reqCount.Load(); n != 1 {
+		t.Fatalf("Tick must not call the embedding endpoint while embedSoon holds embedMu: request count = %d, want 1", n)
+	}
+
+	releaseHandler()
+	b.waitEmbed() // let embedSoon's goroutine finish before the test ends
 }
 
 func TestLeaseAllowsOneProcess(t *testing.T) {

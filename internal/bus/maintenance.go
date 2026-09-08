@@ -30,12 +30,11 @@ func (b *Bus) takeLease() bool {
 }
 
 // Tick runs one maintenance pass if this process holds the lease. Every
-// step is bounded by a context carrying the tick's wall-clock deadline: SQL
-// statements stay non-context (a lease renewal or a single chunk can still
-// block up to busy_timeout, at most one statement's wait past the deadline,
-// which is harmless since every step is idempotent), but the HTTP embedding
-// call honors the deadline via ctx and loopChunks checks ctx.Err() between
-// chunks.
+// step is bounded by a context carrying the tick's wall-clock deadline, but
+// SQL statements stay non-context: the deadline is enforced between chunks
+// and for HTTP; SQL lock waits and incremental_vacuum may overrun it,
+// bounded per statement by busy_timeout, which is harmless since every step
+// is idempotent.
 func (b *Bus) Tick(ctx context.Context) {
 	if !b.takeLease() {
 		return
@@ -77,12 +76,22 @@ func (b *Bus) Tick(ctx context.Context) {
 				return int(n), nil
 			})
 		}},
-		{"capacity", func() error { return b.evictToBudget(deadline) }},
+		{"capacity", func() error { return b.evictToBudget(tickCtx, deadline) }},
 		{"vacuum", func() error {
 			_, err := b.db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumPages))
 			return err
 		}},
 		{"embeddings", func() error {
+			// embedSoon (the post-write immediate pass) takes embedMu before
+			// running embedBatch in the background; without the same lock
+			// here, Tick and a concurrent embedSoon pass can both call the
+			// embedding endpoint for the same batch at once, doubling HTTP
+			// cost for no benefit (A4). A skipped tick pass is harmless:
+			// embedSoon or the next tick picks up the same backlog.
+			if !b.embedMu.TryLock() {
+				return nil
+			}
+			defer b.embedMu.Unlock()
 			// ponytail: embedBatch retries the same first-64 batch forever if one
 			// text is permanently rejected by the endpoint (e.g. malformed
 			// content). Upgrade path: mark per-row failures so a bad row is
@@ -186,8 +195,11 @@ func (b *Bus) budget() int64 {
 // evictToBudget deletes ordinary messages oldest-first, then sets or clears
 // the capacity notice. A sweep only starts once usage exceeds budget itself
 // (not merely the lower target it sweeps down to); notice clearing runs
-// independently of whether a sweep ran at all.
-func (b *Bus) evictToBudget(deadline time.Time) error {
+// independently of whether a sweep ran at all. The sweep loop also checks
+// ctx (A5): looping on the wall-clock deadline alone means a caller whose
+// ctx is canceled mid-sweep (Tick on client disconnect) still runs up to a
+// full chunk-and-vacuum cycle before the deadline check catches it.
+func (b *Bus) evictToBudget(ctx context.Context, deadline time.Time) error {
 	budget := b.budget()
 	target := budget - budget*int64(b.cfg.CleanupFreePercent)/100
 	u, err := b.Usage()
@@ -195,7 +207,7 @@ func (b *Bus) evictToBudget(deadline time.Time) error {
 		return err
 	}
 	if u > budget {
-		for time.Now().Before(deadline) {
+		for ctx.Err() == nil && time.Now().Before(deadline) {
 			if u <= target {
 				break
 			}
@@ -239,7 +251,7 @@ func (b *Bus) checkCapacity() error {
 	if u <= b.budget() {
 		return nil
 	}
-	if err := b.evictToBudget(time.Now().Add(2 * time.Second)); err != nil {
+	if err := b.evictToBudget(context.Background(), time.Now().Add(2*time.Second)); err != nil {
 		return internal(err)
 	}
 	u, err = b.Usage()

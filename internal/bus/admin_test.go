@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
@@ -118,7 +119,11 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 		n, err := b.embedBatch(context.Background())
 		done <- result{n, err}
 	}()
-	<-reached // the batch's HTTP call for first.Seq is now blocked mid-flight
+	select { // the batch's HTTP call for first.Seq is now blocked mid-flight
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedBatch's HTTP call never reached the handler")
+	}
 
 	admin, err := Open(b.cfg, b.log)
 	if err != nil {
@@ -151,7 +156,12 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 	}
 
 	releaseHandler()
-	r := <-done
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedBatch did not return after the handler was released")
+	}
 	if r.err != nil {
 		t.Fatal(r.err)
 	}

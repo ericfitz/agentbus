@@ -44,6 +44,38 @@ func TestRejectsOutOfRange(t *testing.T) {
 	}
 }
 
+func TestRejectsTrailingObjectAfterConfig(t *testing.T) {
+	p := write(t, t.TempDir(), `{"log_level":"debug"}{"log_level":"error"}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
+		t.Fatalf("want trailing-object error, got %v", err)
+	}
+}
+
+func TestRejectsTrailingJunkAfterConfig(t *testing.T) {
+	p := write(t, t.TempDir(), `{"log_level":"debug"} garbage`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
+		t.Fatalf("want trailing-junk error, got %v", err)
+	}
+}
+
+func TestRejectsTopLevelNull(t *testing.T) {
+	p := write(t, t.TempDir(), `null`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "null") {
+		t.Fatalf("want top-level null rejected, got %v", err)
+	}
+}
+
+func TestRejectsNullField(t *testing.T) {
+	p := write(t, t.TempDir(), `{"sqlite_budget_mib": null}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "sqlite_budget_mib") || !strings.Contains(err.Error(), "null") {
+		t.Fatalf("want sqlite_budget_mib null rejected, got %v", err)
+	}
+}
+
 func TestRejectsEndpointWithoutModel(t *testing.T) {
 	p := write(t, t.TempDir(), `{"embedding_endpoint": "http://localhost:11434/v1/embeddings"}`)
 	_, _, err := Load(p)

@@ -25,7 +25,10 @@ Example enabling semantic memory search through a local Ollama:
 ```
 
 Embeddings are optional and off by default. With no `embedding_endpoint` set,
-nothing leaves the machine. For a remote provider add
+Agentbus's own embedding traffic makes no network calls (a configured
+`inspection_command` is a separate feature and can still reach the network on
+its own). For a remote provider, set `embedding_endpoint` and
+`embedding_model` to that provider's values and add
 `"embedding_api_key_file": "~/.keys/VOYAGE_API_KEY"`. The file may be a bare
 key or a one-line `export NAME='value'`; its contents are never logged.
 
@@ -80,7 +83,12 @@ every later call.
 [mcp_servers.agentbus]
 command = "agentbus"
 args = ["mcp"]
+tool_timeout_sec = 300
 ```
+
+`tool_timeout_sec` must stay above `receive_max_wait_seconds` (see
+[Configuration](#configuration-optional)) or a long `receive` wait gets cut
+off by Codex before Agentbus itself would have returned.
 
 Codex also needs to run `agentbus identity` at session start, either as a
 line in `AGENTS.md` or as a `$CODEX_HOME/hooks.json` SessionStart hook:
@@ -94,7 +102,12 @@ prompt, or start Codex with `--dangerously-bypass-hook-trust`, or the hook
 never fires.
 
 Codex spawns a separate `agentbus mcp` process per thread, including subagent
-threads; each registers on its own, so no `parent`/`as` handoff is needed.
+threads; each registers on its own, so there's no single shared connection to
+inherit an `as` from the way Claude Code subagents do. Each thread must still
+call `register` itself and pass its own returned `as` on every later call; if
+you want a subagent thread's display name to show its parent, its prompt
+must tell it the parent's name to pass as `parent` on `register`, since a
+separate process has no other way to learn it.
 
 ## Operating
 
@@ -114,9 +127,11 @@ threads; each registers on its own, so no `parent`/`as` handoff is needed.
 ## Limits worth knowing
 
 - `register`'s `context` is capped at 1 KiB and `parent` at 512 bytes.
-- An idle subscription is reaped, and reported as expired, the next time its
-  owner calls `receive` or re-registers, not by the periodic background
-  maintenance tick.
+- An idle subscription is reaped, and reported as expired, the next time
+  its owner calls `receive`. Re-registering also reaps any idle
+  subscription for that name, but drops it silently instead of reporting
+  it. The periodic background maintenance tick does not reap subscriptions
+  itself.
 - A single record larger than `result_default_kib` is still delivered on its
   own rather than dropped; only the fixed 4 MiB hard ceiling is never
   exceeded.

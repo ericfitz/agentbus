@@ -55,6 +55,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ericfitz/agentbus-local/internal/bus"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )
@@ -92,7 +93,10 @@ func callOK(t *testing.T, p *proc, name string, args map[string]any) string {
 // internal state (lease/session owner tokens) no tool exposes.
 func openDirectDB(t *testing.T, dir string) *sql.DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(dir, "agentbus.db") + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	dsn, err := bus.SQLiteDSN(dir)
+	if err != nil {
+		t.Fatalf("build direct db dsn: %v", err)
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open direct db: %v", err)
@@ -282,8 +286,9 @@ func gapsOf(r map[string]any) []any {
 // live sends on the same channel, and proves a subscriber whose cursor
 // falls behind the evicted boundary gets gap notices that, together with
 // the old-content messages it received before eviction caught up, account
-// for every seq in the pre-eviction backlog exactly once - then delivery of
-// only the surviving (live) messages, in seq order, with no duplicates.
+// for every seq in the pre-eviction backlog (a coverage union that
+// tolerates overlap - see below) - then delivery of only the surviving
+// (live) messages, in seq order, with no duplicates.
 //
 // Chunked eviction commits its 1,000-row chunks back-to-back with no
 // ordering guarantee against a concurrent poll: a poll landing between two
@@ -291,8 +296,10 @@ func gapsOf(r map[string]any) []any {
 // delivery of already-evicted-boundary-adjacent survivors from the second
 // in the very same response (or several such interleavings). So "coverage"
 // here is not "the first gap spans everything" but a set: every seq in
-// (primedCursor, nOld] must be accounted for, exactly once, by either a gap
-// notice or a delivered old- message - see the covered map below. At least
+// (primedCursor, nOld] must be accounted for by either a gap notice or a
+// delivered old- message - see the covered map below (the union allows a
+// seq to be covered more than once, e.g. by both a gap and a redelivered
+// message for an overlapping range). At least
 // one real gap notice must occur (delivery alone must not satisfy
 // coverage), and the aged rows must actually have been deleted from the
 // table by the end (a direct-SQL check), so coverage cannot be satisfied
@@ -314,8 +321,9 @@ func gapsOf(r map[string]any) []any {
 // backlog before eviction ever runs). A redelivered response's gaps are
 // still recorded (a fresh signal: the gap check runs unconditionally on the
 // live cursor, independent of pending state), but its messages are not
-// reprocessed - they are byte-identical to what a prior, non-redelivered
-// response for the same batch already recorded.
+// reprocessed - they were already recorded on their first delivery, and
+// retention can evict a pending row before a redelivery ever happens, so a
+// redelivered batch is not guaranteed identical to what was first recorded.
 //
 // Coverage marking is a plain idempotent union (covered[seq] = true, never
 // an error to set twice): a gap can legitimately reclaim part of a range

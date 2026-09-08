@@ -145,7 +145,7 @@ func wrapSchemaErrorsInEnvelope(next mcp.MethodHandler) mcp.MethodHandler {
 		}
 		envelope, marshalErr := json.Marshal(map[string]any{
 			"code":      "validation",
-			"message":   tc.Text,
+			"message":   bus.TruncateErrorMessage(tc.Text),
 			"retryable": false,
 		})
 		if marshalErr != nil {

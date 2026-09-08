@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ericfitz/agentbus-local/internal/config"
@@ -76,6 +77,70 @@ func TestReopenKeepsData(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatal("data lost on reopen")
+	}
+}
+
+// TestDataDirWithURIMetacharactersOpensAndStaysIsolated reproduces F2: a
+// data directory name containing '?', '#', or '%' must not change the
+// SQLite DSN's meaning (a naive "file:"+path concatenation lets '?' start
+// query parameters and '#' start a fragment), and two such directories
+// must remain distinct databases.
+func TestDataDirWithURIMetacharactersOpensAndStaysIsolated(t *testing.T) {
+	base := t.TempDir()
+	dirA := filepath.Join(base, "proj?a#b%c")
+	dirB := filepath.Join(base, "proj?x#y%z")
+	openAt := func(dir string) *Bus {
+		t.Helper()
+		cfg := config.Default()
+		cfg.DataDirectory = dir
+		cfg.Path = filepath.Join(dir, "config.json")
+		b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatalf("open %q: %v", dir, err)
+		}
+		t.Cleanup(func() { b.Close() })
+		return b
+	}
+	a := openAt(dirA)
+	bb := openAt(dirB)
+
+	aSam := reg(t, a, "Sam")
+	a.CreateChannel(aSam, "dev", "ordinary")
+	if _, err := a.Send(aSam, SendInput{Channel: "dev", Content: "only in a"}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := bb.db.QueryRow("SELECT count(*) FROM messages").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("dirB sees dirA's data: n=%d (directories are not isolated)", n)
+	}
+	if err := a.db.QueryRow("SELECT count(*) FROM messages").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("dirA lost its own write: n=%d", n)
+	}
+}
+
+// TestOpenRejectsNewerSchemaVersion is the A6 forward-compat guard: an
+// older binary opening a database a newer binary already stamped with a
+// higher user_version must fail loudly instead of silently running
+// against a schema it doesn't understand.
+func TestOpenRejectsNewerSchemaVersion(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.db.Exec("PRAGMA user_version = 99"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := b.cfg
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+		t.Fatal("Open must reject a database with a newer schema version")
+	} else if !strings.Contains(err.Error(), "99") {
+		t.Fatalf("error must name the found schema version, got %v", err)
 	}
 }
 

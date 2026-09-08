@@ -44,23 +44,33 @@ type Message struct {
 
 const messageColumns = "seq, channel, sender, context, created_at, type, content, reply_to, metadata, refs, memory_id, revision"
 
+// decodeJSONFields unmarshals the metadata/refs JSON columns (NULL as nil)
+// into m, shared by scanMessages and search's dedicated row scan.
+func decodeJSONFields(m Message, meta, refs *string) (Message, error) {
+	if meta != nil {
+		if err := json.Unmarshal([]byte(*meta), &m.Metadata); err != nil {
+			return m, err
+		}
+	}
+	if refs != nil {
+		if err := json.Unmarshal([]byte(*refs), &m.Refs); err != nil {
+			return m, err
+		}
+	}
+	return m, nil
+}
+
 func scanMessages(rows *sql.Rows) ([]Message, error) {
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		var meta, refs sql.NullString
+		var meta, refs *string
 		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision); err != nil {
 			return nil, err
 		}
-		if meta.Valid {
-			if err := json.Unmarshal([]byte(meta.String), &m.Metadata); err != nil {
-				return nil, err
-			}
-		}
-		if refs.Valid {
-			if err := json.Unmarshal([]byte(refs.String), &m.Refs); err != nil {
-				return nil, err
-			}
+		m, err := decodeJSONFields(m, meta, refs)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, m)
 	}
@@ -282,14 +292,20 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	return msgs, nil
 }
 
-// trimBytes keeps whole records up to limit bytes, always at least one.
-func trimBytes(msgs []Message, limit int) []Message {
+// trimToBytes keeps whole items up to limit bytes as measured by size, always
+// at least one. Shared by trimBytes (messages) and search's SearchHit paging.
+func trimToBytes[T any](items []T, size func(T) int, limit int) []T {
 	total := 0
-	for i, m := range msgs {
-		total += envelopeBytes(m)
+	for i, it := range items {
+		total += size(it)
 		if total > limit && i > 0 {
-			return msgs[:i]
+			return items[:i]
 		}
 	}
-	return msgs
+	return items
+}
+
+// trimBytes keeps whole records up to limit bytes, always at least one.
+func trimBytes(msgs []Message, limit int) []Message {
+	return trimToBytes(msgs, envelopeBytes, limit)
 }

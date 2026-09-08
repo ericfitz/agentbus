@@ -111,6 +111,35 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 	}
 }
 
+// T10.4: Register(resume=true) must drop this name's idle-expired
+// subscriptions before listing pending channels, since the tick no longer
+// reaps them itself.
+func TestRegisterResumePurgesExpiredSubscriptions(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "dev", "ordinary")
+	if err := b.Subscribe(sam, "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Duration(b.cfg.CursorIdleHours+1) * time.Hour) }
+	r, err := b.Register("Sam", "", "repo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range r.Pending {
+		if p.Channel == "dev" {
+			t.Fatalf("expired subscription must not appear as pending: %+v", r.Pending)
+		}
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=? AND channel='dev'", sam).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("expired subscription row must be deleted on resume")
+	}
+}
+
 func TestDiscoverListsLiveSessions(t *testing.T) {
 	b := newTestBus(t)
 	b.Register("Sam", "", "tmi", true)

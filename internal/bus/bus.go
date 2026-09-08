@@ -93,7 +93,14 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	return b, nil
 }
 
-func (b *Bus) Close() error { return b.db.Close() }
+// Close waits for any in-flight background embedSoon pass to finish before
+// closing the database, so that goroutine never runs its final query against
+// an already-closed *sql.DB.
+func (b *Bus) Close() error {
+	b.embedMu.Lock()
+	defer b.embedMu.Unlock()
+	return b.db.Close()
+}
 
 func (b *Bus) nowMs() int64 { return b.Now().UnixMilli() }
 

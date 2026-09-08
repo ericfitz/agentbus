@@ -75,6 +75,15 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=?", display); err != nil {
 			return Registration{}, internal(err)
 		}
+	} else {
+		// The tick no longer reaps idle subscriptions itself (that would erase
+		// the evidence Receive needs to report them as expired), so a resuming
+		// registration must drop its own idle-expired ones before listing
+		// pending channels, or an expired subscription would show up as pending.
+		idle := int64(b.cfg.CursorIdleHours) * 3_600_000
+		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND last_activity < ?", display, now-idle); err != nil {
+			return Registration{}, internal(err)
+		}
 	}
 	rows, err := tx.Query(`SELECT s.channel,
 	  (SELECT count(*) FROM messages m WHERE m.channel=s.channel AND m.seq>s.cursor_seq AND m.tombstone=0 AND m.sender<>s.sender)

@@ -151,6 +151,21 @@ func (b *Bus) senderContext(as string) (string, error) {
 	return c, nil
 }
 
+// receiptResult unmarshals a stored receipt result back into a SendResult.
+func receiptResult(raw json.RawMessage) (SendResult, error) {
+	var res SendResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return SendResult{}, internal(err)
+	}
+	return res, nil
+}
+
+// Temporary stubs for hooks that later tasks replace: Task 10 (checkCapacity,
+// embedSoon), Task 11 (inspect).
+func (b *Bus) inspect(kind, as string, payload any) error { return nil }
+func (b *Bus) checkCapacity() error                       { return nil }
+func (b *Bus) embedSoon()                                 {}
+
 func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := b.auth(as); err != nil {
 		return SendResult{}, err
@@ -159,25 +174,64 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err != nil {
 		return SendResult{}, err
 	}
-	context, err := b.senderContext(as)
-	if err != nil {
-		return SendResult{}, internal(err)
+	key := in.IdempotencyKey
+	in.IdempotencyKey = ""
+
+	// Cheap read-only replay check before paying for the hook/capacity work below.
+	if prev, hit, err := b.checkReceipt(b.db, as, key, in); err != nil {
+		return SendResult{}, err
+	} else if hit {
+		return receiptResult(prev)
 	}
+
+	if err := b.inspect("send", as, in); err != nil {
+		return SendResult{}, err
+	}
+	if err := b.checkCapacity(); err != nil {
+		return SendResult{}, err
+	}
+
 	tx, err := b.db.Begin()
 	if err != nil {
 		return SendResult{}, internal(err)
 	}
 	defer tx.Rollback()
-	seq, err := b.insertMessage(tx, as, context, in, kind)
+
+	// Re-check inside the transaction: closes the race where two sends with the
+	// same key both passed the read-only check above concurrently.
+	if prev, hit, err := b.checkReceipt(tx, as, key, in); err != nil {
+		return SendResult{}, err
+	} else if hit {
+		return receiptResult(prev)
+	}
+
+	// Charge the rate limit only for a send that has cleared the hook and
+	// capacity checks and is about to be accepted; a receipt replay never
+	// reaches this line, so replays are free.
+	if !b.limits.allow(as, envelopeBytes(Message{Content: in.Content, Metadata: in.Metadata, Refs: in.Refs}), b.Now()) {
+		return SendResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
+	}
+
+	context, err := b.senderContext(as)
 	if err != nil {
 		return SendResult{}, internal(err)
 	}
-	if err := tx.Commit(); err != nil {
+	seq, err := b.insertMessage(tx, as, context, in, kind)
+	if err != nil {
 		return SendResult{}, internal(err)
 	}
 	res := SendResult{Seq: seq}
 	if kind == "memory" {
 		res.MemoryID = &seq
+	}
+	if err := b.storeReceipt(tx, as, key, in, res); err != nil {
+		return SendResult{}, internal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return SendResult{}, internal(err)
+	}
+	if kind == "memory" {
+		b.embedSoon()
 	}
 	return res, nil
 }

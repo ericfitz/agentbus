@@ -270,6 +270,14 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
 
+	// Serialize concurrent calls sharing this (sender, key) so two racing
+	// retries can't both miss the receipt check below and both run the
+	// inspection hook before either commits (I3). Released on every return
+	// path through commit.
+	if key != "" {
+		defer b.lockKey(as, key)()
+	}
+
 	// Cheap read-only replay check before any mutable-state lookup (R2): a
 	// keyed retry must replay its stored result even if the channel or
 	// reply_to it named has since been evicted, rather than failing not_found.

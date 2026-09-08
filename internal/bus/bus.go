@@ -35,10 +35,39 @@ type Bus struct {
 	embedder *embedder
 	embedMu  sync.Mutex
 
+	// hookMu serializes inspection hook runs within this process (spec:
+	// "serial within a process, concurrent across processes"). Held only
+	// across a hook's own Start..Wait, never while a DB transaction is open.
+	hookMu sync.Mutex
+	// keyLocks serializes operations sharing the same (sender, idempotency
+	// key) process-local, keyed by lockKey, so two concurrent calls with an
+	// identical key cannot both miss the receipt check and both run the
+	// inspection hook before either commits.
+	keyLocks sync.Map // string -> *sync.Mutex
+
 	budgetOverride int64 // tests only
-	// inspectCalls counts calls to the inspect hook stub (tests only).
-	// atomic: Send/Edit/Delete run concurrently in production.
+	// inspectCalls counts calls to the inspect hook (tests only). atomic:
+	// Send/Edit/Delete run concurrently in production.
 	inspectCalls atomic.Int64
+}
+
+// lockKey returns an unlock func for the process-local critical section
+// shared by all keyed Send/EditMemory/DeleteMemory calls for (sender, key).
+// The operation kind is deliberately not part of the key: two different
+// operations reusing the same idempotency key must still serialize, so the
+// resulting fingerprint conflict (receipts.go) is found after one commits,
+// not raced. Callers acquire it before their preflight receipt read and
+// release (via defer) on every return path through commit.
+//
+// ponytail: entries in keyLocks are never removed, so it grows with the
+// number of distinct (sender, key) pairs a process ever sees. Add reference
+// counting if a long-running process sees enough distinct keys for this to
+// matter; receipts themselves already expire after receipt_retention_minutes.
+func (b *Bus) lockKey(sender, key string) func() {
+	v, _ := b.keyLocks.LoadOrStore(sender+"\x00"+key, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {

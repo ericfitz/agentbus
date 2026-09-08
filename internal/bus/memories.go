@@ -80,6 +80,14 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
 
+	// Serialize concurrent calls sharing this (sender, key) so two racing
+	// retries can't both miss the receipt check below and both run the
+	// inspection hook before either commits (I3). Released on every return
+	// path through commit.
+	if key != "" {
+		defer b.lockKey(as, key)()
+	}
+
 	// Cheap read-only replay check before any mutable-state lookup (R2): a
 	// keyed retry must replay its stored result even if the memory it named
 	// has since been deleted, rather than failing not_found.
@@ -203,6 +211,14 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 		return err
 	}
 	payload := map[string]any{"delete": id}
+
+	// Serialize concurrent calls sharing this (sender, key) so two racing
+	// retries can't both miss the receipt check below and both run the
+	// inspection hook before either commits (I3). Released on every return
+	// path through commit.
+	if key != "" {
+		defer b.lockKey(as, key)()
+	}
 
 	// Cheap read-only replay check before paying for the hook work below. A
 	// stored (empty) result means this delete already committed.

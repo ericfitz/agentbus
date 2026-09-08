@@ -118,3 +118,13 @@ func TestReceiveWaitsThenReturnsEmpty(t *testing.T) {
 		t.Fatalf("%+v %v %v", r, err, time.Since(start))
 	}
 }
+
+func TestReceiveWaitSecondsClampedNotRejected(t *testing.T) {
+	b, _, kim := setupTwo(t)
+	b.cfg.ReceiveMaxWaitSeconds = 1
+	start := time.Now()
+	r, err := b.Receive(kim, ReceiveInput{WaitSeconds: 999})
+	if err != nil || len(r.Messages) != 0 || time.Since(start) < 900*time.Millisecond || time.Since(start) > 3*time.Second {
+		t.Fatalf("over-cap wait must be clamped, not rejected: %+v %v %v", r, err, time.Since(start))
+	}
+}

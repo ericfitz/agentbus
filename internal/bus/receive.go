@@ -85,8 +85,11 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 	if in.Count > b.cfg.ReceiveMaxCount {
 		in.Count = b.cfg.ReceiveMaxCount
 	}
-	if in.WaitSeconds < 0 || in.WaitSeconds > b.cfg.ReceiveMaxWaitSeconds {
-		return ReceiveResult{}, errf("validation", false, "wait_seconds must be between 0 and %d", b.cfg.ReceiveMaxWaitSeconds)
+	if in.WaitSeconds < 0 {
+		return ReceiveResult{}, errf("validation", false, "wait_seconds must not be negative")
+	}
+	if in.WaitSeconds > b.cfg.ReceiveMaxWaitSeconds {
+		in.WaitSeconds = b.cfg.ReceiveMaxWaitSeconds
 	}
 	// Wall-clock deadline: b.Now may be a test clock that does not advance.
 	deadline := time.Now().Add(time.Duration(in.WaitSeconds) * time.Second)

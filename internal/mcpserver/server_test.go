@@ -1,12 +1,15 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus-local/internal/bus"
 	"github.com/ericfitz/agentbus-local/internal/config"
@@ -100,5 +103,63 @@ func TestMissingAsIsValidationError(t *testing.T) {
 	text := res.Content[0].(*mcp.TextContent).Text
 	if !strings.Contains(text, "validation") {
 		t.Fatalf("missing as must be a validation error, got %s", text)
+	}
+}
+
+// TestBackgroundLoopsStopBeforeCallerCanCloseSafely covers fix round 1
+// finding 1: Run must wait for the heartbeat and tick goroutines to exit
+// before closing the bus, or an in-flight call can run against a closed
+// bus. startBackgroundLoops is exercised directly (Run itself blocks on
+// stdio, which isn't testable in-process) with a fast heartbeat interval so
+// several heartbeats actually fire while the loop is running.
+func TestBackgroundLoopsStopBeforeCallerCanCloseSafely(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.CleanupIntervalSeconds = 5 // long enough not to fire during this test
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	b, err := bus.Open(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := startBackgroundLoops(ctx, b, cfg, log, 3*time.Millisecond)
+	time.Sleep(20 * time.Millisecond) // let several heartbeats actually run
+	cancel()
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("wg.Wait did not return after cancel; a background goroutine leaked")
+	}
+
+	// Only safe to close now that wg.Wait has confirmed both loops exited.
+	if err := b.Close(); err != nil {
+		t.Fatalf("close after wg.Wait failed: %v", err)
+	}
+	if strings.Contains(buf.String(), "heartbeat failed") {
+		t.Fatalf("a heartbeat ran against the closed bus: %s", buf.String())
+	}
+}
+
+func TestDefaultContextFallsBackAndLogsOnGetwdError(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	got := defaultContextFor("", errors.New("boom"), log)
+	if got != "." {
+		t.Fatalf(`want ".", got %q`, got)
+	}
+	if !strings.Contains(buf.String(), "boom") {
+		t.Fatalf("expected the Getwd error to be logged, got %q", buf.String())
+	}
+}
+
+func TestDefaultContextUsesCwdBasenameWhenNoError(t *testing.T) {
+	got := defaultContextFor("/foo/bar", nil, nil)
+	if got != "bar" {
+		t.Fatalf("want bar, got %q", got)
 	}
 }

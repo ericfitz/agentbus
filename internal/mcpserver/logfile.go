@@ -40,6 +40,10 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 		if err := w.f.Close(); err != nil {
 			return 0, err
 		}
+		// Clear the handle now: if a rename or remove below fails and we
+		// return early, the next Write must reopen w.path rather than
+		// write through this now-closed *os.File.
+		w.f = nil
 		for i := w.keep - 1; i >= 1; i-- {
 			if err := os.Rename(fmt.Sprintf("%s.%d", w.path, i), fmt.Sprintf("%s.%d", w.path, i+1)); err != nil && !os.IsNotExist(err) {
 				return 0, err

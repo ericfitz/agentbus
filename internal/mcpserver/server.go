@@ -4,9 +4,11 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ericfitz/agentbus-local/internal/bus"
@@ -96,9 +98,28 @@ func result(v any, err error) (*mcp.CallToolResult, any, error) {
 
 // NewServer registers every tool on a server without a transport.
 func NewServer(b *bus.Bus, cfg config.Config) *mcp.Server {
+	return newServer(b, cfg, nil)
+}
+
+// defaultContextFor computes register's default context from os.Getwd's
+// result. On error it falls back to "." explicitly and, when log is
+// non-nil, logs a warning naming the error.
+func defaultContextFor(cwd string, err error, log *slog.Logger) string {
+	if err != nil {
+		if log != nil {
+			log.Warn("os.Getwd failed; defaulting register context to \".\"", "err", err)
+		}
+		return "."
+	}
+	return filepath.Base(cwd)
+}
+
+// newServer is NewServer plus an optional logger, used by Run so a Getwd
+// failure is recorded in the log instead of silently defaulting.
+func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "agentbus", Version: Version}, nil)
-	cwd, _ := os.Getwd()
-	defaultContext := filepath.Base(cwd)
+	cwd, err := os.Getwd()
+	defaultContext := defaultContextFor(cwd, err, log)
 
 	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
@@ -178,9 +199,33 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 	ctx, cancel := context.WithCancel(ctx)
+	// wg.Wait must run after cancel() but before b.Close(): otherwise a
+	// Heartbeat or Tick in flight when the client disconnects can execute
+	// against a closed bus. Defers run LIFO, so registering wg.Wait before
+	// cancel's defer makes cancel fire first, then wg.Wait, then the
+	// b.Close deferred above.
+	wg := startBackgroundLoops(ctx, b, cfg, log, 10*time.Second)
+	defer wg.Wait()
 	defer cancel()
+	log.Info("agentbus mcp started", "version", Version, "config", cfg.Path, "data", cfg.DataDirectory)
+	err = newServer(b, cfg, log).Run(ctx, &mcp.StdioTransport{})
+	if err != nil {
+		log.Error("server run failed", "err", err)
+	}
+	return err
+}
+
+// startBackgroundLoops starts the heartbeat and maintenance-tick goroutines
+// and returns a WaitGroup that completes once both have exited. Both loops
+// exit promptly when ctx is canceled; the caller must wg.Wait() after
+// canceling ctx and before closing b, or an in-flight Heartbeat/Tick call
+// can run against a closed bus.
+func startBackgroundLoops(ctx context.Context, b *bus.Bus, cfg config.Config, log *slog.Logger, heartbeatEvery time.Duration) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		t := time.NewTicker(10 * time.Second)
+		defer wg.Done()
+		t := time.NewTicker(heartbeatEvery)
 		defer t.Stop()
 		for {
 			select {
@@ -194,6 +239,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 	go func() {
+		defer wg.Done()
 		interval := time.Duration(cfg.CleanupIntervalSeconds) * time.Second
 		select {
 		case <-ctx.Done():
@@ -209,10 +255,5 @@ func Run(ctx context.Context, cfg config.Config) error {
 			}
 		}
 	}()
-	log.Info("agentbus mcp started", "version", Version, "config", cfg.Path, "data", cfg.DataDirectory)
-	err = NewServer(b, cfg).Run(ctx, &mcp.StdioTransport{})
-	if err != nil {
-		log.Error("server run failed", "err", err)
-	}
-	return err
+	return &wg
 }

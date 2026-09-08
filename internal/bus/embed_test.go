@@ -57,6 +57,7 @@ func newEmbedBus(t *testing.T, endpoint string) *Bus {
 	os.WriteFile(keyFile, []byte("export VOYAGE_API_KEY='sk-test'\n"), 0o600)
 	cfg := config.Default()
 	cfg.DataDirectory = dir
+	cfg.Path = filepath.Join(dir, "config.json")
 	cfg.EmbeddingEndpoint = endpoint
 	cfg.EmbeddingModel = "fake-1"
 	cfg.EmbeddingAPIKeyFile = keyFile
@@ -99,11 +100,23 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	b.Send(sam, SendInput{Channel: "mem", Content: "violets are blue"})
 	b.Send(sam, SendInput{Channel: "mem", Content: "git rebase"})
 	b.Send(sam, SendInput{Channel: "dev", Content: "roses are red"}) // ordinary: never embedded
-	n, err := b.embedBatch(context.Background())
-	if err != nil || n != 3 {
-		t.Fatalf("n=%d err=%v", n, err)
+	// embedSoon runs a background pass per memory Send above; wait for any
+	// in-flight pass before asserting, and assert on the committed total
+	// rather than this call's own n, since the background pass may have
+	// already embedded some or all of the rows.
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatalf("err=%v", err)
 	}
-	if n, _ = b.embedBatch(context.Background()); n != 0 {
+	var embedded int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
+		t.Fatal(err)
+	}
+	if embedded != 3 {
+		t.Fatalf("embedded=%d", embedded)
+	}
+	b.waitEmbed()
+	if n, _ := b.embedBatch(context.Background()); n != 0 {
 		t.Fatal("second pass must find nothing")
 	}
 	r, err := b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic"})
@@ -117,8 +130,15 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	// Two identical-content memories tie on score; the order must be stable
 	// across calls (tie-break on seq), not whatever an unstable sort emits.
 	b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
-	if n, err = b.embedBatch(context.Background()); err != nil || n != 1 {
-		t.Fatalf("expected to embed the duplicate, n=%d err=%v", n, err)
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatalf("expected to embed the duplicate: %v", err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
+		t.Fatal(err)
+	}
+	if embedded != 4 {
+		t.Fatalf("embedded=%d", embedded)
 	}
 	first, _ := b.Search(sam, SearchInput{Query: "roses are red", Mode: "semantic"})
 	second, _ := b.Search(sam, SearchInput{Query: "roses are red", Mode: "semantic"})
@@ -133,7 +153,8 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	// Model change: old rows orphaned and re-embedded.
 	b.cfg.EmbeddingModel = "fake-2"
 	b.embedder.model = "fake-2"
-	if n, _ = b.embedBatch(context.Background()); n != 4 {
+	b.waitEmbed()
+	if n, _ := b.embedBatch(context.Background()); n != 4 {
 		t.Fatalf("model change must re-embed, got %d", n)
 	}
 	var stale int

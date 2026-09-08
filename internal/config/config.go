@@ -35,6 +35,9 @@ type Config struct {
 	EmbeddingModel           string   `json:"embedding_model"`
 	EmbeddingAPIKeyFile      string   `json:"embedding_api_key_file"`
 	LogLevel                 string   `json:"log_level"`
+
+	// Path is the config file that was loaded (or would have been). Not a setting.
+	Path string `json:"-"`
 }
 
 func Default() Config {
@@ -113,6 +116,7 @@ func Load(path string) (Config, string, error) {
 	if d := os.Getenv("AGENTBUS_DATA_DIR"); d != "" {
 		c.DataDirectory = d
 	}
+	c.Path = path
 	return c, path, nil
 }
 

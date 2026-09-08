@@ -3,6 +3,7 @@ package bus
 import (
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/ericfitz/agentbus-local/internal/config"
@@ -13,6 +14,7 @@ func newTestBus(t *testing.T) *Bus {
 	t.Helper()
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
 	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ericfitz/agentbus-local/internal/config"
@@ -31,6 +32,9 @@ type Bus struct {
 
 	limits   *limiter
 	embedder *embedder
+	embedMu  sync.Mutex
+
+	budgetOverride int64 // tests only
 }
 
 func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {

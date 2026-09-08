@@ -170,11 +170,8 @@ func receiptResult(raw json.RawMessage) (SendResult, error) {
 	return res, nil
 }
 
-// Temporary stubs for hooks that later tasks replace: Task 10 (checkCapacity,
-// embedSoon), Task 11 (inspect).
+// Temporary stub for a hook that a later task replaces: Task 11 (inspect).
 func (b *Bus) inspect(kind, as string, payload any) error { return nil }
-func (b *Bus) checkCapacity() error                       { return nil }
-func (b *Bus) embedSoon()                                 {}
 
 func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := b.auth(as); err != nil {

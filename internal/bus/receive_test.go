@@ -207,3 +207,90 @@ func TestReceiveAckOfOutOfFilterPendingDoesNotLeakIntoNewSelection(t *testing.T)
 		t.Fatalf("dev must not have gotten a new pending pair from an ops-filtered call: %q", pending)
 	}
 }
+
+// Redelivery must reapply the current call's include_own filter rather than
+// dropping it: own messages ahead of an external one in seq order must not
+// crowd the external message out from under the byte ceiling.
+func TestReceiveRedeliveryAppliesCurrentOwnFilterAndNeverSkipsExternal(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ResultDefaultKiB = 1
+	for i := 0; i < 5; i++ {
+		b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
+	}
+	b.Send(sam, SendInput{Channel: "dev", Content: "external"})
+	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
+	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "external" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	r2, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "external" {
+		t.Fatalf("redelivery must reapply the own filter and still show the external message: %+v %v", r2, err)
+	}
+	r3, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch})
+	if err != nil || len(r3.Messages) != 0 {
+		t.Fatalf("ack after redelivery must leave nothing skipped: %+v %v", r3, err)
+	}
+}
+
+// A redelivery that the 4 MiB ceiling genuinely trims must re-stamp
+// pending_end_seq to what it actually showed, so a later ack cannot skip an
+// undisclosed tail. Rows are inserted directly (not via Send) to build a
+// multi-megabyte backlog without the send rate limiter rejecting the burst.
+func TestReceiveRedeliveryReStampsPendingEndSeqWhenTrimmed(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	big := string(make([]byte, 200*1024)) // 200 KiB each; ~30 exceeds the 4 MiB ceiling
+	tx, err := b.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 29; i++ {
+		if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,?,?,?,?,?)",
+			kim, "test", b.nowMs(), "", big, len(big)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,?,?,?,?,?)",
+		sam, "test", b.nowMs(), "", "external", 8); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Creation: own filter off excludes kim's 29 rows, so only "external"
+	// qualifies and pending_end_seq is pinned to just that one row.
+	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
+	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "external" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	// Redelivery with include_own now true: the bound (pending_end_seq) still
+	// covers all 30 rows, and the 29 now-unfiltered ~200 KiB own rows exceed
+	// the 4 MiB ceiling before reaching "external" (last by seq).
+	r2, err := b.Receive(kim, ReceiveInput{IncludeOwn: true})
+	if err != nil || !r2.Redelivered || len(r2.Messages) == 0 {
+		t.Fatalf("%+v %v", r2, err)
+	}
+	for _, m := range r2.Messages {
+		if m.Content == "external" {
+			t.Fatalf("test setup invalid: external message was not actually trimmed out")
+		}
+	}
+	lastShown := r2.Messages[len(r2.Messages)-1].Seq
+	var pendingEnd int64
+	if err := b.db.QueryRow("SELECT pending_end_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&pendingEnd); err != nil {
+		t.Fatal(err)
+	}
+	if pendingEnd != lastShown {
+		t.Fatalf("pending_end_seq must be re-stamped to what was actually shown: got %d want %d", pendingEnd, lastShown)
+	}
+	if _, err := b.Receive(kim, ReceiveInput{Ack: r2.Batch, IncludeOwn: true}); err != nil {
+		t.Fatal(err)
+	}
+	var cursor int64
+	if err := b.db.QueryRow("SELECT cursor_seq FROM subscriptions WHERE sender=? AND channel='dev'", kim).Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
+	if cursor != lastShown {
+		t.Fatalf("ack must advance only to what was shown, never past the undisclosed tail: cursor=%d want %d", cursor, lastShown)
+	}
+}

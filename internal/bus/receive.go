@@ -237,10 +237,20 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			inScope = append(inScope, s)
 		}
 	}
-	// buildBounded reproduces exactly "the same batch": the seq range fixed at
-	// creation, with no count/own re-filtering from the current call — those
-	// belong only to new selection (in.Count and in.IncludeOwn can differ
-	// between the original delivery and this redelivery).
+	// own applies the CURRENT call's include_own preference to both queries.
+	// The original batch's own-filter setting at creation is not stored, so
+	// redelivery cannot reproduce it exactly; reapplying the current one is
+	// safe because it can only add or drop the sender's OWN rows, never an
+	// external one, whereas dropping the filter entirely (as redelivery
+	// briefly did) let unfiltered own rows crowd an external message out of
+	// the byte ceiling below.
+	own := ""
+	if !in.IncludeOwn {
+		own = " AND sender<>?"
+	}
+	// buildBounded reproduces "the same batch": the seq range fixed at
+	// creation, with no count re-filtering from the current call (in.Count
+	// can differ between the original delivery and this redelivery).
 	buildBounded := func(set []subRow) (string, []any) {
 		var conds []string
 		var a []any
@@ -248,7 +258,10 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			conds = append(conds, "(channel=? AND seq>? AND seq<=?)")
 			a = append(a, s.channel, s.cursor, s.pendingEnd)
 		}
-		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0 ORDER BY seq"
+		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq"
+		if own != "" {
+			a = append(a, as)
+		}
 		return q, a
 	}
 	buildNew := func(set []subRow) (string, []any) {
@@ -257,10 +270,6 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		for _, s := range set {
 			conds = append(conds, "(channel=? AND seq>?)")
 			a = append(a, s.channel, s.cursor)
-		}
-		own := ""
-		if !in.IncludeOwn {
-			own = " AND sender<>?"
 		}
 		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq LIMIT ?"
 		if own != "" {
@@ -282,6 +291,27 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		res.Batch = pending[0].pendingToken
 		res.Redelivered = true
 		res.Instruction = fmt.Sprintf("This batch was delivered before and not acknowledged. Pass ack=%q on your next receive to advance past it.", res.Batch)
+		// Never let an ack of this token skip anything not actually shown here:
+		// re-stamp each channel's pending_end_seq to the highest seq actually
+		// redelivered (falling back to its cursor, i.e. nothing new, if this
+		// round shows it none at all), whether that's lower than before because
+		// the byte ceiling cut the tail or because the own filter now excludes
+		// rows it previously included.
+		shown := map[string]int64{}
+		for _, m := range res.Messages {
+			shown[m.Channel] = m.Seq
+		}
+		for _, s := range pending {
+			newEnd := shown[s.channel]
+			if newEnd == 0 {
+				newEnd = s.cursor
+			}
+			if newEnd != s.pendingEnd {
+				if _, err := tx.Exec("UPDATE subscriptions SET pending_end_seq=? WHERE sender=? AND channel=?", newEnd, as, s.channel); err != nil {
+					return res, internal(err)
+				}
+			}
+		}
 	case len(inScope) > 0:
 		q, a := buildNew(inScope)
 		msgs, err := queryMessages(tx, q, a)

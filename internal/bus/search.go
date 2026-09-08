@@ -167,7 +167,21 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	if len(page) > in.Count {
 		page = page[:in.Count]
 	}
-	page = trimToBytes(page, func(h SearchHit) int { return envelopeBytes(h.Message) }, b.cfg.ResultDefaultKiB*1024)
+	// Reserve the exact serialized size of SearchResult's non-record fields
+	// (C2): Next isn't known until after trimming (it depends on the final
+	// page length), so reserve against a max-length placeholder of the same
+	// digit width used elsewhere for an int64 cursor; SemanticUnavailable is
+	// a fixed-size bool.
+	placeholderNext := strings.Repeat("9", upperBoundSeqDigits)
+	reserve := marshalLen(SearchResult{Next: placeholderNext, SemanticUnavailable: res.SemanticUnavailable})
+	limit := min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes) - reserve
+	if limit > 0 {
+		page = trimToBytes(page, func(h SearchHit) int { return envelopeBytes(h.Message) }, limit)
+	} else {
+		// C2: the reserve alone exceeds the limit; return metadata only
+		// rather than fail.
+		page = []SearchHit{}
+	}
 	if offset+len(page) < len(ranked) {
 		res.Next = strconv.Itoa(offset + len(page))
 	}

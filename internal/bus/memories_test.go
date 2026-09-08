@@ -93,3 +93,38 @@ func TestMemoryRevisionsDeliverOnceWithCurrentContent(t *testing.T) {
 		t.Fatalf("later edit delivered at its own position: %+v", r.Messages)
 	}
 }
+
+// C1: an oversized edit must be rejected before the inspect hook or
+// checkCapacity ever run, for the same reason as an oversized send.
+func TestEditMemoryOversizedSkipsHookAndEviction(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "dev", "ordinary")
+	b.CreateChannel(sam, "mem", "memory")
+	fill(t, b, sam, "dev", 20, 2000)
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	b.inspectCalls = 0   // fill() and the seed Send above legitimately called the hook
+	b.budgetOverride = 1 // checkCapacity would evict everything it can, if reached
+	_, err = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: strings.Repeat("x", 65*1024)})
+	if err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("oversized edit must be rejected as validation: %v", err)
+	}
+	if b.inspectCalls != 0 {
+		t.Fatalf("oversized edit must not invoke the inspect hook: %d calls", b.inspectCalls)
+	}
+	var after int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("oversized edit must not trigger eviction: before=%d after=%d", before, after)
+	}
+}

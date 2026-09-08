@@ -222,6 +222,35 @@ func (b *Bus) senderContext(q queryRower, as string) (string, error) {
 	return c, nil
 }
 
+// sendEnvelope resolves the sender's owner-qualified context on q and
+// validates in's worst-case envelope size against max_message_kib (R4),
+// returning the context and size for the caller to reuse (inserting the
+// row, charging the rate limit). Called twice per write: once on b.db as a
+// preflight, before the inspect hook and checkCapacity run, so an oversized
+// input can never trigger either (C1); and again on the write tx as the
+// authoritative check, since context could change between the two.
+func (b *Bus) sendEnvelope(q queryRower, as string, in SendInput, memoryKind bool) (context string, size int, err error) {
+	context, err = b.senderContext(q, as)
+	if err != nil {
+		return "", 0, internal(err)
+	}
+	size = envelopeUpperBound(as, context, in, memoryKind)
+	if size > b.cfg.MaxMessageKiB*1024 {
+		return "", 0, errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
+	}
+	return context, size, nil
+}
+
+// marshalLen returns the serialized size of v. Used to compute an exact
+// reserve for a result's non-record fields (C2) so a byte ceiling covers
+// the whole serialized result, not just an approximate guess. Every caller
+// passes a value built entirely of strings, ints, bools, and slices of
+// those, so json.Marshal cannot fail.
+func marshalLen(v any) int {
+	j, _ := json.Marshal(v)
+	return len(j)
+}
+
 // receiptResult unmarshals a stored receipt result back into a SendResult.
 func receiptResult(raw json.RawMessage) (SendResult, error) {
 	var res SendResult
@@ -232,7 +261,11 @@ func receiptResult(raw json.RawMessage) (SendResult, error) {
 }
 
 // Temporary stub for a hook that a later task replaces: Task 11 (inspect).
-func (b *Bus) inspect(kind, as string, payload any) error { return nil }
+// inspectCalls lets tests assert the hook is (or isn't) reached (C1).
+func (b *Bus) inspect(kind, as string, payload any) error {
+	b.inspectCalls++
+	return nil
+}
 
 func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := b.auth(b.db, as); err != nil {
@@ -255,6 +288,14 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 
 	kind, err := b.validateSendRefs(in)
 	if err != nil {
+		return SendResult{}, err
+	}
+
+	// Preflight envelope-size gate (C1): must run before inspect and
+	// checkCapacity so an oversized input can never trigger the hook or
+	// inline eviction. Re-checked authoritatively on the write tx below,
+	// since context could change between here and there.
+	if _, _, err := b.sendEnvelope(b.db, as, in, kind == "memory"); err != nil {
 		return SendResult{}, err
 	}
 
@@ -286,17 +327,11 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 		return receiptResult(prev)
 	}
 
-	context, err := b.senderContext(tx, as)
+	// Authoritative envelope-size gate (R4/C1): same check as the preflight
+	// above, re-read on the write transaction.
+	context, size, err := b.sendEnvelope(tx, as, in, kind == "memory")
 	if err != nil {
-		return SendResult{}, internal(err)
-	}
-
-	// Authoritative envelope-size gate (R4): measured with the real sender,
-	// owner-qualified context, channel, and type, plus a fixed worst-case
-	// width for the fields SQLite/the clock assign at insert time.
-	size := envelopeUpperBound(as, context, in, kind == "memory")
-	if size > b.cfg.MaxMessageKiB*1024 {
-		return SendResult{}, errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
+		return SendResult{}, err
 	}
 
 	// Charge the rate limit only for a send that has cleared the hook and
@@ -374,24 +409,31 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	return msgs, nil
 }
 
-// trimFramingBytes and trimResultFramingBytes are generous, fixed allowances
-// for the JSON framing a trimmed result sits inside: trimFramingBytes covers
-// one record's own array punctuation (comma, whitespace), and
-// trimResultFramingBytes covers the enclosing result object's other fields
-// (batch, instruction, gaps, notice, next, search score, ...). Without them,
-// a limit measured only against record bodies can produce a serialized
-// result that exceeds the caller's actual byte ceiling (#27).
+// trimFramingBytes is a generous, fixed allowance for one record's own
+// array punctuation (comma, whitespace) in the enclosing JSON array.
+// trimHardCeilingBytes is the absolute cap on any trimmed result,
+// regardless of what limit a caller (or misconfiguration) asks for.
+//
+// Earlier this package also folded a blind, fixed per-result allowance into
+// trimToBytes itself for the enclosing result object's other fields (batch,
+// instruction, gaps, notice, next, ...). That is not generous enough: those
+// fields are variable length (e.g. one gap or expired-channel entry per
+// evicted/idle subscription), so a fixed guess can still under-reserve and
+// let a serialized result exceed the hard ceiling (C2). Every caller with
+// such fields now computes its own exact reserve — the real serialized size
+// of a placeholder result with Messages/Hits cleared — and subtracts it
+// from limit before calling trimToBytes (see receiveOnce, Search; History
+// returns a bare slice with no sibling fields, so its reserve is zero).
 const (
-	trimFramingBytes       = 32
-	trimResultFramingBytes = 512
-	// trimHardCeilingBytes is the absolute cap on any trimmed result,
-	// regardless of what limit a caller (or misconfiguration) asks for.
+	trimFramingBytes     = 32
 	trimHardCeilingBytes = 4 << 20
 )
 
 // trimToBytes keeps whole items up to limit bytes as measured by size plus
-// framing allowances, clamped to the 4 MiB hard ceiling. Shared by trimBytes
-// (messages) and search's SearchHit paging.
+// the per-record framing allowance, clamped to the 4 MiB hard ceiling.
+// Shared by trimBytes (messages) and search's SearchHit paging. limit must
+// already have any reserve for the caller's other result fields subtracted
+// (see the package comment above).
 //
 // The first item is always kept even if it alone exceeds the limit: a legal
 // max_message_kib record above result_default_kib must still be
@@ -399,7 +441,7 @@ const (
 // deliberate, not a bug.
 func trimToBytes[T any](items []T, size func(T) int, limit int) []T {
 	limit = min(limit, trimHardCeilingBytes)
-	total := trimResultFramingBytes
+	total := 0
 	for i, it := range items {
 		total += size(it) + trimFramingBytes
 		if total > limit && i > 0 {
@@ -410,6 +452,8 @@ func trimToBytes[T any](items []T, size func(T) int, limit int) []T {
 }
 
 // trimBytes keeps whole records up to limit bytes, always at least one.
+// History returns a bare []Message with no sibling result fields, so no
+// reserve is needed here (C2).
 func trimBytes(msgs []Message, limit int) []Message {
 	return trimToBytes(msgs, envelopeBytes, limit)
 }

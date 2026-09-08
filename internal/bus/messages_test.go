@@ -63,10 +63,10 @@ func TestHistoryBeforeKeepsRowsNearestCursor(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	b.CreateChannel(sam, "dev", "ordinary")
-	// Content sized so each envelope is ~197 bytes; with trimToBytes's fixed
-	// per-record and per-result framing allowance (#27), 2 fit in a 1 KiB
-	// page and 3 don't.
-	content := strings.Repeat("x", 100)
+	// Content sized so each envelope is ~397 bytes; with trimToBytes's
+	// per-record framing allowance (#27) and History's zero reserve (C2),
+	// 2 fit in a 1 KiB page and 3 don't.
+	content := strings.Repeat("x", 300)
 	for i := 1; i <= 5; i++ {
 		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: content}); err != nil {
 			t.Fatal(err)
@@ -155,5 +155,36 @@ func TestSendRejectsWhenContextPushesEnvelopeOverLimit(t *testing.T) {
 	b.CreateChannel(sam, "dev", "ordinary")
 	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "short"}); err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatalf("send must reject when the registered context pushes the envelope over max_message_kib: %v", err)
+	}
+}
+
+// C1: an oversized send must be rejected before the inspect hook or
+// checkCapacity ever run, so it can neither trigger the hook nor evict
+// ordinary messages to make room for a write that will be rejected anyway.
+func TestSendOversizedSkipsHookAndEviction(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "dev", "ordinary")
+	fill(t, b, sam, "dev", 20, 2000)
+	var before int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	b.inspectCalls = 0   // fill() above legitimately called the hook; only count from here
+	b.budgetOverride = 1 // checkCapacity would evict everything it can, if reached
+	_, err := b.Send(sam, SendInput{Channel: "dev", Content: strings.Repeat("x", 65*1024)})
+	if err == nil || !strings.Contains(err.Error(), "validation") {
+		t.Fatalf("oversized send must be rejected as validation: %v", err)
+	}
+	if b.inspectCalls != 0 {
+		t.Fatalf("oversized send must not invoke the inspect hook: %d calls", b.inspectCalls)
+	}
+	var after int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("oversized send must not trigger eviction: before=%d after=%d", before, after)
 	}
 }

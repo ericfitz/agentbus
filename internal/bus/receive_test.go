@@ -1,6 +1,8 @@
 package bus
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -339,5 +341,48 @@ func TestReceiveRedeliveryReStampsPendingEndSeqWhenAMessageIsTombstoned(t *testi
 	}
 	if opsCursorAfter != opsCursor {
 		t.Fatalf("ack must not move ops's cursor at all: got %d want %d", opsCursorAfter, opsCursor)
+	}
+}
+
+// C2: many expired subscriptions plus messages near the (small, scaled-down)
+// limit must not push the serialized ReceiveResult over its byte ceiling.
+// Expired channel names are variable length and, before this fix, were
+// covered only by a fixed 512-byte guess that a large enough expired list
+// could exceed on its own.
+func TestReceiveResultNeverExceedsLimitWithManyExpiredChannels(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ResultDefaultKiB = 4 // small and scaled so the test is fast
+
+	// Many long-idle subscriptions that will report as expired on this
+	// receive, each contributing a channel name to res.Expired. Subscriptions
+	// carry no FK to channels, so no channel row is needed for these.
+	idleMs := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("stale-channel-%030d", i) // ~45 bytes
+		if _, err := b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,0,?)", kim, name, b.nowMs()-idleMs); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A handful of messages near the (small) limit.
+	for i := 0; i < 8; i++ {
+		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Expired) != 20 {
+		t.Fatalf("expected 20 expired channels, got %d: %v", len(r.Expired), r.Expired)
+	}
+	j, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limit := b.cfg.ResultDefaultKiB * 1024; len(j) > limit {
+		t.Fatalf("serialized ReceiveResult exceeds its byte ceiling: %d > %d", len(j), limit)
 	}
 }

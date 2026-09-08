@@ -13,6 +13,13 @@ import (
 // "the same batch").
 const redeliveryHardCeilingBytes = 4 * 1024 * 1024
 
+// maxBatchTokenLen is the fixed length of every batch token: randomToken's
+// 24 hex characters plus the ":o0"/":o1" include_own suffix makeBatchToken
+// appends. Used as a placeholder when reserving space for a new-selection
+// token that hasn't been generated yet (C2) — a redelivery reuses an
+// existing token instead, so it never needs the placeholder.
+const maxBatchTokenLen = 24 + len(":o1")
+
 type ReceiveInput struct {
 	Ack         string   `json:"ack,omitempty"`
 	Count       int      `json:"count,omitempty"`
@@ -277,6 +284,12 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 	}
 
+	// The notice must be known before the reserve computation below (C2), so
+	// it's read here rather than after message selection as before.
+	if err := tx.QueryRow("SELECT message FROM notices WHERE kind='capacity'").Scan(&res.Notice); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return res, internal(err)
+	}
+
 	var pending, inScope []subRow
 	for _, s := range subs {
 		if s.pendingToken != "" {
@@ -326,23 +339,48 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		a = append(a, in.Count)
 		return q, a
 	}
-	limit := b.cfg.ResultDefaultKiB * 1024
+
+	// reserve returns the exact serialized size of the result this branch
+	// will return, with Messages cleared, so message selection can be
+	// trimmed against limit-reserve (C2): gaps, expired-channel names, the
+	// notice, and batch/instruction are all variable length and a fixed
+	// guess can under-reserve for them (e.g. many idle/evicted
+	// subscriptions in one call).
+	reserve := func(batch, instruction string, redelivered bool) int {
+		r := res
+		r.Messages = nil
+		r.Batch = batch
+		r.Instruction = instruction
+		r.Redelivered = redelivered
+		return marshalLen(r)
+	}
 
 	switch {
 	case len(pending) > 0:
+		// The redelivery token already exists at its final length, so no
+		// placeholder is needed for it, unlike the new-selection case below.
+		batch := pending[0].pendingToken
+		instruction := fmt.Sprintf("This batch was delivered before and not acknowledged. Pass ack=%q on your next receive to advance past it.", batch)
+		limit := redeliveryHardCeilingBytes - reserve(batch, instruction, true)
+		if limit <= 0 {
+			// C2: the reserve alone exceeds the hard ceiling (e.g. a huge
+			// batch of gaps/expired channels). Return metadata only, leaving
+			// the pending batch untouched for a later poll, rather than fail.
+			break
+		}
 		// Replay the ORIGINAL include_own the batch was created with, decoded
 		// from the shared token (all channels in one pending batch always
 		// share one token), not whatever this call's in.IncludeOwn happens to
 		// be: the caller cannot change what a batch already means.
-		q, a := buildBounded(pending, ownClause(tokenIncludesOwn(pending[0].pendingToken)))
+		q, a := buildBounded(pending, ownClause(tokenIncludesOwn(batch)))
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
 		}
-		res.Messages = trimBytes(msgs, redeliveryHardCeilingBytes)
-		res.Batch = pending[0].pendingToken
+		res.Messages = trimToBytes(msgs, envelopeBytes, limit)
+		res.Batch = batch
 		res.Redelivered = true
-		res.Instruction = fmt.Sprintf("This batch was delivered before and not acknowledged. Pass ack=%q on your next receive to advance past it.", res.Batch)
+		res.Instruction = instruction
 		// Never let an ack of this token skip anything not actually shown here:
 		// re-stamp each channel's pending_end_seq to the highest seq actually
 		// redelivered (falling back to its cursor, i.e. nothing new, if this
@@ -365,12 +403,22 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			}
 		}
 	case len(inScope) > 0:
+		// The real token doesn't exist yet (only generated below, once we
+		// know at least one message will be delivered), so reserve against a
+		// max-length placeholder of the same shape.
+		placeholderBatch := strings.Repeat("x", maxBatchTokenLen)
+		instruction := fmt.Sprintf("Pass ack=%q on your next receive to acknowledge this batch.", placeholderBatch)
+		limit := min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes) - reserve(placeholderBatch, instruction, false)
+		if limit <= 0 {
+			// C2: as above, return metadata only rather than fail.
+			break
+		}
 		q, a := buildNew(inScope)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
 		}
-		res.Messages = trimBytes(msgs, limit)
+		res.Messages = trimToBytes(msgs, envelopeBytes, limit)
 		if len(res.Messages) > 0 {
 			tok, err := makeBatchToken(in.IncludeOwn)
 			if err != nil {
@@ -388,9 +436,6 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			}
 			res.Instruction = fmt.Sprintf("Pass ack=%q on your next receive to acknowledge this batch.", res.Batch)
 		}
-	}
-	if err := tx.QueryRow("SELECT message FROM notices WHERE kind='capacity'").Scan(&res.Notice); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return res, internal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		return res, internal(err)

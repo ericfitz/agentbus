@@ -103,6 +103,14 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	}
 	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs}
 
+	// Preflight envelope-size gate (C1): must run before inspect and
+	// checkCapacity so an oversized input can never trigger the hook or
+	// inline eviction. Re-checked authoritatively on the write tx below,
+	// since context could change between here and there.
+	if _, _, err := b.sendEnvelope(b.db, as, send, true); err != nil {
+		return EditResult{}, err
+	}
+
 	if err := b.inspect("edit_memory", as, in); err != nil {
 		return EditResult{}, err
 	}
@@ -142,17 +150,11 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 		return EditResult{}, err
 	}
 
-	context, err := b.senderContext(tx, as)
+	// Authoritative envelope-size gate (R4/C1): same check as the preflight
+	// above, re-read on the write transaction.
+	context, size, err := b.sendEnvelope(tx, as, send, true)
 	if err != nil {
-		return EditResult{}, internal(err)
-	}
-
-	// Authoritative envelope-size gate (R4), measured with the real sender,
-	// owner-qualified context, channel, and type, plus a fixed worst-case
-	// width for the fields SQLite/the clock assign at insert time.
-	size := envelopeUpperBound(as, context, send, true)
-	if size > b.cfg.MaxMessageKiB*1024 {
-		return EditResult{}, errf("validation", false, "envelope exceeds max_message_kib (%d KiB)", b.cfg.MaxMessageKiB)
+		return EditResult{}, err
 	}
 
 	// Charge the rate limit only for an edit that has cleared the hook and

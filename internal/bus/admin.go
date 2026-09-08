@@ -1,6 +1,9 @@
 package bus
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
 // Status is the admin view of the whole bus: it does not require a
 // registration, unlike Discover/ListChannels.
@@ -85,15 +88,16 @@ func (b *Bus) StatusReport() (Status, error) {
 	if st.Channels, err = b.listChannels(b.db); err != nil {
 		return st, err
 	}
-	if err := b.db.QueryRow("SELECT message FROM notices WHERE kind='capacity'").Scan(&st.Notice); err != nil && err != sql.ErrNoRows {
+	if err := b.db.QueryRow("SELECT message FROM notices WHERE kind='capacity'").Scan(&st.Notice); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return st, internal(err)
 	}
-	model := ""
+	// No embedder configured means nothing is ever embedded, so "backlog"
+	// stays 0 rather than counting every live memory (which would happen if
+	// we queried with model="", since no embeddings row ever uses that key).
 	if b.embedder != nil {
-		model = b.embedder.model
-	}
-	if err := b.db.QueryRow("SELECT count(*) FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq AND e.model=? WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL", model).Scan(&st.EmbeddingBacklog); err != nil {
-		return st, internal(err)
+		if err := b.db.QueryRow("SELECT count(*) FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq AND e.model=? WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL", b.embedder.model).Scan(&st.EmbeddingBacklog); err != nil {
+			return st, internal(err)
+		}
 	}
 	return st, nil
 }
@@ -101,13 +105,17 @@ func (b *Bus) StatusReport() (Status, error) {
 // Reset wipes every table in one transaction. The file is never unlinked, so
 // a live process sees its session row gone and fails its next auth with
 // not_registered on its own; Reset never touches running processes directly.
+// sqlite_sequence (messages.seq's AUTOINCREMENT counter) is deliberately
+// left alone: seq must stay monotonic across a reset, or another process's
+// in-flight embedding HTTP call — keyed only by seq — could land its old
+// vector on whatever new message reuses that now-recycled seq number.
 func (b *Bus) Reset() error {
 	tx, err := b.db.Begin()
 	if err != nil {
 		return internal(err)
 	}
 	defer tx.Rollback()
-	for _, t := range []string{"embeddings", "messages", "subscriptions", "sessions", "channels", "receipts", "notices", "sqlite_sequence"} {
+	for _, t := range []string{"embeddings", "messages", "subscriptions", "sessions", "channels", "receipts", "notices"} {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 			return internal(err)
 		}

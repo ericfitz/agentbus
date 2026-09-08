@@ -59,6 +59,48 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	}
 }
 
+// TestIdentityWarnsOnMalformedOrInvalidIdentity covers the minor fold-in:
+// a malformed/unreadable identity file, or an identity failing the name
+// rule, must warn (not silently ignore) and fall back to the next level.
+func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "myrepo")
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	os.MkdirAll(filepath.Join(root, ".local"), 0o755)
+	identityPath := filepath.Join(root, ".local", "agentbus.json")
+
+	// Malformed JSON: warn and fall back to the repo basename.
+	os.WriteFile(identityPath, []byte(`{not json`), 0o600)
+	var out, warn bytes.Buffer
+	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name myrepo\n" {
+		t.Fatalf("%q %v", out.String(), err)
+	}
+	if warn.Len() == 0 {
+		t.Fatal("malformed identity file must warn")
+	}
+
+	// Identity value fails the name rule (contains '/'): warn and fall back.
+	os.WriteFile(identityPath, []byte(`{"identity": "a/b"}`), 0o600)
+	out.Reset()
+	warn.Reset()
+	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name myrepo\n" {
+		t.Fatalf("%q %v", out.String(), err)
+	}
+	if warn.Len() == 0 {
+		t.Fatal("invalid identity name must warn")
+	}
+
+	// A valid identity produces no warning.
+	os.WriteFile(identityPath, []byte(`{"identity": "Sam"}`), 0o600)
+	out.Reset()
+	warn.Reset()
+	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name Sam\n" {
+		t.Fatalf("%q %v", out.String(), err)
+	}
+	if warn.Len() != 0 {
+		t.Fatalf("valid identity must not warn, got %q", warn.String())
+	}
+}
+
 func TestResetRequiresYes(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()

@@ -20,6 +20,18 @@ const redeliveryHardCeilingBytes = 4 * 1024 * 1024
 // existing token instead, so it never needs the placeholder.
 const maxBatchTokenLen = 24 + len(":o1")
 
+// maxNoticesPerReceive bounds how many Expired and Gaps entries (each,
+// independently) one receive call reports. Without a bound, a sender with
+// enough idle or evicted-behind subscriptions could make the metadata alone
+// (channel names up to 128 bytes each, per validateName) approach or exceed
+// the 4 MiB hard ceiling, entirely independent of any message (C2). Expiry
+// deletes and gap cursor advances apply ONLY to the reported subset; the
+// remainder are left untouched (still idle, still gapped) to surface on a
+// later call. Subscriptions are always processed in channel-name order (the
+// loading query is ORDER BY channel), so which ones get reported first is
+// deterministic.
+const maxNoticesPerReceive = 256
+
 type ReceiveInput struct {
 	Ack         string   `json:"ack,omitempty"`
 	Count       int      `json:"count,omitempty"`
@@ -220,7 +232,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			continue
 		}
 		if last < now-idle {
-			res.Expired = append(res.Expired, s.channel)
+			// C2: cap how many get reported (and thus reaped, below); past
+			// the cap, leave the subscription alone so it can still not be
+			// delivered to (it's genuinely idle) without inflating this
+			// call's metadata. It surfaces again on a later call.
+			if len(res.Expired) < maxNoticesPerReceive {
+				res.Expired = append(res.Expired, s.channel)
+			}
 			continue
 		}
 		subs = append(subs, s)
@@ -270,6 +288,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			return res, internal(err)
 		}
 		if subs[i].cursor < evicted-1 {
+			// C2: cap how many gaps get reported (and their cursors
+			// advanced) per call; past the cap, leave the cursor where it
+			// is so the gap surfaces again on a later call rather than
+			// inflating this call's metadata.
+			if len(res.Gaps) >= maxNoticesPerReceive {
+				continue
+			}
 			res.Gaps = append(res.Gaps, Gap{Channel: subs[i].channel, From: subs[i].cursor + 1, To: evicted - 1})
 			subs[i].cursor = evicted - 1
 			if _, err := tx.Exec("UPDATE subscriptions SET cursor_seq=? WHERE sender=? AND channel=?", subs[i].cursor, as, subs[i].channel); err != nil {
@@ -437,6 +462,19 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			res.Instruction = fmt.Sprintf("Pass ack=%q on your next receive to acknowledge this batch.", res.Batch)
 		}
 	}
+
+	// Hard-cap safety net (C2): by construction this can never fire.
+	// Expired/Gaps are bounded to maxNoticesPerReceive each (~128-byte
+	// channel names, per validateName), and every branch above trims
+	// messages against limit = (4 MiB or result_default_kib) - the exact
+	// reserve for everything else in res, so the largest single legal
+	// envelope (max_message_kib ≤ 1024 KiB, enforced by config validation)
+	// always has room. If some future change breaks one of those
+	// invariants, fail loudly rather than ship a result over the ceiling.
+	if n := marshalLen(res); n > trimHardCeilingBytes {
+		return res, internal(fmt.Errorf("serialized receive result of %d bytes exceeds the %d byte hard ceiling", n, trimHardCeilingBytes))
+	}
+
 	if err := tx.Commit(); err != nil {
 		return res, internal(err)
 	}

@@ -111,14 +111,14 @@ func TestEditMemoryOversizedSkipsHookAndEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b.inspectCalls = 0   // fill() and the seed Send above legitimately called the hook
-	b.budgetOverride = 1 // checkCapacity would evict everything it can, if reached
+	b.inspectCalls.Store(0) // fill() and the seed Send above legitimately called the hook
+	b.budgetOverride = 1    // checkCapacity would evict everything it can, if reached
 	_, err = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: strings.Repeat("x", 65*1024)})
 	if err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatalf("oversized edit must be rejected as validation: %v", err)
 	}
-	if b.inspectCalls != 0 {
-		t.Fatalf("oversized edit must not invoke the inspect hook: %d calls", b.inspectCalls)
+	if n := b.inspectCalls.Load(); n != 0 {
+		t.Fatalf("oversized edit must not invoke the inspect hook: %d calls", n)
 	}
 	var after int
 	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&after); err != nil {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ericfitz/agentbus-local/internal/config"
@@ -35,7 +36,9 @@ type Bus struct {
 	embedMu  sync.Mutex
 
 	budgetOverride int64 // tests only
-	inspectCalls   int   // tests only: counts calls to the inspect hook stub
+	// inspectCalls counts calls to the inspect hook stub (tests only).
+	// atomic: Send/Edit/Delete run concurrently in production.
+	inspectCalls atomic.Int64
 }
 
 func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {

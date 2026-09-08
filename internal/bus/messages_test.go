@@ -171,14 +171,14 @@ func TestSendOversizedSkipsHookAndEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b.inspectCalls = 0   // fill() above legitimately called the hook; only count from here
-	b.budgetOverride = 1 // checkCapacity would evict everything it can, if reached
+	b.inspectCalls.Store(0) // fill() above legitimately called the hook; only count from here
+	b.budgetOverride = 1    // checkCapacity would evict everything it can, if reached
 	_, err := b.Send(sam, SendInput{Channel: "dev", Content: strings.Repeat("x", 65*1024)})
 	if err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatalf("oversized send must be rejected as validation: %v", err)
 	}
-	if b.inspectCalls != 0 {
-		t.Fatalf("oversized send must not invoke the inspect hook: %d calls", b.inspectCalls)
+	if n := b.inspectCalls.Load(); n != 0 {
+		t.Fatalf("oversized send must not invoke the inspect hook: %d calls", n)
 	}
 	var after int
 	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&after); err != nil {

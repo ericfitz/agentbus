@@ -263,7 +263,7 @@ func receiptResult(raw json.RawMessage) (SendResult, error) {
 // Temporary stub for a hook that a later task replaces: Task 11 (inspect).
 // inspectCalls lets tests assert the hook is (or isn't) reached (C1).
 func (b *Bus) inspect(kind, as string, payload any) error {
-	b.inspectCalls++
+	b.inspectCalls.Add(1)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -349,34 +350,46 @@ func TestReceiveRedeliveryReStampsPendingEndSeqWhenAMessageIsTombstoned(t *testi
 // Expired channel names are variable length and, before this fix, were
 // covered only by a fixed 512-byte guess that a large enough expired list
 // could exceed on its own.
+// seedExpired inserts n long-idle subscriptions for as, directly via SQL, so
+// they report as expired on the next receive. Subscriptions carry no FK to
+// channels, so no channel row is needed for these.
+func seedExpired(t *testing.T, b *Bus, as string, n int, nameFmt string) {
+	t.Helper()
+	idleMs := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf(nameFmt, i)
+		if _, err := b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,0,?)", as, name, b.nowMs()-idleMs); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// C2: many candidate messages plus enough expired channels to force real
+// trimming (not just pass because too little data was offered) must still
+// produce a serialized result within the configured byte ceiling.
 func TestReceiveResultNeverExceedsLimitWithManyExpiredChannels(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	b.cfg.ResultDefaultKiB = 4 // small and scaled so the test is fast
 
-	// Many long-idle subscriptions that will report as expired on this
-	// receive, each contributing a channel name to res.Expired. Subscriptions
-	// carry no FK to channels, so no channel row is needed for these.
-	idleMs := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
-	for i := 0; i < 20; i++ {
-		name := fmt.Sprintf("stale-channel-%030d", i) // ~45 bytes
-		if _, err := b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,0,?)", kim, name, b.nowMs()-idleMs); err != nil {
+	seedExpired(t, b, kim, 20, "stale-channel-%030d") // ~44 bytes each
+
+	// Enough candidate messages, each large enough, to comfortably exceed
+	// the 4 KiB budget on their own: real trimming must engage.
+	for i := 0; i < 40; i++ {
+		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: strings.Repeat("m", 200)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// A handful of messages near the (small) limit.
-	for i := 0; i < 8; i++ {
-		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	r, err := b.Receive(kim, ReceiveInput{})
+	r, err := b.Receive(kim, ReceiveInput{Count: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(r.Expired) != 20 {
 		t.Fatalf("expected 20 expired channels, got %d: %v", len(r.Expired), r.Expired)
+	}
+	if len(r.Messages) == 0 || len(r.Messages) >= 40 {
+		t.Fatalf("trimming must have engaged (some but not all candidate messages): got %d", len(r.Messages))
 	}
 	j, err := json.Marshal(r)
 	if err != nil {
@@ -384,5 +397,100 @@ func TestReceiveResultNeverExceedsLimitWithManyExpiredChannels(t *testing.T) {
 	}
 	if limit := b.cfg.ResultDefaultKiB * 1024; len(j) > limit {
 		t.Fatalf("serialized ReceiveResult exceeds its byte ceiling: %d > %d", len(j), limit)
+	}
+}
+
+// C2: when the (bounded) metadata reserve alone exceeds the configured soft
+// limit, receive must return no messages rather than exceed the limit — and
+// the metadata-only result must still comfortably respect the hard ceiling.
+func TestReceiveMetadataOnlyWhenReserveExceedsSoftLimit(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ResultDefaultKiB = 1 // 1 KiB: smaller than 20 expired names' reserve
+
+	seedExpired(t, b, kim, 20, "stale-channel-%030d")
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Expired) != 20 {
+		t.Fatalf("expected 20 expired channels, got %d", len(r.Expired))
+	}
+	if len(r.Messages) != 0 {
+		t.Fatalf("reserve alone exceeding the soft limit must yield no messages: got %d", len(r.Messages))
+	}
+	j, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j) > trimHardCeilingBytes {
+		t.Fatalf("metadata-only result must still respect the hard ceiling: %d > %d", len(j), trimHardCeilingBytes)
+	}
+}
+
+// C2: a legal max_message_kib-sized message must still be delivered even
+// when it alone exceeds a tiny soft limit (the documented first-record
+// exception), as long as the whole result still fits the hard ceiling.
+func TestReceiveKeepsFirstOversizedRecordWithinHardCeiling(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ResultDefaultKiB = 1 // tiny soft limit
+
+	big := strings.Repeat("m", (b.cfg.MaxMessageKiB-1)*1024) // leave margin for envelope overhead
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: big}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Messages) != 1 {
+		t.Fatalf("the first oversized-for-soft-limit record must still be kept: got %d messages", len(r.Messages))
+	}
+	j, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j) > trimHardCeilingBytes {
+		t.Fatalf("first-record exception must never exceed the hard ceiling: %d > %d", len(j), trimHardCeilingBytes)
+	}
+}
+
+// C2: Expired notices are bounded per call (maxNoticesPerReceive); the
+// remainder are left untouched as subscription rows and surface on a later
+// call, rather than inflating one call's metadata without limit.
+func TestReceiveBoundsExpiredNoticesPerCall(t *testing.T) {
+	b, _, kim := setupTwo(t)
+	const extra = 50
+	const n = maxNoticesPerReceive + extra
+	seedExpired(t, b, kim, n, "stale-%05d")
+
+	r1, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r1.Expired) != maxNoticesPerReceive {
+		t.Fatalf("first receive must report exactly the bound: got %d want %d", len(r1.Expired), maxNoticesPerReceive)
+	}
+	if r1.Expired[0] != "stale-00000" || r1.Expired[len(r1.Expired)-1] != fmt.Sprintf("stale-%05d", maxNoticesPerReceive-1) {
+		t.Fatalf("reported subset must be the lowest channel names in order: %s..%s", r1.Expired[0], r1.Expired[len(r1.Expired)-1])
+	}
+	var remaining int
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", kim).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if want := extra + 1; remaining != want { // +1 for the still-live "dev" subscription from setupTwo
+		t.Fatalf("unreported expired subscriptions must remain as rows: got %d want %d", remaining, want)
+	}
+
+	r2, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r2.Expired) != extra {
+		t.Fatalf("second receive must report the next batch: got %d want %d", len(r2.Expired), extra)
 	}
 }

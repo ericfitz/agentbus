@@ -1,6 +1,8 @@
 package bus
 
 import (
+	"context"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -173,9 +175,107 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	return res, nil
 }
 
-// rankedSearch is completed in Task 9. Until then semantic modes fall back to
-// text results with SemanticUnavailable set.
+// rankedSearch serves the semantic and both modes. If the embedder is unset or
+// the endpoint is unreachable, it falls back to text search and reports
+// unavailable=true.
 func (b *Bus) rankedSearch(in SearchInput) ([]SearchHit, bool, error) {
-	hits, err := b.textSearch(in, searchPageMax)
-	return hits, true, err
+	if b.embedder == nil {
+		hits, err := b.textSearch(in, searchPageMax)
+		return hits, true, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), embedQueryTimeout)
+	defer cancel()
+	sem, err := b.semanticSearch(ctx, in)
+	if err != nil {
+		b.log.Warn("semantic search unavailable", "err", err)
+		hits, terr := b.textSearch(in, searchPageMax)
+		return hits, true, terr
+	}
+	if in.Mode == "semantic" {
+		return sem, false, nil
+	}
+	text, err := b.textSearch(in, searchPageMax)
+	if err != nil {
+		return nil, false, err
+	}
+	return rrf(text, sem), false, nil
+}
+
+// semanticSearch ranks live memory revisions by dot product against the query
+// embedding, brute-force in Go over candidates selected by the SQL filters.
+func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, error) {
+	qv, err := b.embedder.embed(ctx, []string{in.Query})
+	if err != nil {
+		return nil, err
+	}
+	vecRows, err := b.db.Query("SELECT seq, vector FROM embeddings WHERE model=?", b.embedder.model)
+	if err != nil {
+		return nil, internal(err)
+	}
+	vectors := map[int64][]byte{}
+	for vecRows.Next() {
+		var seq int64
+		var vec []byte
+		if err := vecRows.Scan(&seq, &vec); err != nil {
+			vecRows.Close()
+			return nil, internal(err)
+		}
+		vectors[seq] = vec
+	}
+	if err := vecRows.Err(); err != nil {
+		vecRows.Close()
+		return nil, internal(err)
+	}
+	vecRows.Close()
+
+	filters, fargs := searchFilters(in)
+	q := "SELECT " + qualifiedColumns("m") + " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0 AND m.memory_id IS NOT NULL" + filters
+	rows, err := b.db.Query(q, append([]any{b.embedder.model}, fargs...)...)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer rows.Close()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, internal(err)
+	}
+	hits := make([]SearchHit, 0, len(msgs))
+	for _, m := range msgs {
+		vec, ok := vectors[m.Seq]
+		if !ok {
+			continue
+		}
+		hits = append(hits, SearchHit{Message: m, Score: dot(qv[0], decodeVec(vec))})
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > searchPageMax {
+		hits = hits[:searchPageMax]
+	}
+	return hits, nil
+}
+
+// rrf merges two rankings by reciprocal rank fusion (k=60).
+func rrf(text, sem []SearchHit) []SearchHit {
+	score := map[int64]float64{}
+	bySeq := map[int64]SearchHit{}
+	for _, list := range [][]SearchHit{text, sem} {
+		for rank, h := range list {
+			score[h.Seq] += 1 / float64(60+rank+1)
+			if _, ok := bySeq[h.Seq]; !ok {
+				bySeq[h.Seq] = h
+			}
+		}
+	}
+	out := make([]SearchHit, 0, len(bySeq))
+	for seq, h := range bySeq {
+		h.Score = score[seq]
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score == out[j].Score {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].Score > out[j].Score
+	})
+	return out
 }

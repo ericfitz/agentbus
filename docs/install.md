@@ -1,6 +1,16 @@
 # Installing Agentbus
 
-## Build
+## Homebrew (macOS)
+
+```sh
+brew install ericfitz/tap/agentbus
+```
+
+The formula installs a signed, notarized universal binary from the matching
+[GitHub release](https://github.com/ericfitz/agentbus/releases). Maintainers
+cut a release with `release/release.sh <tag>` from a tagged, clean checkout.
+
+## Build from source
 
 ```sh
 CGO_ENABLED=0 go build -o agentbus .

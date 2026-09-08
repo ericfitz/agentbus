@@ -282,17 +282,23 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 
 	// Gaps: cursor below the channel's retention boundary. Resume from the
 	// oldest survivor and drop a now-unreachable pending batch for that channel.
+	gapsDeferred := false
 	for i := range subs {
 		var evicted int64
 		if err := tx.QueryRow("SELECT evicted_before_seq FROM channels WHERE name=?", subs[i].channel).Scan(&evicted); err != nil {
 			return res, internal(err)
 		}
 		if subs[i].cursor < evicted-1 {
-			// C2: cap how many gaps get reported (and their cursors
+			// C2/C3: cap how many gaps get reported (and their cursors
 			// advanced) per call; past the cap, leave the cursor where it
 			// is so the gap surfaces again on a later call rather than
-			// inflating this call's metadata.
+			// inflating this call's metadata. gapsDeferred then suppresses
+			// ALL delivery below (C3): this subscription's survivors past
+			// the gap must not be delivered (and its pending state must not
+			// be touched) until its gap has actually been reported —
+			// otherwise a later ack could advance past the gap unreported.
 			if len(res.Gaps) >= maxNoticesPerReceive {
+				gapsDeferred = true
 				continue
 			}
 			res.Gaps = append(res.Gaps, Gap{Channel: subs[i].channel, From: subs[i].cursor + 1, To: evicted - 1})
@@ -381,6 +387,11 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	}
 
 	switch {
+	case gapsDeferred:
+		// C3: at least one gap notice couldn't be reported this call, so no
+		// message delivery or pending-batch write can safely happen this
+		// round either — see the comment on gapsDeferred above.
+		res.Instruction = "Some gap notices exceeded this call's limit; call receive again to see the rest before message delivery resumes."
 	case len(pending) > 0:
 		// The redelivery token already exists at its final length, so no
 		// placeholder is needed for it, unlike the new-selection case below.

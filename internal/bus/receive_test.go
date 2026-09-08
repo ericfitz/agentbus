@@ -494,3 +494,85 @@ func TestReceiveBoundsExpiredNoticesPerCall(t *testing.T) {
 		t.Fatalf("second receive must report the next batch: got %d want %d", len(r2.Expired), extra)
 	}
 }
+
+// C3: a gap deferred by the notice cap must not be silently lost. While any
+// gap notice is deferred, the call must return metadata only (no messages,
+// no new pending batch) so a client cannot ack past a survivor whose gap it
+// never saw. An unrelated ack processed in the same call (a prior pending
+// batch on another channel) must not interfere with that guarantee either.
+func TestReceiveDefersDeliveryWhileGapsExceedCap(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	kim := reg(t, b, "Kim")
+
+	// An unrelated pending batch, acked in the same call that first hits the
+	// gap cap below, to prove ack processing cannot bury a deferred gap.
+	b.CreateChannel(sam, "dev", "ordinary")
+	if err := b.Subscribe(kim, "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+	b.Send(sam, SendInput{Channel: "dev", Content: "unrelated"})
+	pending, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || pending.Batch == "" {
+		t.Fatalf("setup: expected a pending batch: %+v %v", pending, err)
+	}
+
+	// c256 gets a real gap (two evicted messages) plus a surviving message
+	// past it, subscribed before any of that happens so its cursor starts
+	// at 0.
+	b.CreateChannel(sam, "c256", "ordinary")
+	if err := b.Subscribe(kim, "c256", "now"); err != nil {
+		t.Fatal(err)
+	}
+	gone1, _ := b.Send(sam, SendInput{Channel: "c256", Content: "gone1"})
+	gone2, _ := b.Send(sam, SendInput{Channel: "c256", Content: "gone2"})
+	survivor, _ := b.Send(sam, SendInput{Channel: "c256", Content: "survivor"})
+	if _, err := b.db.Exec("DELETE FROM messages WHERE seq IN (?,?)", gone1.Seq, gone2.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("UPDATE channels SET evicted_before_seq=? WHERE name='c256'", survivor.Seq); err != nil {
+		t.Fatal(err)
+	}
+
+	// c000..c255: 256 more gapped subscriptions with no messages, so c256
+	// (lexicographically last) is the 257th and must be deferred.
+	for i := 0; i < 256; i++ {
+		name := fmt.Sprintf("c%03d", i)
+		if _, err := b.db.Exec("INSERT INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,'ordinary',0,5)", name); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,0,?)", kim, name, b.nowMs()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r1, err := b.Receive(kim, ReceiveInput{Ack: pending.Batch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r1.Gaps) != maxNoticesPerReceive {
+		t.Fatalf("first receive must report exactly the bound: got %d want %d", len(r1.Gaps), maxNoticesPerReceive)
+	}
+	if len(r1.Messages) != 0 || r1.Batch != "" {
+		t.Fatalf("deferred gaps must suppress delivery entirely: %+v", r1)
+	}
+	if r1.Instruction == "" {
+		t.Fatal("a deferred-gap result must explain why nothing was delivered")
+	}
+	for _, g := range r1.Gaps {
+		if g.Channel == "c256" {
+			t.Fatal("c256's gap must be deferred to a later call, not reported now")
+		}
+	}
+
+	r2, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r2.Gaps) != 1 || r2.Gaps[0].Channel != "c256" {
+		t.Fatalf("second receive must report the deferred gap: %+v", r2.Gaps)
+	}
+	if len(r2.Messages) != 1 || r2.Messages[0].Content != "survivor" {
+		t.Fatalf("survivor must be delivered once the gap backlog drains: %+v", r2.Messages)
+	}
+}

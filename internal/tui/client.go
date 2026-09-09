@@ -21,6 +21,7 @@ type client struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         *sync.WaitGroup
+	mu         sync.Mutex
 	subscribed map[string]bool
 }
 
@@ -56,14 +57,35 @@ func newClient(cfg config.Config, name string, log *slog.Logger) (*client, error
 
 // subscribe is idempotent per channel name.
 func (c *client) subscribe(ch bus.Channel, from string) error {
-	if c.subscribed[ch.Name] {
+	c.mu.Lock()
+	already := c.subscribed[ch.Name]
+	c.mu.Unlock()
+	if already {
 		return nil
 	}
 	if err := c.b.Subscribe(c.as, ch.Name, from); err != nil {
 		return err
 	}
+	c.mu.Lock()
 	c.subscribed[ch.Name] = true
+	c.mu.Unlock()
 	return nil
+}
+
+// isSubscribed reports whether ch is currently subscribed.
+func (c *client) isSubscribed(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.subscribed[name]
+}
+
+// forget drops the local record of a subscription (after Unsubscribe).
+//
+//nolint:unused // consumed by a later task (Unsubscribe flow)
+func (c *client) forget(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.subscribed, name)
 }
 
 // receiveLoop long-polls Receive, acking the previous batch each time, and

@@ -280,8 +280,6 @@ func (m Model) renderStatusBar() string {
 
 // overlay renders a titled, bordered box centred on the screen; the border
 // colour names the overlay (cyan search, magenta memories, green health).
-//
-//nolint:unused // consumed by Tasks 8-10
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w := min(max(m.width-8, 40), 100)
 	h := max(m.height-4, 10)
@@ -294,7 +292,6 @@ func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
-// Stubs replaced by Tasks 8-10.
-func (m Model) viewSearch() string   { return "" }
+// Stubs replaced by Tasks 9-10.
 func (m Model) viewMemories() string { return "" }
 func (m Model) viewHealth() string   { return "" }

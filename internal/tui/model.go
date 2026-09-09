@@ -83,7 +83,6 @@ type Model struct {
 
 // Placeholders until Tasks 9-10 define the real overlay state.
 type (
-	searchState struct{ semanticDown bool }
 	memState    struct{} //nolint:unused // consumed by Task 9
 	healthState struct{} //nolint:unused // consumed by Task 10
 )
@@ -210,6 +209,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sentMsg:
 		if msg.err != nil {
 			cmds = append(cmds, m.showToast("send: "+errText(msg.err)))
+		}
+	case searchMsg:
+		m.search.err = msg.err
+		m.search.ran = true
+		if msg.err == nil {
+			m.search.hits = msg.res.Hits
+			m.search.cursor = 0
+			m.search.textOnly = msg.res.SemanticUnavailable
+			if m.search.mode != "text" {
+				m.search.semanticDown = msg.res.SemanticUnavailable
+			}
 		}
 	}
 	switch m.mode {
@@ -645,11 +655,9 @@ func (m *Model) fitCompose() {
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
 
 // Stubs replaced by later tasks. Each returns nil so this package compiles
-// before Tasks 8-10 land.
-func (m *Model) openSearch() tea.Cmd            { return nil }
+// before Tasks 9-10 land.
 func (m *Model) openMemories() tea.Cmd          { return nil }
 func (m *Model) openHealth() tea.Cmd            { return nil }
-func (m *Model) updateSearch(tea.Msg) tea.Cmd   { return nil }
 func (m *Model) updateMemories(tea.Msg) tea.Cmd { return nil }
 func (m *Model) updateHealth(tea.Msg) tea.Cmd   { return nil }
 

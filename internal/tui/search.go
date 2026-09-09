@@ -124,11 +124,7 @@ func (m Model) viewSearch() string {
 	// summary/badge lines below the list, so the hit rows plus that fixed
 	// chrome never exceed the overlay's body height.
 	visible := max(h-4-4, 1)
-	start := 0
-	if len(hits) > visible {
-		start = max(0, min(m.search.cursor-visible/2, len(hits)-visible))
-	}
-	end := min(start+visible, len(hits))
+	start, end := window(m.search.cursor, len(hits), visible)
 	for i := start; i < end; i++ {
 		hit := hits[i]
 		mark := "  "

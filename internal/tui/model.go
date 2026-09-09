@@ -77,15 +77,12 @@ type Model struct {
 	toastSeq int
 
 	search searchState
-	mem    memState    //nolint:unused // consumed by Task 9
+	mem    memState
 	health healthState //nolint:unused // consumed by Task 10
 }
 
-// Placeholders until Tasks 9-10 define the real overlay state.
-type (
-	memState    struct{} //nolint:unused // consumed by Task 9
-	healthState struct{} //nolint:unused // consumed by Task 10
-)
+// Placeholder until Task 10 defines the real overlay state.
+type healthState struct{} //nolint:unused // consumed by Task 10
 
 func New(c *client, th Theme) Model {
 	ta := textarea.New()
@@ -226,6 +223,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.search.hits = nil
 			m.search.textOnly = false
+		}
+	case memListMsg:
+		m.mem.err = msg.err
+		if msg.err == nil {
+			m.mem.list = msg.msgs
+			m.mem.cursor = min(m.mem.cursor, max(len(msg.msgs)-1, 0))
+			cmds = append(cmds, m.loadRevisions())
+		}
+	case revisionsMsg:
+		if msg.err == nil && m.mem.currentID() == msg.id {
+			m.mem.revs = msg.revs
+			m.mem.rev = len(msg.revs) - 1
+		}
+	case memEditedMsg:
+		cmds = append(cmds, m.applyMemoryEdit(msg))
+	case memChangedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.showToast("memory: "+errText(msg.err)))
+		} else {
+			cmds = append(cmds, m.loadMemoryList())
 		}
 	}
 	switch m.mode {
@@ -660,12 +677,10 @@ func (m *Model) fitCompose() {
 
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
 
-// Stubs replaced by later tasks. Each returns nil so this package compiles
-// before Tasks 9-10 land.
-func (m *Model) openMemories() tea.Cmd          { return nil }
-func (m *Model) openHealth() tea.Cmd            { return nil }
-func (m *Model) updateMemories(tea.Msg) tea.Cmd { return nil }
-func (m *Model) updateHealth(tea.Msg) tea.Cmd   { return nil }
+// Stub replaced by Task 10. Returns nil so this package compiles before it
+// lands.
+func (m *Model) openHealth() tea.Cmd          { return nil }
+func (m *Model) updateHealth(tea.Msg) tea.Cmd { return nil }
 
 const (
 	leftRail  = 18

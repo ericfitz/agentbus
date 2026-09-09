@@ -297,6 +297,16 @@ func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
-// Stubs replaced by Tasks 9-10.
-func (m Model) viewMemories() string { return "" }
-func (m Model) viewHealth() string   { return "" }
+// window returns the [start, end) slice bounds that keep cursor visible
+// among n items when only visible of them fit, centring cursor when the
+// list is longer than that.
+func window(cursor, n, visible int) (start, end int) {
+	start = 0
+	if n > visible {
+		start = max(0, min(cursor-visible/2, n-visible))
+	}
+	return start, min(start+visible, n)
+}
+
+// Stub replaced by Task 10.
+func (m Model) viewHealth() string { return "" }

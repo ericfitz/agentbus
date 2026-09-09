@@ -174,7 +174,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. The channels general (chat) and memory (memories) always exist. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {

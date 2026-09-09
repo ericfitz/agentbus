@@ -165,6 +165,10 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 		}
 		b.embedder = e
 	}
+	if err := b.ensureDefaults(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return b, nil
 }
 

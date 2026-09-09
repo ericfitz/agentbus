@@ -17,9 +17,10 @@ import (
 const InitPrompt = `Set up Agentbus for this repository:
 1. Run ` + "`agentbus init`" + ` in a shell. Inside a git repository it writes the
    repository's identity file and prints a line of the form
-   "Agentbus: call register with name NAME".
+   "Agentbus: call register with name NAME; default channels: ...".
 2. Call the Agentbus register tool with that name, then pass the returned
-   "as" value on every later Agentbus call.
+   "as" value on every later Agentbus call. The channels "general" (chat)
+   and "memory" (memories) always exist; subscribe to them to take part.
 If the command reports that the MCP server is not configured yet, tell the
 user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
 

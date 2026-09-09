@@ -76,7 +76,7 @@ func TestReopenKeepsData(t *testing.T) {
 	if err := b2.db.QueryRow("SELECT count(*) FROM channels").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
+	if n != 1+len(DefaultChannels) {
 		t.Fatal("data lost on reopen")
 	}
 }

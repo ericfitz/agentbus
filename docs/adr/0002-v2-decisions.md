@@ -58,3 +58,19 @@ behavior:
   `AGENTBUS_DATA_DIR` environment overrides.
 - Tool names carry no prefix; the harness namespaces by server name, and tool
   descriptions open with `Agentbus:`.
+
+## Human-made decision added 2026-09-09
+
+- `register` is idempotent within a process: registering a name the calling
+  process already holds (including a suffixed form it was given earlier)
+  returns that name with a refreshed context and `resumed: true`, instead
+  of minting the next suffix. Suffixes still disambiguate distinct live
+  processes. Prompted by a `/clear`-preserved MCP server re-registering as
+  `agentbus3`. `subscribe` was already idempotent (a repeat leaves the
+  cursor alone).
+- Two channels always exist: `general` (ordinary) and `memory` (memory).
+  The bus creates them when it opens and again after `reset`; a same-named
+  channel of another kind that already exists is left as is. The
+  `agentbus identity` hook line names them so a fresh agent has a place to
+  chat and remember without knowing to create channels. Nobody is
+  subscribed automatically.

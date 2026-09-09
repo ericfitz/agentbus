@@ -84,3 +84,17 @@ Pushed to `main`:
 - **v0.1.2 shipped**: signed, notarized universal binary on the
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.2);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (ba5b153).
+
+## 2026-09-09: TUI fixes, idempotent register, default channels
+
+Pushed to `main`:
+
+- TUI: `tab`/`shift+tab` cycle panes (channels, messages, compose), `home`
+  returns to channels; `?` opens a help overlay, `h` health; colors are
+  `tui_*_color` config keys with `AGENTBUS_TUI_*COLOR` overrides; key hints
+  render keys in the agent color. Decisions 8-12 in the TUI spec.
+- `register` is idempotent within a process (no new suffix on re-register
+  after `/clear`). ADR 0002.
+- Default channels `general` and `memory` exist on every bus, recreated
+  after `reset`; the identity hook line names them. ADR 0002.
+- American spelling throughout.

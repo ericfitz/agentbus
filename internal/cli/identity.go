@@ -40,8 +40,14 @@ func identity(cwd string, out, warn io.Writer) error {
 		}
 		dir = parent
 	}
-	_, err := fmt.Fprintf(out, "Agentbus: call register with name %s\n", name)
+	_, err := fmt.Fprint(out, identityLine(name))
 	return err
+}
+
+// identityLine is the one line the SessionStart hook prints: the name to
+// register and the channels that always exist.
+func identityLine(name string) string {
+	return "Agentbus: call register with name " + name + "; default channels: general (chat), memory (memories)\n"
 }
 
 // readIdentityFile reads dir/.local/agentbus.json, returning (identity,

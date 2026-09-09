@@ -105,6 +105,10 @@ directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
 the repository directory's basename.
 
+Every bus has two channels from the start, `general` (ordinary) and
+`memory` (memory), recreated after `agentbus reset`; the identity line names
+them so an agent can subscribe without first creating anything.
+
 ## Claude Code (manual setup)
 
 The harness's MCP server entry must be named `agentbus`, since the harness
@@ -174,14 +178,15 @@ separate process has no other way to learn it.
 - `agentbus status` shows live identities, channels, usage against budget,
   and any capacity notice.
 - `agentbus tui` opens a live dashboard: channels with unread counts on the
-  left, the selected channel's stream in the centre, live sessions on the
+  left, the selected channel's stream in the center, live sessions on the
   right, a compose line, and a status bar. It registers as `tui_name` from
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
-  Press `esc` for the command keys; `?` opens the health overlay, which lists
-  them. `/` searches, `m` opens the memory browser, `h` opens health, `q`
-  quits. Colours come from
-  `AGENTBUS_TUI_*COLOR` environment variables; see below.
+  Press `esc` for the command keys and `?` for the full keymap. `tab` and
+  `shift+tab` move between the channel list, the message list, and the
+  compose line; `home` returns to the channel list. `/` searches, `m` opens
+  the memory browser, `h` opens health and config, `q` quits. Colors are
+  `tui_*_color` config settings; see below.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose
@@ -193,26 +198,29 @@ separate process has no other way to learn it.
 
 ## TUI theme
 
-Each variable takes one of the sixteen ANSI colour names (`black`, `red`,
-`green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, or a `bright` form
-such as `brightblack`), an index `0`-`15`, or `default` for the terminal's
-own colour. Matching is case-insensitive. Other values, including `#RRGGBB`,
-are rejected with one line on stderr and the default is used.
+Each color is a config setting; the environment variable in the second
+column overrides it for one run. A value is one of the sixteen ANSI color
+names (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
+`white`, or a `bright` form such as `brightblack`), an index `0`-`15`, or
+`default` for the terminal's own color. Matching is case-insensitive. Other
+values, including `#RRGGBB`, fail config load; in an environment variable
+they are rejected with one line on stderr and the config value is used.
 
-| Variable | Used for | Default |
-|----------|----------|---------|
-| `AGENTBUS_TUI_BGCOLOR` | screen background | `default` |
-| `AGENTBUS_TUI_TEXTCOLOR` | message content | `default` |
-| `AGENTBUS_TUI_DIMCOLOR` | timestamps, dividers, help | `brightblack` |
-| `AGENTBUS_TUI_AGENTCOLOR` | agent names, selected channel, key hints | `cyan` |
-| `AGENTBUS_TUI_USERCOLOR` | your own name | `yellow` |
-| `AGENTBUS_TUI_MEMCOLOR` | memory channels and the memory browser | `magenta` |
-| `AGENTBUS_TUI_HEALTHCOLOR` | live heartbeat dot, ok states | `green` |
-| `AGENTBUS_TUI_WARNCOLOR` | warnings such as the text-only search badge | `yellow` |
-| `AGENTBUS_TUI_ERRORCOLOR` | errors and the delete confirmation | `red` |
-| `AGENTBUS_TUI_SELCOLOR` | selected row background | `brightblack` |
+| Config key | Environment override | Used for | Default |
+|------------|----------------------|----------|---------|
+| `tui_background_color` | `AGENTBUS_TUI_BGCOLOR` | screen background | `default` |
+| `tui_text_color` | `AGENTBUS_TUI_TEXTCOLOR` | message content | `default` |
+| `tui_dim_color` | `AGENTBUS_TUI_DIMCOLOR` | timestamps, dividers, help | `brightblack` |
+| `tui_agent_color` | `AGENTBUS_TUI_AGENTCOLOR` | agent names, selected channel, key hints | `cyan` |
+| `tui_user_color` | `AGENTBUS_TUI_USERCOLOR` | your own name | `yellow` |
+| `tui_memory_color` | `AGENTBUS_TUI_MEMCOLOR` | memory channels and the memory browser | `magenta` |
+| `tui_health_color` | `AGENTBUS_TUI_HEALTHCOLOR` | live heartbeat dot, ok states | `green` |
+| `tui_warn_color` | `AGENTBUS_TUI_WARNCOLOR` | warnings such as the text-only search badge | `yellow` |
+| `tui_error_color` | `AGENTBUS_TUI_ERRORCOLOR` | errors and the delete confirmation | `red` |
+| `tui_selection_color` | `AGENTBUS_TUI_SELCOLOR` | selected row background | `brightblack` |
 
-The health overlay (`h`) lists the resolved theme.
+The health overlay (`h`) lists the resolved theme and marks each value an
+environment variable overrode.
 
 ## Limits worth knowing
 

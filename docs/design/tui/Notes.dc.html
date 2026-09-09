@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; background: #16181d; }
+    a { color: #6fc3d6; } a:hover { color: #9ad9e6; }
+    .term { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; color: #d6d3cd; background: #16181d; }
+    .term * { box-sizing: border-box; }
+    .dim { color: #7c818c; }
+    .cyan { color: #6fc3d6; }
+    .green { color: #8fc98a; }
+    .amber { color: #d9b36b; }
+    .mag { color: #c99ad6; }
+    .red { color: #e08585; }
+    .b { font-weight: 700; }
+    .sel { background: #262a33; }
+    .row { display: flex; flex-direction: row; gap: 0; white-space: pre; overflow: hidden; }
+    .cur { display: inline-block; width: 8px; height: 17px; background: #d6d3cd; vertical-align: text-bottom; }
+    .panel { border: 1px solid #3a3f4b; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; }
+    .ptitle { padding: 0 8px; color: #7c818c; letter-spacing: 0.08em; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #262a33; }
+    .lines { display: flex; flex-direction: column; padding: 4px 0; }
+    .lines > div { padding: 0 8px; white-space: pre; overflow: hidden; }
+  </style>
+</helmet>
+<div class="term" style="width: 900px; height: 1300px; padding: 20px 24px; display: flex; flex-direction: column; gap: 22px;">
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="cyan b" style="font-size: 15px;">agentbus tui · design notes</div>
+    <div class="dim" style="white-space: pre-wrap;">Observe and participate. One binary, no server: the TUI opens the SQLite database through the bus package exactly like status and reset do, registers as the human, and is an ordinary bus participant. Bubble Tea + Lip Gloss; static mockups, 100×32 cells at zoom 1.</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">data flow</div>
+    <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre;">start     Register(tui_name, resume) → ListChannels → Subscribe(all) → History(selected, last 200)
+live      goroutine: Receive(wait=receive_max_wait_seconds, ack=prev token) → tea.Msg per batch
+          gaps[] → dim “n evicted” divider in the stream; unread = seq &gt; last-seen per channel
+status    every 5 s: StatusReport() → status bar + Health overlay
+send      Enter → Send{channel, content, reply_to?}; memory channel → Send creates a memory
+search    Search{query, mode, count 20}; semantic_unavailable → “text only” badge, no error
+memories  Search{channel, mode text, count 200} for the list · GetMemory / EditMemory / DeleteMemory
+scroll    at top of stream → History(before=oldest seq, 200) prepended
+quit      Close() waits for heartbeat and tick goroutines, as mcp does</div></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">keymap</div>
+    <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre;"><span class="b">global</span>    <span class="cyan">?</span> help   <span class="cyan">/</span> search   <span class="cyan">m</span> memories   <span class="cyan">h</span> health   <span class="cyan">q</span> quit   <span class="cyan">esc</span> close overlay / cancel reply
+<span class="b">channels</span>  <span class="cyan">j k</span> or <span class="cyan">↑ ↓</span> select   <span class="cyan">tab</span> next unread   <span class="cyan">c</span> create channel   <span class="cyan">s</span> toggle subscribe
+<span class="b">stream</span>    <span class="cyan">pgup pgdn</span> scroll   <span class="cyan">g G</span> oldest / newest   <span class="cyan">enter</span> detail (metadata, refs, raw JSON)   <span class="cyan">r</span> reply
+<span class="b">compose</span>   <span class="cyan">enter</span> send   <span class="cyan">shift+enter</span> newline   <span class="cyan">↑</span> recall last sent   <span class="cyan">ctrl+u</span> clear
+<span class="b">search</span>    <span class="cyan">tab</span> mode text → semantic → both   <span class="cyan">enter</span> jump to hit in its channel
+<span class="b">memories</span>  <span class="cyan">e</span> edit in $EDITOR (tmp file, save = EditMemory)   <span class="cyan">d</span> delete (y/n)   <span class="cyan">← →</span> revision
+<span class="b">health</span>    <span class="cyan">o</span> open config in $EDITOR; reload on return</div></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">colour rules (ANSI-safe, honours the terminal palette)</div>
+    <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre;"><span class="cyan">cyan</span>     agent sender names, selected channel, key hints, focused overlay border
+<span class="amber">amber</span>    the human’s own name and messages, warnings (text-only fallback, capacity)
+<span class="green">green</span>    live heartbeat dot, ok states, Health border
+<span class="mag">magenta</span>  memory channels (◆) and the Memories overlay border
+<span class="red">red</span>      errors and delete confirmation
+<span class="dim">dim</span>      timestamps, contexts, dividers, help text · never colour message content</div></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">bus and config additions needed</div>
+    <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre-wrap;">config   <span class="cyan">tui_name</span> (string, default OS user name, same rule as register names); flag <span class="cyan">--as</span> overrides
+status   StatusReport already has sessions, channels, usage, budget, notice, backlog, paths. Health also wants: embedding endpoint + model + last query outcome, last receive batch time, gap count. First three come from config and the TUI’s own call log, so no bus change; “last tick” is the only new StatusReport field and is optional.
+history  unchanged; the TUI pages with before=oldest seq
+cli      new subcommand <span class="cyan">agentbus tui</span> in main.go; internal/tui package; ~4 Charm dependencies</div></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">out of scope for v1</div>
+    <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre-wrap;">Mouse support · multiple humans in one TUI · editing config values in-place (o opens $EDITOR) · reset from the TUI (keep it a deliberate shell command) · light-theme tuning beyond ANSI defaults</div></div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

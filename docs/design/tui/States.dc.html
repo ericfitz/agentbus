@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; background: #16181d; }
+    a { color: #6fc3d6; } a:hover { color: #9ad9e6; }
+    .term { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; color: #d6d3cd; background: #16181d; }
+    .term * { box-sizing: border-box; }
+    .dim { color: #7c818c; }
+    .cyan { color: #6fc3d6; }
+    .green { color: #8fc98a; }
+    .amber { color: #d9b36b; }
+    .mag { color: #c99ad6; }
+    .red { color: #e08585; }
+    .b { font-weight: 700; }
+    .sel { background: #262a33; }
+    .row { display: flex; flex-direction: row; gap: 0; white-space: pre; overflow: hidden; }
+    .cur { display: inline-block; width: 8px; height: 17px; background: #d6d3cd; vertical-align: text-bottom; }
+    .panel { border: 1px solid #3a3f4b; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; }
+    .ptitle { padding: 0 8px; color: #7c818c; letter-spacing: 0.08em; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #262a33; }
+    .lines { display: flex; flex-direction: column; padding: 4px 0; }
+    .lines > div { padding: 0 8px; white-space: pre; overflow: hidden; }
+  </style>
+</helmet>
+<div class="term" style="width: 900px; height: 520px; padding: 12px; display: flex; flex-direction: column; gap: 18px;">
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">compose · reply mode (r on a message)</div>
+    <div class="panel" style="flex-direction: column; padding: 0 8px;">
+      <div class="row dim"><span>↳ replying to </span><span class="cyan">xfa</span><span> #412 “Formula template needs the sha256 for arm64 too;…”  </span><span class="b">esc</span><span> cancel</span></div>
+      <div class="row"><span class="cyan">general</span><span class="dim"> › </span><span>Added in 9cbba9f</span><span class="cur"></span></div>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">compose · memory channel (enter creates a memory)</div>
+    <div class="panel" style="flex-direction: row; padding: 0 8px; height: 22px; align-items: center;">
+      <div class="row"><span class="mag">◆ notes</span><span class="dim"> › </span><span>Reviewer checklist: run -race, check PROGRESS.md</span><span class="cur"></span><span class="dim">   ⏎ new memory</span></div>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">error toast · one line above the status bar, 5 s or any key</div>
+    <div class="row" style="padding: 0 8px;"><span class="red b">✗ </span><span class="red">rate_limited</span><span class="dim">: sender exceeded send_messages_per_second · retryable, resend with </span><span class="b">↑ ⏎</span></div>
+    <div class="row" style="justify-content: space-between; padding: 0 8px; color: #7c818c;"><div class="row"><span>db 412 MiB / 2 GiB</span><span>   </span><span>embed </span><span class="amber">unreachable</span><span>   </span><span>backlog 37</span><span>   </span><span>as </span><span class="amber">eric</span></div><div class="row"><span class="b">?</span><span> help</span></div></div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">empty channel · capacity notice</div>
+    <div class="panel" style="height: 88px; align-items: center; justify-content: center;"><div class="dim">no messages yet in <span class="cyan">release</span> · type below to send the first</div></div>
+    <div class="row" style="padding: 0 8px;"><span class="amber b">! </span><span class="amber">capacity</span><span class="dim">: 1.9 GiB of 2 GiB used, evicting oldest messages to 1.5 GiB</span></div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">delete confirm (memories, d)</div>
+    <div class="row" style="padding: 0 8px;"><span class="red">delete memory #41 “Release procedure”?</span><span class="dim"> tombstones all revisions · </span><span class="b">y</span><span class="dim"> yes  </span><span class="b">n</span><span class="dim"> no</span></div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; background: #16181d; }
+    a { color: #6fc3d6; } a:hover { color: #9ad9e6; }
+    .term { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; color: #d6d3cd; background: #16181d; }
+    .term * { box-sizing: border-box; }
+    .dim { color: #7c818c; }
+    .cyan { color: #6fc3d6; }
+    .green { color: #8fc98a; }
+    .amber { color: #d9b36b; }
+    .mag { color: #c99ad6; }
+    .red { color: #e08585; }
+    .b { font-weight: 700; }
+    .sel { background: #262a33; }
+    .row { display: flex; flex-direction: row; gap: 0; white-space: pre; overflow: hidden; }
+    .cur { display: inline-block; width: 8px; height: 17px; background: #d6d3cd; vertical-align: text-bottom; }
+    .panel { border: 1px solid #3a3f4b; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; }
+    .ptitle { padding: 0 8px; color: #7c818c; letter-spacing: 0.08em; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #262a33; }
+    .lines { display: flex; flex-direction: column; padding: 4px 0; }
+    .lines > div { padding: 0 8px; white-space: pre; overflow: hidden; }
+  </style>
+</helmet>
+<div class="term" style="width: 900px; height: 640px; padding: 12px; display: flex; flex-direction: column; background: #0f1114;">
+  <div class="panel" style="flex-grow: 1; background: #16181d; border-color: #c99ad6; flex-direction: row;">
+    <div style="width: 380px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid #3a3f4b;">
+      <div class="ptitle"><span class="mag" style="text-transform: none;">◆ notes</span> · 12 memories</div>
+      <div class="lines">
+        <div class="sel"><span class="cyan">› #41</span> <span class="dim">r2</span> Release procedure                <span class="dim">12:00</span></div>
+        <div>  #37 <span class="dim">r1</span> Reviewer checklist               <span class="dim">Sep 7</span></div>
+        <div>  #35 <span class="dim">r3</span> Config key bounds                <span class="dim">Sep 7</span></div>
+        <div>  #29 <span class="dim">r1</span> Codex prompt-file workaround     <span class="dim">Sep 6</span></div>
+        <div>  #24 <span class="dim">r1</span> Search caps ranking at 1000      <span class="dim">Sep 6</span></div>
+        <div>  #22 <span class="dim">r2</span> Homebrew tap layout              <span class="dim">Sep 6</span></div>
+      </div>
+      <div style="flex-grow: 1;"></div>
+      <div class="lines dim"><div>first line of content is the title</div></div>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+      <div class="ptitle">#41 · revision 2 of 2 · <span class="cyan" style="text-transform: none;">agentbus</span> · 12:00</div>
+      <div class="lines" style="white-space: pre-wrap;">
+        <div style="white-space: pre-wrap;">Release procedure
+
+Bump Version in internal/mcpserver/server.go, commit, git tag
+vX.Y.Z, push both, then run ./release/release.sh vX.Y.Z from a
+terminal. The sandbox cannot run it.</div>
+        <div></div>
+        <div class="dim">type      note</div>
+        <div class="dim">refs      release/release.sh · docs/install.md</div>
+        <div class="dim">revisions <span class="cyan">r2</span> 12:00 agentbus · r1 09:31 agentbus</div>
+      </div>
+      <div style="flex-grow: 1;"></div>
+      <div class="row" style="justify-content: flex-end; padding: 2px 8px; border-top: 1px solid #262a33; color: #7c818c;"><span class="b">e</span><span> edit  </span><span class="b">d</span><span> delete  </span><span class="b">← →</span><span> revision  </span><span class="b">esc</span><span> close</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

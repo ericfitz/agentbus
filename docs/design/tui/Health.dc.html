@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; background: #16181d; }
+    a { color: #6fc3d6; } a:hover { color: #9ad9e6; }
+    .term { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; color: #d6d3cd; background: #16181d; }
+    .term * { box-sizing: border-box; }
+    .dim { color: #7c818c; }
+    .cyan { color: #6fc3d6; }
+    .green { color: #8fc98a; }
+    .amber { color: #d9b36b; }
+    .mag { color: #c99ad6; }
+    .red { color: #e08585; }
+    .b { font-weight: 700; }
+    .sel { background: #262a33; }
+    .row { display: flex; flex-direction: row; gap: 0; white-space: pre; overflow: hidden; }
+    .cur { display: inline-block; width: 8px; height: 17px; background: #d6d3cd; vertical-align: text-bottom; }
+    .panel { border: 1px solid #3a3f4b; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; }
+    .ptitle { padding: 0 8px; color: #7c818c; letter-spacing: 0.08em; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #262a33; }
+    .lines { display: flex; flex-direction: column; padding: 4px 0; }
+    .lines > div { padding: 0 8px; white-space: pre; overflow: hidden; }
+  </style>
+</helmet>
+<div class="term" style="width: 900px; height: 640px; padding: 12px; display: flex; flex-direction: column; background: #0f1114;">
+  <div class="panel" style="flex-grow: 1; background: #16181d; border-color: #8fc98a;">
+    <div class="ptitle">health</div>
+    <div class="lines" style="padding: 8px 0;">
+      <div><span class="dim">storage      </span>412 MiB of 2 GiB   <span class="green">████████</span><span class="dim">████████████████████████████████</span> 20%</div>
+      <div><span class="dim">notice       </span><span class="dim">none</span></div>
+      <div><span class="dim">sessions     </span>4 live · <span class="dim">channels</span> 5 (2 memory)</div>
+      <div><span class="dim">embeddings   </span><span class="green">ok</span> · nomic-embed-text · http://localhost:11434/v1/embeddings</div>
+      <div><span class="dim">             </span>backlog 0 · query timeout 10 s · last query 12:05:12 <span class="green">ok</span></div>
+      <div><span class="dim">receive      </span>long-poll <span class="green">connected</span> · last batch 12:05:31 · 0 gaps</div>
+    </div>
+    <div class="ptitle" style="border-top: 1px solid #262a33;">config · ~/.config/agentbus/config.json</div>
+    <div class="lines" style="padding: 8px 0; columns: 2; display: block;">
+      <div><span class="dim">data_directory              </span>~/.local/share/agentbus</div>
+      <div><span class="dim">sqlite_budget_mib           </span>2048</div>
+      <div><span class="dim">message_retention_hours     </span>168</div>
+      <div><span class="dim">cleanup_free_percent        </span>25</div>
+      <div><span class="dim">cleanup_interval_seconds    </span>60</div>
+      <div><span class="dim">cursor_idle_hours           </span>72</div>
+      <div><span class="dim">tombstone_min_hours         </span>72</div>
+      <div><span class="dim">receipt_retention_minutes   </span>60</div>
+      <div><span class="dim">max_message_kib             </span>64</div>
+      <div><span class="dim">send_messages_per_second    </span>100</div>
+      <div><span class="dim">send_kib_per_second         </span>1024</div>
+      <div><span class="dim">receive_default_count       </span>100</div>
+      <div><span class="dim">receive_max_count           </span>1000</div>
+      <div><span class="dim">receive_max_wait_seconds    </span>60</div>
+      <div><span class="dim">result_default_kib          </span>64</div>
+      <div><span class="dim">discovery_enabled           </span>true</div>
+      <div><span class="dim">inspection_command          </span><span class="dim">unset</span></div>
+      <div><span class="dim">embedding_query_timeout_s   </span>10</div>
+      <div><span class="dim">log_level                   </span>info</div>
+      <div><span class="dim">tui_name                    </span><span class="amber">eric</span></div>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div class="row" style="justify-content: flex-end; padding: 2px 8px; border-top: 1px solid #262a33; color: #7c818c;"><span class="b">o</span><span> open config in $EDITOR  </span><span class="b">esc</span><span> close</span></div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

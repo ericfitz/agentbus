@@ -2,3 +2,4 @@ HANDOFF.md
 /agentbus
 .local/
 /dist/
+/docs/design/**/agentbus-*.html

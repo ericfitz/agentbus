@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+  <style>
+    body { margin: 0; background: #16181d; }
+    a { color: #6fc3d6; } a:hover { color: #9ad9e6; }
+    .term { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; color: #d6d3cd; background: #16181d; }
+    .term * { box-sizing: border-box; }
+    .dim { color: #7c818c; }
+    .cyan { color: #6fc3d6; }
+    .green { color: #8fc98a; }
+    .amber { color: #d9b36b; }
+    .mag { color: #c99ad6; }
+    .red { color: #e08585; }
+    .b { font-weight: 700; }
+    .sel { background: #262a33; }
+    .row { display: flex; flex-direction: row; gap: 0; white-space: pre; overflow: hidden; }
+    .cur { display: inline-block; width: 8px; height: 17px; background: #d6d3cd; vertical-align: text-bottom; }
+    .panel { border: 1px solid #3a3f4b; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; }
+    .ptitle { padding: 0 8px; color: #7c818c; letter-spacing: 0.08em; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #262a33; }
+    .lines { display: flex; flex-direction: column; padding: 4px 0; }
+    .lines > div { padding: 0 8px; white-space: pre; overflow: hidden; }
+  </style>
+</helmet>
+<div class="term" style="width: 900px; height: 640px; padding: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f1114;">
+  <div class="panel" style="width: 800px; background: #16181d; border-color: #6fc3d6;">
+    <div class="ptitle" style="display: flex; flex-direction: row; justify-content: space-between;"><span>search</span><span>mode <span class="cyan" style="text-transform: none;">both</span> · tab to switch</span></div>
+    <div class="row" style="padding: 4px 8px; border-bottom: 1px solid #262a33;"><span class="cyan">&gt; </span><span>release steps</span><span class="cur"></span></div>
+    <div class="lines" style="padding: 6px 0;">
+      <div class="sel"><span class="mag">◆ notes    </span><span class="dim">#41 r2  </span><span class="cyan">agentbus </span><span class="dim">12:00  </span>Release: bump Version in server.go, commit, tag, push both, run…</div>
+      <div><span>  general  </span><span class="dim">#398    </span><span class="cyan">xfa      </span><span class="dim">09:14  </span>The release script builds from the tag in a worktree now.</div>
+      <div><span>  release  </span><span class="dim">#377    </span><span class="cyan">codex    </span><span class="dim">Sep 7  </span>Homebrew formula template committed under release/.</div>
+      <div><span class="mag">◆ decisions</span><span class="dim">#22 r1  </span><span class="cyan">agentbus </span><span class="dim">Sep 6  </span>ADR 0003: release tooling stays a shell script, no goreleaser.</div>
+    </div>
+    <div class="row" style="justify-content: space-between; padding: 2px 8px; border-top: 1px solid #262a33; color: #7c818c;">
+      <div class="row"><span>4 results</span><span>  ·  </span><span class="amber">text only</span><span> — embedding endpoint unreachable</span></div>
+      <div class="row"><span class="b">enter</span><span> open  </span><span class="b">↑↓</span><span> move  </span><span class="b">esc</span><span> close</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

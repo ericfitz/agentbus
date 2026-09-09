@@ -40,9 +40,10 @@ type (
 		err  error
 	}
 	memEditedMsg struct {
-		id   int64
-		path string
-		err  error
+		id       int64
+		path     string
+		original string // the content written to path, to detect a no-op edit
+		err      error
 	}
 	memChangedMsg struct { // an edit or delete finished; reload the list
 		id  int64

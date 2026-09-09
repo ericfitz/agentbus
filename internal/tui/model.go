@@ -225,6 +225,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search.textOnly = false
 		}
 	case memListMsg:
+		if msg.channel != m.mem.channel {
+			break // stale: memories was reopened on a different channel
+		}
 		m.mem.err = msg.err
 		if msg.err == nil {
 			m.mem.list = msg.msgs
@@ -232,9 +235,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.loadRevisions())
 		}
 	case revisionsMsg:
-		if msg.err == nil && m.mem.currentID() == msg.id {
-			m.mem.revs = msg.revs
-			m.mem.rev = len(msg.revs) - 1
+		if m.mem.currentID() == msg.id {
+			if msg.err != nil {
+				m.mem.err = msg.err
+			} else {
+				m.mem.err = nil
+				m.mem.revs = msg.revs
+				m.mem.rev = len(msg.revs) - 1
+			}
 		}
 	case memEditedMsg:
 		cmds = append(cmds, m.applyMemoryEdit(msg))

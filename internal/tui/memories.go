@@ -5,7 +5,6 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -83,10 +82,14 @@ func memoryID(x bus.Message) int64 {
 	return 0
 }
 
+// loadRevisions clears the (now stale) revisions of whatever memory was
+// previously current before returning the command to fetch the new
+// cursor's, so the detail section never shows one memory's id label over
+// another's content while the fetch is in flight.
 func (m *Model) loadRevisions() tea.Cmd {
+	m.mem.revs, m.mem.rev = nil, 0
 	id := m.mem.currentID()
 	if id == 0 {
-		m.mem.revs, m.mem.rev = nil, 0
 		return nil
 	}
 	c := m.c
@@ -133,40 +136,57 @@ func (m *Model) updateMemories(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// memEditPath is the temp file the editor opens for the current memory.
-func (m *Model) memEditPath() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("agentbus-memory-%d.md", m.mem.currentID()))
-}
-
+// editorCommand names $VISUAL, else $EDITOR, else vi; a blank or
+// whitespace-only value (unset, or set to "") falls back the same way
+// rather than leaving an empty argv[0] that would panic below.
 func editorCommand(path string) *exec.Cmd {
 	ed := os.Getenv("VISUAL")
 	if ed == "" {
 		ed = os.Getenv("EDITOR")
 	}
-	if ed == "" {
-		ed = "vi"
-	}
 	parts := strings.Fields(ed)
+	if len(parts) == 0 {
+		parts = []string{"vi"}
+	}
 	return exec.Command(parts[0], append(parts[1:], path)...)
 }
 
-// editMemoryInEditor writes the current revision to a temp file and hands
-// the terminal to the editor; memEditedMsg arrives when it exits.
+// editMemoryInEditor writes the current revision to a fresh, unique temp
+// file (os.CreateTemp: unpredictable name, O_EXCL, 0600 — a shared,
+// predictable path would let another process on the host race a symlink
+// into place) and hands the terminal to the editor; memEditedMsg arrives
+// when it exits.
 func (m *Model) editMemoryInEditor() tea.Cmd {
 	cur := m.mem.current()
-	if cur == nil {
+	id := m.mem.currentID()
+	if cur == nil || id == 0 {
 		return nil
 	}
-	path := m.memEditPath()
-	if err := os.WriteFile(path, []byte(cur.Content+"\n"), 0o600); err != nil {
+	f, err := os.CreateTemp("", "agentbus-memory-*.md")
+	if err != nil {
 		return m.showToast("edit: " + err.Error())
 	}
-	id := *cur.MemoryID
-	return tea.ExecProcess(editorCommand(path), func(err error) tea.Msg { return memEditedMsg{id: id, path: path, err: err} })
+	original := cur.Content
+	if _, err := f.WriteString(original + "\n"); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return m.showToast("edit: " + err.Error())
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return m.showToast("edit: " + err.Error())
+	}
+	path := f.Name()
+	return tea.ExecProcess(editorCommand(path), func(err error) tea.Msg {
+		return memEditedMsg{id: id, path: path, original: original, err: err}
+	})
 }
 
 // applyMemoryEdit reads the editor's file back, removes it, and edits the
-// memory when the content changed.
+// memory when the content changed. It compares against the content that was
+// written to the file (msg.original) rather than re-reading the current
+// memory, which may have moved on (list reload, cursor moved) since the
+// editor was launched.
 func (m *Model) applyMemoryEdit(msg memEditedMsg) tea.Cmd {
 	defer func() { _ = os.Remove(msg.path) }()
 	if msg.err != nil {
@@ -177,8 +197,10 @@ func (m *Model) applyMemoryEdit(msg memEditedMsg) tea.Cmd {
 		return m.showToast("edit: " + err.Error())
 	}
 	content := strings.TrimRight(string(body), "\n")
-	cur := m.mem.current()
-	if cur == nil || content == "" || content == cur.Content {
+	if content == "" {
+		return m.showToast("empty edit ignored")
+	}
+	if content == msg.original {
 		return m.showToast("memory unchanged")
 	}
 	c := m.c
@@ -236,7 +258,7 @@ func (m Model) viewMemories() string {
 		r := m.mem.revs[min(m.mem.rev, len(m.mem.revs)-1)]
 		b.WriteString("\n" + dim.Render(fmt.Sprintf("#%d · revision %d of %d · %s · %s", m.mem.currentID(), m.mem.rev+1, len(m.mem.revs), r.Sender, clock(r.CreatedAt))) + "\n")
 		lines := strings.Split(r.Content, "\n")
-		if maxLines := detailRows - 3; len(lines) > maxLines {
+		if maxLines := detailRows - 4; len(lines) > maxLines {
 			more := len(lines) - maxLines
 			b.WriteString(strings.Join(lines[:maxLines], "\n") + "\n")
 			b.WriteString(dim.Render(fmt.Sprintf("… (%d more lines)", more)) + "\n")
@@ -255,9 +277,10 @@ func (m Model) viewMemories() string {
 		}
 	}
 	if m.mode == modeConfirmDelete {
-		cur := m.mem.current()
-		title := strings.SplitN(cur.Content, "\n", 2)[0]
-		b.WriteString("\n" + th.Style(th.Error).Render(fmt.Sprintf("delete memory #%d “%s”? tombstones all revisions · y yes  n no", m.mem.currentID(), title)))
+		if cur := m.mem.current(); cur != nil {
+			title := strings.SplitN(cur.Content, "\n", 2)[0]
+			b.WriteString("\n" + th.Style(th.Error).Render(fmt.Sprintf("delete memory #%d “%s”? tombstones all revisions · y yes  n no", m.mem.currentID(), title)))
+		}
 	}
 	count := fmt.Sprintf(" · %d memories", len(m.mem.list))
 	if end-start < len(m.mem.list) {

@@ -3,9 +3,11 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -57,12 +59,14 @@ func TestMemoryEditViaEditorFile(t *testing.T) {
 	_, second := seedMemories(t, f)
 	f.key("esc")
 	f.key("m")
-	// Simulate the editor having returned: write the temp file ourselves.
-	path := f.m.memEditPath()
+	// Simulate the editor having returned: write the temp file ourselves,
+	// under the test's own tmp dir rather than the shared one the real
+	// editMemoryInEditor now uses (os.CreateTemp).
+	path := filepath.Join(t.TempDir(), "memory.md")
 	if err := os.WriteFile(path, []byte("Reviewer checklist\nrun -race\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f.send(memEditedMsg{id: *second.MemoryID, path: path})
+	f.send(memEditedMsg{id: *second.MemoryID, path: path, original: "Reviewer checklist"})
 	f.receive(t)
 	cur, err := f.c.b.GetMemory(f.c.as, *second.MemoryID)
 	if err != nil || cur.Content != "Reviewer checklist\nrun -race" || *cur.Revision != 2 {
@@ -152,5 +156,49 @@ func TestMemoriesOverlayWindowsALongList(t *testing.T) {
 	lines := strings.Split(v, "\n")
 	if len(lines) > f.m.height {
 		t.Fatalf("view has %d lines, want <= height %d:\n%s", len(lines), f.m.height, v)
+	}
+}
+
+// TestMovingCursorClearsStaleRevisionsBeforeReload guards against the
+// detail section showing one memory's revision label over another's
+// content while MemoryRevisions is still in flight: the cursor move must
+// clear m.mem.revs synchronously, before the returned command runs.
+func TestMovingCursorClearsStaleRevisionsBeforeReload(t *testing.T) {
+	f := newFixture(t)
+	seedMemories(t, f)
+	f.key("esc")
+	f.key("m")
+	if len(f.m.mem.revs) == 0 {
+		t.Fatal("cursor 0 must already have revisions loaded")
+	}
+	next, cmd := f.m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	f.m = next.(Model)
+	if len(f.m.mem.revs) != 0 {
+		t.Fatal("revisions must clear immediately on cursor move, before the reload lands")
+	}
+	wantID := f.m.mem.currentID()
+	f.run(cmd)
+	if len(f.m.mem.revs) == 0 || *f.m.mem.revs[0].MemoryID != wantID {
+		t.Fatalf("revisions must reload for the new cursor: %+v", f.m.mem.revs)
+	}
+}
+
+func TestEditorCommandPrecedence(t *testing.T) {
+	t.Setenv("VISUAL", "code -w")
+	t.Setenv("EDITOR", "nano")
+	if got := editorCommand("x.md").Args; len(got) != 3 || got[0] != "code" || got[1] != "-w" {
+		t.Fatalf("VISUAL must win over EDITOR, with its own args: %v", got)
+	}
+	t.Setenv("VISUAL", "")
+	if got := editorCommand("x.md").Args[0]; got != "nano" {
+		t.Fatalf("EDITOR must win when VISUAL is unset, got %q", got)
+	}
+	t.Setenv("EDITOR", "")
+	if got := editorCommand("x.md").Args[0]; got != "vi" {
+		t.Fatalf("default must be vi, got %q", got)
+	}
+	t.Setenv("VISUAL", "   ") // whitespace-only used to panic on parts[0]
+	if got := editorCommand("x.md").Args[0]; got != "vi" {
+		t.Fatalf("whitespace-only VISUAL must fall back to vi without panicking, got %q", got)
 	}
 }

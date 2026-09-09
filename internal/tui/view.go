@@ -290,7 +290,7 @@ func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer
 	w, h := m.overlaySize()
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		m.theme.Style(border).Bold(true).Render(title),
-		lipgloss.NewStyle().Width(w-4).Height(h-4).Render(body),
+		lipgloss.NewStyle().Width(w-4).Height(h-4).MaxHeight(h-4).Render(body),
 		m.theme.Style(m.theme.Dim).Render(footer),
 	)
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(w - 2).Render(inner)

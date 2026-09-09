@@ -3,7 +3,6 @@ package tui
 import (
 	"io"
 	"log/slog"
-	"os"
 	"testing"
 	"time"
 
@@ -12,20 +11,10 @@ import (
 	"github.com/ericfitz/agentbus/internal/config"
 )
 
-// testConfig's data directory comes from os.MkdirTemp rather than
-// t.TempDir(): the latter embeds the full test function name, and on macOS
-// (long $TMPDIR) that can push the resulting config path past what fits on
-// one line in the health overlay, corrupting its rendering. A short, fixed
-// prefix keeps the path length independent of the test name.
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Default()
-	dir, err := os.MkdirTemp("", "abtui")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	cfg.DataDirectory = dir
+	cfg.DataDirectory = t.TempDir()
 	cfg.Path = cfg.DataDirectory + "/config.json"
 	cfg.ReceiveMaxWaitSeconds = 1
 	return cfg

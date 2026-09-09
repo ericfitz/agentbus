@@ -9,11 +9,12 @@ import (
 	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/ericfitz/agentbus/internal/mcpserver"
+	"github.com/ericfitz/agentbus/internal/tui"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|status|reset|identity|version> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -55,6 +56,23 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		if err := cli.Init(o, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "tui":
+		fs := flag.NewFlagSet("agentbus tui", flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		as := fs.String("as", "", "identity to register as (default: tui_name from the config)")
+		if err := fs.Parse(args); err != nil {
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		if err := tui.Run(cfg, *as, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}

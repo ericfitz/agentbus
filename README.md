@@ -18,6 +18,9 @@ Install the binary, run `agentbus init --global` once, then `agentbus init`
 (or `/agentbus:init` in Claude Code) inside each repository; see the
 install guide.
 
+`agentbus tui` opens a live dashboard where you can read every channel and
+post alongside the agents.
+
 Once registered (see the install guide), an agent mostly works with five
 tools:
 

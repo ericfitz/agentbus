@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build, sign, notarize, and publish a macOS release of agentbus, then update
-# the Homebrew tap. Run from a checkout whose HEAD is the given tag.
+# the Homebrew tap. Builds from the tag, so HEAD may be anywhere.
 #   ./release/release.sh v0.1.1
 # One-time setup: a notarytool keychain profile named $NOTARY_PROFILE, created
 # with `xcrun notarytool store-credentials` (Apple ID + app-specific password).
@@ -21,15 +21,16 @@ BIN="${DIST}/${BIN_NAME}"
 TARBALL="${DIST}/${BIN_NAME}-${TAG}-macos-universal.tar.gz"
 cd "$REPO_ROOT"
 
-[[ "$(git describe --tags --exact-match 2>/dev/null)" == "$TAG" ]] ||
-    { echo "error: HEAD is not tagged $TAG" >&2; exit 1; }
-[[ -z "$(git status --porcelain)" ]] || { echo "error: working tree is dirty" >&2; exit 1; }
+# Build from the tagged source in a throwaway worktree, whatever HEAD is.
+SRC="$(mktemp -d)/src"
+git worktree add -q "$SRC" "$TAG"
+trap 'git worktree remove -f "$SRC"' EXIT
 
-echo "==> Building universal binary $VERSION"
+echo "==> Building universal binary $VERSION from $TAG"
 rm -rf "$DIST" && mkdir -p "$DIST"
 for arch in arm64 amd64; do
-    CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build -trimpath \
-        -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "${BIN}-${arch}" .
+    (cd "$SRC" && CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build -trimpath \
+        -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "${BIN}-${arch}" .)
 done
 lipo -create -output "$BIN" "${BIN}-arm64" "${BIN}-amd64"
 rm "${BIN}-arm64" "${BIN}-amd64"

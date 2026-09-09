@@ -63,3 +63,14 @@ Pushed to `main` (unreleased since v0.1.1):
 - `golangci-lint run ./...` is clean: 227 findings fixed (224 errcheck, mostly
   `_ =` on discarded `Close`/`Rollback`/test setup returns; 3 staticcheck).
   No behavior change.
+
+## 2026-09-09: agentbus tui
+
+Pushed to `main`:
+
+- `agentbus tui`: Bubble Tea dashboard per
+  `docs/superpowers/specs/2026-09-08-agentbus-tui-design.md` — channel and
+  session rails, stream with new/evicted dividers, compose with reply and
+  memory creation, search / memories / health overlays, env-var ANSI theme.
+- New config key `tui_name`; new bus read `MemoryRevisions`;
+  `mcpserver.StartBackgroundLoops` exported for reuse.

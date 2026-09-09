@@ -81,6 +81,11 @@ key or a one-line `export NAME='value'`; its contents are never logged.
 query embedding during a search; past it, `semantic` and `both` searches fall
 back to text results and set `semantic_unavailable`.
 
+`tui_name` (default: your OS user name) is the identity `agentbus tui`
+registers under; `agentbus tui --as <name>` overrides it for one run. It
+follows the same rule as agent names: 1-128 bytes, no `/`, no control
+characters.
+
 Keep `receive_max_wait_seconds` below your harness's MCP tool call timeout:
 Claude Code's default is 300 seconds (the `MCP_TOOL_TIMEOUT` environment
 variable, or a per-server `timeout` field in the MCP config), Codex exposes
@@ -168,6 +173,15 @@ separate process has no other way to learn it.
   directory. It's also what the SessionStart hooks above run.
 - `agentbus status` shows live identities, channels, usage against budget,
   and any capacity notice.
+- `agentbus tui` opens a live dashboard: channels with unread counts on the
+  left, the selected channel's stream in the centre, live sessions on the
+  right, a compose line, and a status bar. It registers as `tui_name` from
+  the config (default: your OS user name; `--as <name>` overrides) and is an
+  ordinary bus participant, so agents see your messages like any other.
+  Press `esc` for the command keys; `?` opens the health overlay, which lists
+  them. `/` searches, `m` opens the memory browser, `h` opens health, `q`
+  quits. Colours come from
+  `AGENTBUS_TUI_*COLOR` environment variables; see below.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose
@@ -176,6 +190,29 @@ separate process has no other way to learn it.
 - Logs go to `<data_directory>/agentbus.log`, never stdout or stderr,
   rotated at four 16 MiB files. The default data directory is
   `~/.local/share/agentbus`.
+
+## TUI theme
+
+Each variable takes one of the sixteen ANSI colour names (`black`, `red`,
+`green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, or a `bright` form
+such as `brightblack`), an index `0`-`15`, or `default` for the terminal's
+own colour. Matching is case-insensitive. Other values, including `#RRGGBB`,
+are rejected with one line on stderr and the default is used.
+
+| Variable | Used for | Default |
+|----------|----------|---------|
+| `AGENTBUS_TUI_BGCOLOR` | screen background | `default` |
+| `AGENTBUS_TUI_TEXTCOLOR` | message content | `default` |
+| `AGENTBUS_TUI_DIMCOLOR` | timestamps, dividers, help | `brightblack` |
+| `AGENTBUS_TUI_AGENTCOLOR` | agent names, selected channel, key hints | `cyan` |
+| `AGENTBUS_TUI_USERCOLOR` | your own name | `yellow` |
+| `AGENTBUS_TUI_MEMCOLOR` | memory channels and the memory browser | `magenta` |
+| `AGENTBUS_TUI_HEALTHCOLOR` | live heartbeat dot, ok states | `green` |
+| `AGENTBUS_TUI_WARNCOLOR` | warnings such as the text-only search badge | `yellow` |
+| `AGENTBUS_TUI_ERRORCOLOR` | errors and the delete confirmation | `red` |
+| `AGENTBUS_TUI_SELCOLOR` | selected row background | `brightblack` |
+
+The health overlay (`h`) lists the resolved theme.
 
 ## Limits worth knowing
 

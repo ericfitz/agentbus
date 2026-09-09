@@ -128,3 +128,28 @@ func TestEditMemoryOversizedSkipsHookAndEviction(t *testing.T) {
 		t.Fatalf("oversized edit must not trigger eviction: before=%d after=%d", before, after)
 	}
 }
+
+func TestMemoryRevisionsListsAllRevisionsOldestFirst(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "mem", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"}); err != nil {
+		t.Fatal(err)
+	}
+	revs, err := b.MemoryRevisions(sam, *c.MemoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revs) != 2 || revs[0].Content != "v1" || revs[1].Content != "v2" || *revs[0].Revision != 1 || *revs[1].Revision != 2 {
+		t.Fatalf("want [v1 r1, v2 r2], got %+v", revs)
+	}
+	if _, err := b.MemoryRevisions(sam, 999999); err == nil || !strings.Contains(err.Error(), "not_found") {
+		t.Fatalf("want not_found, got %v", err)
+	}
+}

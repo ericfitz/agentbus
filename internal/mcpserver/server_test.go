@@ -111,7 +111,7 @@ func TestMissingAsIsValidationError(t *testing.T) {
 // TestBackgroundLoopsStopBeforeCallerCanCloseSafely covers fix round 1
 // finding 1: Run must wait for the heartbeat and tick goroutines to exit
 // before closing the bus, or an in-flight call can run against a closed
-// bus. startBackgroundLoops is exercised directly (Run itself blocks on
+// bus. StartBackgroundLoops is exercised directly (Run itself blocks on
 // stdio, which isn't testable in-process) with a fast heartbeat interval so
 // several heartbeats actually fire while the loop is running.
 func TestBackgroundLoopsStopBeforeCallerCanCloseSafely(t *testing.T) {
@@ -126,7 +126,7 @@ func TestBackgroundLoopsStopBeforeCallerCanCloseSafely(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	wg := startBackgroundLoops(ctx, b, cfg, log, 3*time.Millisecond)
+	wg := StartBackgroundLoops(ctx, b, cfg, log, 3*time.Millisecond)
 	time.Sleep(20 * time.Millisecond) // let several heartbeats actually run
 	cancel()
 

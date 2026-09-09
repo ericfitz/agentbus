@@ -74,3 +74,13 @@ Pushed to `main`:
   memory creation, search / memories / health overlays, env-var ANSI theme.
 - New config key `tui_name`; new bus read `MemoryRevisions`;
   `mcpserver.StartBackgroundLoops` exported for reuse.
+
+## 2026-09-09: agentbus tui merged; v0.1.2 shipped
+
+- `agentbus tui` (plan `docs/superpowers/plans/2026-09-08-agentbus-tui.md`)
+  merged to `main` as ae861aa after subagent-driven implementation, per-task
+  reviews, and a whole-branch review; the expired-subscription resubscribe
+  defect the final review parked was fixed before merge (221253f).
+- **v0.1.2 shipped**: signed, notarized universal binary on the
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.2);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (ba5b153).

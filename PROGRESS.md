@@ -98,3 +98,7 @@ Pushed to `main`:
 - Default channels `general` and `memory` exist on every bus, recreated
   after `reset`; the identity hook line names them. ADR 0002.
 - American spelling throughout.
+- **v0.1.3 shipped** (2026-09-09): signed, notarized universal binary on the
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.3);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (879038e).
+  Verified with `brew upgrade agentbus` (0.1.2 -> 0.1.3) and `brew test`.

@@ -41,9 +41,9 @@ func agent(t *testing.T, cfg config.Config, name string) (*bus.Bus, string) {
 func TestNewClientRegistersAndSubscribesToEveryChannel(t *testing.T) {
 	cfg := testConfig(t)
 	ab, sam := agent(t, cfg, "Sam")
-	for _, ch := range []string{"dev", "notes"} {
+	for _, ch := range []string{"dev", "dev-notes"} {
 		kind := "ordinary"
-		if ch == "notes" {
+		if ch == "dev-notes" {
 			kind = "memory"
 		}
 		if _, err := ab.CreateChannel(sam, ch, kind); err != nil {
@@ -58,7 +58,7 @@ func TestNewClientRegistersAndSubscribesToEveryChannel(t *testing.T) {
 	if c.as != "eric" {
 		t.Fatalf("as = %q", c.as)
 	}
-	if !c.subscribed["dev"] || !c.subscribed["notes"] {
+	if !c.subscribed["dev"] || !c.subscribed["dev-notes"] {
 		t.Fatalf("subscribed = %v", c.subscribed)
 	}
 	live, err := c.b.LiveSessionCount()

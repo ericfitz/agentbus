@@ -10,15 +10,15 @@ func TestSearchFindsMessagesAndJumps(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "the release script")
 	f.receive(t)
-	// notes is never received live below (drainAndAck instead of receive):
+	// dev-notes is never received live below (drainAndAck instead of receive):
 	// the model has not visited it yet, so jumpTo's first-time load must
 	// pull the whole channel via History, not just the page before the hit.
 	for i := 0; i < 3; i++ {
-		f.agentSend(t, "notes", fmt.Sprintf("before %d", i))
+		f.agentSend(t, "dev-notes", fmt.Sprintf("before %d", i))
 	}
-	r := f.agentSend(t, "notes", "release procedure memory")
+	r := f.agentSend(t, "dev-notes", "release procedure memory")
 	for i := 0; i < 2; i++ {
-		f.agentSend(t, "notes", fmt.Sprintf("after %d", i))
+		f.agentSend(t, "dev-notes", fmt.Sprintf("after %d", i))
 	}
 	f.drainAndAck(t)
 	f.key("esc")
@@ -35,20 +35,20 @@ func TestSearchFindsMessagesAndJumps(t *testing.T) {
 	if !strings.Contains(v, "2 results") || !strings.Contains(v, "release procedure") {
 		t.Fatalf("view:\n%s", v)
 	}
-	// Move to the notes hit and open it.
+	// Move to the dev-notes hit and open it.
 	for i, h := range f.m.search.hits {
 		if h.Seq == r.Seq {
 			f.m.search.cursor = i
 		}
 	}
 	f.key("enter")
-	if f.m.mode != modeNormal || f.m.selected().Name != "notes" {
+	if f.m.mode != modeNormal || f.m.selected().Name != "dev-notes" {
 		t.Fatalf("enter must jump to the hit's channel: mode=%v sel=%v", f.m.mode, f.m.selected())
 	}
-	if f.m.cursor < 0 || f.m.msgs["notes"][f.m.cursor].Seq != r.Seq {
+	if f.m.cursor < 0 || f.m.msgs["dev-notes"][f.m.cursor].Seq != r.Seq {
 		t.Fatalf("cursor must sit on the hit, cursor=%d", f.m.cursor)
 	}
-	if got, want := len(f.m.msgs["notes"]), 6; got != want {
+	if got, want := len(f.m.msgs["dev-notes"]), 6; got != want {
 		t.Fatalf("jumpTo must load both the latest page and the page before the hit, leaving no hole: got %d messages, want %d", got, want)
 	}
 }
@@ -82,7 +82,7 @@ func TestSearchTabCyclesModeAndSemanticUnavailableShowsBadge(t *testing.T) {
 
 func TestSearchTabInvalidatesLastRunAndRerunsOnEnter(t *testing.T) {
 	f := newFixture(t)
-	f.agentSend(t, "dev", "release notes")
+	f.agentSend(t, "dev", "release dev-notes")
 	f.receive(t)
 	f.key("esc")
 	f.key("/")

@@ -36,6 +36,25 @@ func TestRejectsUnknownKey(t *testing.T) {
 	}
 }
 
+func TestTUIColorsDefaultAndReject(t *testing.T) {
+	p := write(t, t.TempDir(), `{"tui_agent_color": "BrightBlue"}`)
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TUIAgentColor != "BrightBlue" || c.TUISelectionColor != "brightblack" || c.TUIBackgroundColor != "default" {
+		t.Fatalf("colors wrong: %+v", c)
+	}
+	if n, err := ColorIndex(c.TUIAgentColor); err != nil || n != 12 {
+		t.Fatalf("ColorIndex(BrightBlue) = %d, %v", n, err)
+	}
+	p = write(t, t.TempDir(), `{"tui_warn_color": "#ff0"}`)
+	_, _, err = Load(p)
+	if err == nil || !strings.Contains(err.Error(), "tui_warn_color") || !strings.Contains(err.Error(), "brightblack") {
+		t.Fatalf("want color error naming key and accepted forms, got %v", err)
+	}
+}
+
 func TestRejectsOutOfRange(t *testing.T) {
 	p := write(t, t.TempDir(), `{"cleanup_free_percent": 95}`)
 	_, _, err := Load(p)

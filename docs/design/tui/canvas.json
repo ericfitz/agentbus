@@ -8,8 +8,8 @@
     { "file": "Notes.dc.html",    "title": "Design notes",      "x": 2000, "y": 800, "w": 900, "h": 1300 }
   ],
   "annotations": [
-    { "id": "layout", "x": 0, "y": -150, "w": 420, "text": "agentbus tui — chat-client layout.\nLeft: channels with unread counts, ◆ marks memory channels.\nCentre: selected channel stream, newest at bottom, 'new' divider at last-seen.\nRight: live sessions with heartbeat dot.\nBottom: compose, then status bar." },
-    { "id": "overlays", "x": 1000, "y": -110, "w": 380, "text": "Overlays dim the main screen and take focus. Border colour names the overlay: cyan search, magenta memories, green health. esc closes." },
+    { "id": "layout", "x": 0, "y": -150, "w": 420, "text": "agentbus tui — chat-client layout.\nLeft: channels with unread counts, ◆ marks memory channels.\nCenter: selected channel stream, newest at bottom, 'new' divider at last-seen.\nRight: live sessions with heartbeat dot.\nBottom: compose, then status bar." },
+    { "id": "overlays", "x": 1000, "y": -110, "w": 380, "text": "Overlays dim the main screen and take focus. Border color names the overlay: cyan search, magenta memories, green health. esc closes." },
     { "id": "fallback", "x": 1000, "y": 700, "w": 420, "text": "Search never errors on embeddings: the bus falls back to text and sets semantic_unavailable, shown as the amber 'text only' badge." }
   ],
   "launch": { "view": "canvas" }

@@ -81,12 +81,12 @@ func TestReplySetsReplyToAndEscCancels(t *testing.T) {
 func TestEnterOnMemoryChannelCreatesMemory(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
-	f.key("j") // notes
+	f.key("j") // dev-notes
 	f.key("i")
 	f.key("Reviewer checklist")
 	f.key("enter")
 	f.receive(t)
-	ms := f.m.msgs["notes"]
+	ms := f.m.msgs["dev-notes"]
 	if len(ms) != 1 || ms[0].MemoryID == nil {
 		t.Fatalf("memory not created: %+v", ms)
 	}

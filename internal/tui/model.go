@@ -23,7 +23,20 @@ const (
 	modeSearch
 	modeMemories
 	modeHealth
+	modeHelp
 	modeConfirmDelete
+)
+
+// pane is the focused main-screen region; tab and shift+tab cycle them and
+// home returns to the channel list. Focus is derived from mode and cursor
+// rather than stored, so the existing keymap keeps working unchanged.
+type pane int
+
+const (
+	paneChannels pane = iota
+	paneStream
+	paneCompose
+	paneCount
 )
 
 const (
@@ -78,9 +91,10 @@ type Model struct {
 	toastSeq   int
 	lastNotice string
 
-	search searchState
-	mem    memState
-	health healthState
+	search     searchState
+	mem        memState
+	health     healthState
+	helpScroll int
 }
 
 func New(c *client, th Theme) Model {
@@ -269,13 +283,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateMemories(msg))
 	case modeHealth:
 		cmds = append(cmds, m.updateHealth(msg))
+	case modeHelp:
+		cmds = append(cmds, m.updateHelp(msg))
 	}
 	return m, tea.Batch(cmds...)
 }
 
 // updateInsert: compose focused. Only the keys the compose line owns plus
-// tab (next unread), pgup/pgdn (stream), esc (to normal mode) are handled
-// here; everything else types.
+// tab/shift+tab/home (panes), pgup/pgdn (stream), esc (to normal mode) are
+// handled here; everything else types.
 func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 	if m.prompt.active {
 		return m.updatePrompt(msg)
@@ -290,8 +306,8 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 		m.mode = modeNormal
 		m.compose.Blur()
 		return nil
-	case "tab":
-		return m.nextUnread()
+	case "tab", "shift+tab", "home":
+		return m.paneKey(msg)
 	case "pgup", "pgdown":
 		return m.scrollStream(msg)
 	case "enter":
@@ -346,8 +362,8 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			m.cursor = len(m.msgs[m.selName()]) - 1
 		}
 		return m.moveCursor(-1)
-	case "tab":
-		return m.nextUnread()
+	case "tab", "shift+tab", "home":
+		return m.paneKey(msg)
 	case "pgup", "pgdown":
 		return m.scrollStream(msg)
 	case "g":
@@ -376,9 +392,68 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		return m.openSearch()
 	case "m":
 		return m.openMemories()
-	case "h", "?":
+	case "h":
 		return m.openHealth()
+	case "?":
+		return m.openHelp()
 	}
+	return nil
+}
+
+// pane reports which main-screen region has focus.
+func (m *Model) pane() pane {
+	switch {
+	case m.mode == modeInsert:
+		return paneCompose
+	case m.cursor >= 0:
+		return paneStream
+	default:
+		return paneChannels
+	}
+}
+
+// paneKey handles tab (next pane), shift+tab (previous pane), and home
+// (channel list), skipping panes with nothing to focus: the stream when the
+// channel has no messages, compose when no channel is selected.
+func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
+	d := 1
+	switch keyString(msg) {
+	case "shift+tab":
+		d = -1
+	case "home":
+		return m.focusPane(paneChannels)
+	}
+	p := m.pane()
+	for range paneCount - 1 {
+		p = (p + pane(d) + paneCount) % paneCount
+		if p == paneChannels || (p == paneStream && len(m.msgs[m.selName()]) > 0) || (p == paneCompose && m.selName() != "") {
+			return m.focusPane(p)
+		}
+	}
+	return nil
+}
+
+// focusPane moves focus. Entering the stream keeps a cursor that is still
+// valid, else lands on the newest message; leaving it resumes following new
+// messages if the view is at the bottom (moveCursor stops following).
+func (m *Model) focusPane(p pane) tea.Cmd {
+	if p == paneStream {
+		m.mode = modeNormal
+		m.compose.Blur()
+		if n := len(m.msgs[m.selName()]); m.cursor < 0 || m.cursor >= n {
+			m.cursor = n - 1
+		}
+		return m.moveCursor(0)
+	}
+	m.follow = m.stream.AtBottom()
+	if p == paneCompose {
+		m.mode = modeInsert
+		return m.compose.Focus()
+	}
+	m.mode = modeNormal
+	m.compose.Blur()
+	m.cursor = -1
+	m.refreshStream()
 	return nil
 }
 
@@ -412,7 +487,7 @@ func (m *Model) placeCursor(seq int64) {
 
 // scrollCursorIntoView clamps the stream's YOffset so cursorLine (the
 // cursor's first rendered line, set by renderStream) lies within the visible
-// window, scrolling by the minimum amount rather than recentring every move.
+// window, scrolling by the minimum amount rather than recentering every move.
 func (m *Model) scrollCursorIntoView() {
 	if m.cursor < 0 || m.cursorLine < 0 || m.stream.Height <= 0 {
 		return
@@ -512,17 +587,6 @@ func (m *Model) selectChannel(i int) tea.Cmd {
 	m.stream.GotoBottom()
 	if !m.loaded[ch] {
 		return m.loadHistory(ch, nil)
-	}
-	return nil
-}
-
-func (m *Model) nextUnread() tea.Cmd {
-	n := len(m.channels)
-	for k := 1; k <= n; k++ {
-		i := (m.sel + k) % n
-		if m.unread(m.channels[i].Name) > 0 {
-			return m.selectChannel(i)
-		}
 	}
 	return nil
 }

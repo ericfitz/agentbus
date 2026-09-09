@@ -29,8 +29,10 @@ func (m *Model) openHealth() tea.Cmd {
 
 func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 	switch keyString(msg) {
-	case "esc", "h", "?":
+	case "esc", "h":
 		m.mode = modeNormal
+	case "?":
+		return m.openHelp()
 	case "up", "k":
 		m.health.scroll = max(m.health.scroll-1, 0)
 	case "down", "j":
@@ -111,14 +113,14 @@ func (m Model) healthLines() []string {
 		lastB = m.lastBatchAt.Format("15:04:05")
 	}
 	p("%s %s · %s %s · %d gaps\n\n", dim.Render("receive"), recv, dim.Render("last batch"), lastB, m.gapCount)
-	b.WriteString(dim.Render("theme") + "\n")
+	b.WriteString(dim.Render("theme") + dim.Render(" · config value, or the environment variable that overrides it") + "\n")
 	for _, v := range themeVars {
-		p("  %s %s\n", v.env, th.Sources[v.env])
+		p("  %s %s", v.key, th.Sources[v.key])
+		if env := th.Overrides[v.key]; env != "" {
+			p(" %s", dim.Render("← "+env))
+		}
+		b.WriteString("\n")
 	}
-	b.WriteString("\n" + dim.Render("keys") + "\n")
-	p("  %s\n", dim.Render("j/k channels · ↑/↓ stream cursor · tab next unread · r reply · c new channel · s toggle subscribe"))
-	p("  %s\n", dim.Render("/ search · m memories · h ? health · i enter compose · esc back · q quit"))
-	p("  %s\n", dim.Render("compose: enter send · alt+enter newline · ↑ recall · ctrl+u clear"))
 	p("\n%s %s\n", dim.Render("config ·"), cfg.Path)
 	js, err := json.MarshalIndent(cfg, "  ", "  ")
 	if err != nil {
@@ -134,5 +136,5 @@ func (m Model) viewHealth() string {
 	if m.health.scroll < len(lines) {
 		lines = lines[m.health.scroll:]
 	}
-	return m.overlay("health", m.theme.Health, strings.Join(lines, "\n"), "o open config in $EDITOR  ↑↓ scroll  esc close")
+	return m.overlay("health", m.theme.Health, strings.Join(lines, "\n"), m.hints("o", "open config in $EDITOR", "↑↓", "scroll", "?", "help", "esc", "close"))
 }

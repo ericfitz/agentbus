@@ -17,18 +17,39 @@ https://claude.ai/code/artifact/6bcf9b52-d0d3-4727-a373-25ed6621c69f
 3. **Identity: fixed human name.** `tui_name` in config, default the OS user
    name, validated by the register name rule; `--as` overrides.
 4. **Layout: chat client.** Left rail channels with unread counts and a
-   memory marker; centre stream of the selected channel; right rail live
+   memory marker; center stream of the selected channel; right rail live
    sessions; compose line; status bar.
 5. **Secondary views: search, memory browser, health/config.** Message
    detail deferred.
 6. **Framework: Bubble Tea + Lip Gloss.**
-7. **Theming: environment variables, ANSI colours only (v1).** Added
-   2026-09-08 after the canvas review. One variable per colour role; see
+7. **Theming: environment variables, ANSI colors only (v1).** Added
+   2026-09-08 after the canvas review. One variable per color role; see
    "Theming" below. Richer values (`#RGB`, `#RRGGBB`) may follow in a later
    version, so the parser must reject them with a clear message now rather
    than silently accept them.
 
-## Behaviour
+## Human-made decisions (2026-09-09, after the first TTY session)
+
+8. **Colors are config settings; environment variables override.** Each
+   color role is a `tui_*_color` key in the config file, named and validated
+   like every other setting (snake_case, strict validation at load). The
+   `AGENTBUS_TUI_*COLOR` variables stay and override the file for one run.
+   Supersedes the "no config-file keys for colors" line of decision 7.
+9. **`tab` cycles panes; `shift+tab` reverses; `home` returns to the
+   channel list.** The panes are the channel list, the message list, and
+   the compose line, in that order, wrapping. A pane with nothing to focus
+   is skipped (the message list of an empty channel, compose with no
+   channel selected). `home` always lands on the channel list so one key
+   reaches a known state. Replaces `tab` = next unread channel.
+10. **`?` opens a dedicated help overlay; `h` opens health.** Help lists the
+    full keymap (including `shift+tab` and `home`, which the status bar
+    does not mention); health no longer embeds the keymap.
+11. **Key hints and placeholders are marked.** In status bars and overlay
+    footers keys render in the agent color and descriptions dim. Text the
+    user must supply is written as a placeholder, e.g. `<name> [memory]`.
+12. **American English** in all code, comments, and documents.
+
+## Behavior
 
 - Start: Register(tui_name, resume) → ListChannels → Subscribe to all →
   History(selected, last 200).
@@ -45,41 +66,43 @@ https://claude.ai/code/artifact/6bcf9b52-d0d3-4727-a373-25ed6621c69f
 - Errors: one-line toast above the status bar for 5 s or until a key.
 - Quit: Close() waits for background goroutines, as `mcp` does.
 
-Keymap, colour rules, and the required config/bus additions are on the
+Keymap, color rules, and the required config/bus additions are on the
 canvas's "Design notes" artboard. Bus changes needed: none required;
 optional `last tick` field on StatusReport.
 
 ## Theming
 
-Colours come from environment variables read once at startup. Each role
-maps to one variable; unset means the design default shown on the canvas.
+Colors are config settings (decision 8), read once at startup; each
+`AGENTBUS_TUI_*COLOR` environment variable overrides its key for one run.
+Unset means the design default shown on the canvas.
 
-| Variable                    | Role                                                        | Default        |
-|-----------------------------|-------------------------------------------------------------|----------------|
-| `AGENTBUS_TUI_BGCOLOR`      | screen background                                           | terminal default |
-| `AGENTBUS_TUI_TEXTCOLOR`    | message content, default foreground                         | terminal default |
-| `AGENTBUS_TUI_DIMCOLOR`     | timestamps, contexts, dividers, help text, panel borders    | bright black   |
-| `AGENTBUS_TUI_AGENTCOLOR`   | agent sender names, selected channel, key hints, search border | cyan        |
-| `AGENTBUS_TUI_USERCOLOR`    | the human's own name and messages                            | yellow         |
-| `AGENTBUS_TUI_MEMCOLOR`     | memory channels (◆), memory hits, memories overlay border   | magenta        |
-| `AGENTBUS_TUI_HEALTHCOLOR`  | live heartbeat dot, ok states, health overlay border        | green          |
-| `AGENTBUS_TUI_WARNCOLOR`    | warnings: text-only fallback badge, capacity notice, idle dot | yellow       |
-| `AGENTBUS_TUI_ERRORCOLOR`   | errors, error toast, delete confirmation                    | red            |
-| `AGENTBUS_TUI_SELCOLOR`     | background of the selected row                              | bright black   |
+| Config key              | Environment override        | Role                                                        | Default        |
+|-------------------------|-----------------------------|-------------------------------------------------------------|----------------|
+| `tui_background_color`  | `AGENTBUS_TUI_BGCOLOR`      | screen background                                           | terminal default |
+| `tui_text_color`        | `AGENTBUS_TUI_TEXTCOLOR`    | message content, default foreground                         | terminal default |
+| `tui_dim_color`         | `AGENTBUS_TUI_DIMCOLOR`     | timestamps, contexts, dividers, help text, panel borders    | bright black   |
+| `tui_agent_color`       | `AGENTBUS_TUI_AGENTCOLOR`   | agent sender names, selected channel, key hints, search border | cyan        |
+| `tui_user_color`        | `AGENTBUS_TUI_USERCOLOR`    | the human's own name and messages                            | yellow         |
+| `tui_memory_color`      | `AGENTBUS_TUI_MEMCOLOR`     | memory channels (◆), memory hits, memories overlay border   | magenta        |
+| `tui_health_color`      | `AGENTBUS_TUI_HEALTHCOLOR`  | live heartbeat dot, ok states, health overlay border        | green          |
+| `tui_warn_color`        | `AGENTBUS_TUI_WARNCOLOR`    | warnings: text-only fallback badge, capacity notice, idle dot | yellow       |
+| `tui_error_color`       | `AGENTBUS_TUI_ERRORCOLOR`   | errors, error toast, delete confirmation                    | red            |
+| `tui_selection_color`   | `AGENTBUS_TUI_SELCOLOR`     | background of the selected row                              | bright black   |
 
-Accepted values in v1: the sixteen ANSI colour names (`black`, `red`,
+Accepted values in v1: the sixteen ANSI color names (`black`, `red`,
 `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, and their `bright`
 forms, e.g. `brightblack`), the integers `0`-`15`, and `default` (the
-terminal's own colour, useful for `BGCOLOR` on transparent terminals).
+terminal's own color, useful for `BGCOLOR` on transparent terminals).
 Matching is case-insensitive. Anything else, including `#RGB` and
-`#RRGGBB`, is rejected: the TUI prints one line to stderr naming the
-variable and the accepted forms, then uses the default for that role and
-continues. Lip Gloss takes ANSI indices directly, so the parser is a
-name-to-index table plus the integer range check. No config-file keys for
-colours in v1; the Health overlay lists the resolved theme under a
-"theme" heading so a user can see what took effect.
+`#RRGGBB`, is rejected: a bad config value fails config load like any
+other setting; a bad environment variable makes the TUI print one line to
+stderr naming the variable and the accepted forms, then keep the config
+value and continue. Lip Gloss takes ANSI indices directly, so the parser is
+a name-to-index table plus the integer range check. The Health overlay
+lists the resolved theme under a "theme" heading, marking each value an
+environment variable overrode, so a user can see what took effect.
 
 ## Out of scope for v1
 
 Mouse support, multiple humans per TUI, in-place config editing, reset from
-the TUI, truecolour or `#RRGGBB` theme values, per-colour config-file keys.
+the TUI, truecolor or `#RRGGBB` theme values.

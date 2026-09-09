@@ -75,10 +75,10 @@ func (m *Model) updatePrompt(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// createChannelPrompt asks "channel name [kind]" where kind is "memory" or
+// createChannelPrompt asks "<name> [memory]": the kind is "memory" or
 // omitted for ordinary; e.g. "notes memory".
 func (m *Model) createChannelPrompt() tea.Cmd {
-	return m.openPrompt("new channel (name, or name memory)", func(m *Model, v string) tea.Cmd {
+	return m.openPrompt("new channel <name> [memory]", func(m *Model, v string) tea.Cmd {
 		name, kind, _ := strings.Cut(v, " ")
 		kind = strings.TrimSpace(kind)
 		if kind == "" {

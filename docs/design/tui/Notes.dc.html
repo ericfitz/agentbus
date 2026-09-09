@@ -51,7 +51,7 @@ quit      Close() waits for heartbeat and tick goroutines, as mcp does</div></di
   <div style="display: flex; flex-direction: column; gap: 6px;">
     <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">keymap</div>
     <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre;"><span class="b">global</span>    <span class="cyan">?</span> help   <span class="cyan">/</span> search   <span class="cyan">m</span> memories   <span class="cyan">h</span> health   <span class="cyan">q</span> quit   <span class="cyan">esc</span> close overlay / cancel reply
-<span class="b">channels</span>  <span class="cyan">j k</span> or <span class="cyan">↑ ↓</span> select   <span class="cyan">tab</span> next unread   <span class="cyan">c</span> create channel   <span class="cyan">s</span> toggle subscribe
+<span class="b">channels</span>  <span class="cyan">j k</span> or <span class="cyan">↑ ↓</span> select   <span class="cyan">tab shift+tab</span> next / previous pane   <span class="cyan">home</span> channels   <span class="cyan">c</span> create channel &lt;name&gt; [memory]   <span class="cyan">s</span> toggle subscribe
 <span class="b">stream</span>    <span class="cyan">pgup pgdn</span> scroll   <span class="cyan">g G</span> oldest / newest   <span class="cyan">enter</span> detail (metadata, refs, raw JSON)   <span class="cyan">r</span> reply
 <span class="b">compose</span>   <span class="cyan">enter</span> send   <span class="cyan">shift+enter</span> newline   <span class="cyan">↑</span> recall last sent   <span class="cyan">ctrl+u</span> clear
 <span class="b">search</span>    <span class="cyan">tab</span> mode text → semantic → both   <span class="cyan">enter</span> jump to hit in its channel
@@ -60,13 +60,13 @@ quit      Close() waits for heartbeat and tick goroutines, as mcp does</div></di
   </div>
 
   <div style="display: flex; flex-direction: column; gap: 6px;">
-    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">colour rules (ANSI-safe, honours the terminal palette)</div>
+    <div class="dim" style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;">color rules (ANSI-safe, honors the terminal palette)</div>
     <div class="panel" style="padding: 8px 12px;"><div style="white-space: pre;"><span class="cyan">cyan</span>     agent sender names, selected channel, key hints, focused overlay border
 <span class="amber">amber</span>    the human’s own name and messages, warnings (text-only fallback, capacity)
 <span class="green">green</span>    live heartbeat dot, ok states, Health border
 <span class="mag">magenta</span>  memory channels (◆) and the Memories overlay border
 <span class="red">red</span>      errors and delete confirmation
-<span class="dim">dim</span>      timestamps, contexts, dividers, help text · never colour message content</div></div>
+<span class="dim">dim</span>      timestamps, contexts, dividers, help text · never color message content</div></div>
   </div>
 
   <div style="display: flex; flex-direction: column; gap: 6px;">

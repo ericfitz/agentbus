@@ -160,5 +160,5 @@ func (m Model) viewSearch() string {
 		b.WriteString("\n" + th.Style(th.Warn).Render("text only — embedding endpoint unreachable"))
 	}
 	title := "search  " + dim.Render("mode "+m.search.mode+" · tab to switch")
-	return m.overlay(title, th.Agent, b.String(), "enter search / open  ↑↓ move  esc close")
+	return m.overlay(title, th.Agent, b.String(), m.hints("enter", "search / open", "tab", "mode", "↑↓", "move", "esc", "close"))
 }

@@ -20,7 +20,7 @@ func Run(cfg config.Config, as string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	theme := LoadTheme(os.Getenv, stderr)
+	theme := LoadTheme(cfg, os.Getenv, stderr)
 	c, err := newClient(cfg, as, log)
 	if err != nil {
 		return err

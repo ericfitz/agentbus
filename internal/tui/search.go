@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -53,6 +54,7 @@ func (m *Model) updateSearch(msg tea.Msg) tea.Cmd {
 		default:
 			m.search.mode = "text"
 		}
+		m.search.ran = false // the last results answered the old mode; enter must re-run, not open a hit
 		return nil
 	case "up":
 		m.search.cursor = max(m.search.cursor-1, 0)
@@ -83,58 +85,78 @@ func (m *Model) runSearch() tea.Cmd {
 	in := bus.SearchInput{Query: q, Mode: m.search.mode, Count: searchCount}
 	return func() tea.Msg {
 		res, err := c.b.Search(c.as, in)
-		return searchMsg{res: res, err: err}
+		return searchMsg{query: q, res: res, err: err}
 	}
 }
 
-// jumpTo selects the hit's channel, puts the normal-mode cursor on the hit,
-// and loads the page of history before it (the historyMsg handler keeps the
-// cursor on the hit when that page is prepended).
+// jumpTo selects the hit's channel (loading its latest page on a first
+// visit, via selectChannel's own returned cmd), puts the normal-mode cursor
+// on the hit, and loads the page of history before it too, so no gap is
+// left between the hit and whatever selectChannel already loaded (the
+// historyMsg handler keeps the cursor on the hit across both loads).
 func (m *Model) jumpTo(hit bus.Message) tea.Cmd {
+	var cmds []tea.Cmd
 	for i, c := range m.channels {
 		if c.Name == hit.Channel {
-			m.selectChannel(i)
+			cmds = append(cmds, m.selectChannel(i))
 		}
 	}
-	m.loaded[hit.Channel] = true
+	if len(cmds) == 0 {
+		return m.showToast("channel " + hit.Channel + " not in the rail yet")
+	}
 	m.addMessages(hit.Channel, []bus.Message{hit})
 	m.markSeen(hit.Channel)
 	m.placeCursor(hit.Seq)
 	before := hit.Seq
-	c := m.c
-	return func() tea.Msg {
-		ms, err := c.b.History(c.as, hit.Channel, &before, nil, historyPage)
-		return historyMsg{channel: hit.Channel, msgs: ms, prepend: true, err: err}
-	}
+	return tea.Batch(append(cmds, m.loadHistory(hit.Channel, &before))...)
 }
 
 func (m Model) viewSearch() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
+	w, h := m.overlaySize()
+	rowWidth := w - 4
 	var b strings.Builder
 	b.WriteString(m.search.input.View() + "\n\n")
-	for i, h := range m.search.hits {
+
+	hits := m.search.hits
+	// visible reserves the input line, the blank line after it, and the
+	// summary/badge lines below the list, so the hit rows plus that fixed
+	// chrome never exceed the overlay's body height.
+	visible := max(h-4-4, 1)
+	start := 0
+	if len(hits) > visible {
+		start = max(0, min(m.search.cursor-visible/2, len(hits)-visible))
+	}
+	end := min(start+visible, len(hits))
+	for i := start; i < end; i++ {
+		hit := hits[i]
 		mark := "  "
-		if h.MemoryID != nil {
+		if hit.MemoryID != nil {
 			mark = th.Style(th.Mem).Render("◆ ")
 		}
 		rev := ""
-		if h.Revision != nil {
-			rev = " r" + itoa(*h.Revision)
+		if hit.Revision != nil {
+			rev = " r" + itoa(*hit.Revision)
 		}
-		first := strings.SplitN(h.Content, "\n", 2)[0]
-		line := fmt.Sprintf("%s%s #%d%s %s %s  %s", mark, h.Channel, h.Seq, rev, th.Style(th.Agent).Render(h.Sender), dim.Render(clock(h.CreatedAt)), first)
+		first := strings.SplitN(hit.Content, "\n", 2)[0]
+		line := fmt.Sprintf("%s%s #%d%s %s %s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(hit.Sender), dim.Render(clock(hit.CreatedAt)), first)
 		if i == m.search.cursor {
 			line = th.Style(th.Agent).Render("› ") + line
 		} else {
 			line = "  " + line
 		}
-		b.WriteString(line + "\n")
+		b.WriteString(lipgloss.NewStyle().MaxWidth(rowWidth).Render(line) + "\n")
 	}
 	if m.search.ran {
-		summary := fmt.Sprintf("%d results", len(m.search.hits))
-		if m.search.err != nil {
+		var summary string
+		switch {
+		case m.search.err != nil:
 			summary = th.Style(th.Error).Render("✗ " + errText(m.search.err))
+		case len(hits) > visible:
+			summary = fmt.Sprintf("showing %d-%d of %d results", start+1, end, len(hits))
+		default:
+			summary = fmt.Sprintf("%d results", len(hits))
 		}
 		b.WriteString("\n" + dim.Render(summary))
 	}

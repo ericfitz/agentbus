@@ -211,6 +211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.showToast("send: "+errText(msg.err)))
 		}
 	case searchMsg:
+		if msg.query != m.search.query {
+			break // stale: the overlay was reopened or a newer search is already in flight
+		}
 		m.search.err = msg.err
 		m.search.ran = true
 		if msg.err == nil {
@@ -220,6 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.search.mode != "text" {
 				m.search.semanticDown = msg.res.SemanticUnavailable
 			}
+		} else {
+			m.search.hits = nil
+			m.search.textOnly = false
 		}
 	}
 	switch m.mode {

@@ -25,8 +25,9 @@ type (
 		err     error
 	}
 	searchMsg struct {
-		res bus.SearchResult
-		err error
+		query string // the query that produced res, so a stale response (search reopened, or a newer search in flight) is ignored
+		res   bus.SearchResult
+		err   error
 	}
 	memListMsg struct {
 		channel string

@@ -278,11 +278,16 @@ func (m Model) renderStatusBar() string {
 	return left + strings.Repeat(" ", gap) + help
 }
 
+// overlaySize returns the box width and height overlay renders at, so a
+// view (e.g. viewSearch) can size and window its own content to match.
+func (m Model) overlaySize() (w, h int) {
+	return min(max(m.width-8, 40), 100), max(m.height-4, 10)
+}
+
 // overlay renders a titled, bordered box centred on the screen; the border
 // colour names the overlay (cyan search, magenta memories, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
-	w := min(max(m.width-8, 40), 100)
-	h := max(m.height-4, 10)
+	w, h := m.overlaySize()
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		m.theme.Style(border).Bold(true).Render(title),
 		lipgloss.NewStyle().Width(w-4).Height(h-4).MaxHeight(h-4).Render(body),

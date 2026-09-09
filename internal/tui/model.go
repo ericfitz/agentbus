@@ -78,11 +78,8 @@ type Model struct {
 
 	search searchState
 	mem    memState
-	health healthState //nolint:unused // consumed by Task 10
+	health healthState
 }
-
-// Placeholder until Task 10 defines the real overlay state.
-type healthState struct{} //nolint:unused // consumed by Task 10
 
 func New(c *client, th Theme) Model {
 	ta := textarea.New()
@@ -211,6 +208,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.query != m.search.query {
 			break // stale: the overlay was reopened or a newer search is already in flight
 		}
+		m.recordQuery(msg.err == nil && !msg.res.SemanticUnavailable)
 		m.search.err = msg.err
 		m.search.ran = true
 		if msg.err == nil {
@@ -224,6 +222,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search.hits = nil
 			m.search.textOnly = false
 		}
+	case configEditedMsg:
+		cmds = append(cmds, m.onConfigEdited(msg))
 	case memListMsg:
 		if msg.channel != m.mem.channel {
 			break // stale: memories was reopened on a different channel
@@ -684,11 +684,6 @@ func (m *Model) fitCompose() {
 }
 
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
-
-// Stub replaced by Task 10. Returns nil so this package compiles before it
-// lands.
-func (m *Model) openHealth() tea.Cmd          { return nil }
-func (m *Model) updateHealth(tea.Msg) tea.Cmd { return nil }
 
 const (
 	leftRail  = 18

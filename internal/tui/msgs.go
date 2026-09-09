@@ -1,4 +1,3 @@
-//nolint:unused // message types for later TUI tasks; see task briefs 5-10
 package tui
 
 import "github.com/ericfitz/agentbus/internal/bus"

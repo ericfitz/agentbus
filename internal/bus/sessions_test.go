@@ -7,18 +7,31 @@ import (
 	"time"
 )
 
-func TestRegisterAllocatesSuffixes(t *testing.T) {
+func TestRegisterAllocatesSuffixesAcrossProcessesOnly(t *testing.T) {
 	b := newTestBus(t)
 	r1, err := b.Register("Sam", "", "repo", true)
 	if err != nil || r1.Sender != "Sam" {
 		t.Fatalf("%+v %v", r1, err)
 	}
-	r2, _ := b.Register("Sam", "", "repo", true)
-	if r2.Sender != "Sam2" {
-		t.Fatal(r2.Sender)
+	// The same process registering the same name again is idempotent.
+	r2, _ := b.Register("Sam", "", "repo2", true)
+	if r2.Sender != "Sam" || !r2.Resumed {
+		t.Fatalf("re-register must reuse the held name: %+v", r2)
+	}
+	var ctx string
+	if err := b.db.QueryRow("SELECT context FROM sessions WHERE sender='Sam'").Scan(&ctx); err != nil || ctx != "repo2" {
+		t.Fatalf("re-register must refresh context, got %q %v", ctx, err)
+	}
+	// Another live process gets a suffix, and its own re-register keeps it.
+	other, _ := Open(b.cfg, b.log)
+	defer func() { _ = other.Close() }()
+	o1, _ := other.Register("Sam", "", "repo", true)
+	o2, _ := other.Register("Sam", "", "repo", true)
+	if o1.Sender != "Sam2" || o2.Sender != "Sam2" {
+		t.Fatal(o1.Sender, o2.Sender)
 	}
 	c1, _ := b.Register("implement804", "Sam2", "repo", true)
-	c2, _ := b.Register("implement804", "Sam2", "repo", true)
+	c2, _ := other.Register("implement804", "Sam2", "repo", true)
 	if c1.Sender != "Sam2/implement804" || c2.Sender != "Sam2/implement804-2" {
 		t.Fatal(c1.Sender, c2.Sender)
 	}

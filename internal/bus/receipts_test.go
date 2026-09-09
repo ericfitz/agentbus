@@ -9,7 +9,7 @@ import (
 func TestIdempotentSendReplaysAndConflicts(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	in := SendInput{Channel: "dev", Content: "once", IdempotencyKey: "k1", Metadata: map[string]string{"b": "2", "a": "1"}}
 	r1, err := b.Send(sam, in)
 	if err != nil {
@@ -21,7 +21,7 @@ func TestIdempotentSendReplaysAndConflicts(t *testing.T) {
 		t.Fatalf("replay must return original: %+v %v", r2, err)
 	}
 	var n int
-	b.db.QueryRow("SELECT count(*) FROM messages").Scan(&n)
+	_ = b.db.QueryRow("SELECT count(*) FROM messages").Scan(&n)
 	if n != 1 {
 		t.Fatal("replay inserted a row")
 	}
@@ -42,7 +42,7 @@ func TestRateLimits(t *testing.T) {
 	b.cfg.SendMessagesPerSecond = 2
 	b.limits = newLimiter(b.cfg)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	for i := 0; i < 2; i++ {
 		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "x"}); err != nil {
 			t.Fatal(err)

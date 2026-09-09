@@ -189,17 +189,17 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 		var s int64
 		var c string
 		if err := rows.Scan(&s, &c); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, internal(err)
 		}
 		seqs = append(seqs, s)
 		texts = append(texts, c)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return 0, internal(err)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(seqs) == 0 {
 		return 0, nil
 	}
@@ -213,7 +213,7 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var inserted int64
 	for i, s := range seqs {
 		res, err := tx.Exec(`INSERT OR REPLACE INTO embeddings(seq,model,vector)

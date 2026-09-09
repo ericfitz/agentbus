@@ -8,7 +8,7 @@ import (
 func TestMemoryEditDeleteLifecycle(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
 	id := *c.MemoryID
 	e, err := b.EditMemory(sam, EditInput{ID: id, Content: "roses are blue"})
@@ -20,7 +20,7 @@ func TestMemoryEditDeleteLifecycle(t *testing.T) {
 		t.Fatalf("%+v %v", m, err)
 	}
 	var tomb int
-	b.db.QueryRow("SELECT tombstone FROM messages WHERE seq=?", c.Seq).Scan(&tomb)
+	_ = b.db.QueryRow("SELECT tombstone FROM messages WHERE seq=?", c.Seq).Scan(&tomb)
 	if tomb != 1 {
 		t.Fatal("old revision must be tombstoned")
 	}
@@ -38,7 +38,7 @@ func TestMemoryEditDeleteLifecycle(t *testing.T) {
 func TestMemoryEditIdempotent(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
 	in := EditInput{ID: *c.MemoryID, Content: "v2", IdempotencyKey: "e1"}
 	e1, _ := b.EditMemory(sam, in)
@@ -47,7 +47,7 @@ func TestMemoryEditIdempotent(t *testing.T) {
 		t.Fatal("retry manufactured a revision")
 	}
 	var n int
-	b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=?", *c.MemoryID).Scan(&n)
+	_ = b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=?", *c.MemoryID).Scan(&n)
 	if n != 2 {
 		t.Fatal(n)
 	}
@@ -59,7 +59,7 @@ func TestMemoryEditIdempotent(t *testing.T) {
 func TestEditReceiptReplaysAfterMemoryDeleted(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
 	in := EditInput{ID: *c.MemoryID, Content: "v2", IdempotencyKey: "e1"}
 	e1, err := b.EditMemory(sam, in)
@@ -79,15 +79,15 @@ func TestMemoryRevisionsDeliverOnceWithCurrentContent(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	kim := reg(t, b, "Kim")
-	b.CreateChannel(sam, "mem", "memory")
-	b.Subscribe(kim, "mem", "now")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	_ = b.Subscribe(kim, "mem", "now")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
-	b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"})
+	_, _ = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"})
 	r, _ := b.Receive(kim, ReceiveInput{})
 	if len(r.Messages) != 1 || r.Messages[0].Content != "v2" || *r.Messages[0].Revision != 2 {
 		t.Fatalf("superseded revision must be skipped: %+v", r.Messages)
 	}
-	b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v3"})
+	_, _ = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v3"})
 	r, _ = b.Receive(kim, ReceiveInput{Ack: r.Batch})
 	if len(r.Messages) != 1 || r.Messages[0].Content != "v3" {
 		t.Fatalf("later edit delivered at its own position: %+v", r.Messages)
@@ -99,8 +99,8 @@ func TestMemoryRevisionsDeliverOnceWithCurrentContent(t *testing.T) {
 func TestEditMemoryOversizedSkipsHookAndEviction(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	fill(t, b, sam, "dev", 20, 2000)
 	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
 	if err != nil {

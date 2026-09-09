@@ -114,16 +114,16 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	// (0) database gets stamped.
 	var uv int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	switch {
 	case uv > schemaVersion:
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("database schema version %d is newer than this binary supports (schema version %d)", uv, schemaVersion)
 	case uv == 0:
 		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 	}
@@ -133,26 +133,26 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	// on later opens once the mode has stuck.
 	var av int
 	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&av); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	if av != 2 {
 		if _, err := db.Exec("PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 		if _, err := db.Exec("VACUUM"); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 	}
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
 	owner, err := randomToken()
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	b := &Bus{db: db, cfg: cfg, log: log, owner: owner, Now: time.Now}
@@ -160,7 +160,7 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	if cfg.EmbeddingEndpoint != "" {
 		e, err := newEmbedder(cfg)
 		if err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 		b.embedder = e

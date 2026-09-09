@@ -49,3 +49,17 @@ Pushed to `main` and tagged `v0.1.1`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. Verified with
   `brew install ericfitz/tap/agentbus` and `brew test agentbus`.
+
+## 2026-09-08 (evening): search fallback docs, query timeout, lint clean
+
+Pushed to `main` (unreleased since v0.1.1):
+
+- `search` tool description documents the text fallback and
+  `semantic_unavailable`; new config key `embedding_query_timeout_seconds`
+  (default 10, range 0.1-120) replaces the fixed query-embedding timeout.
+- Three deferred runtime minors resolved (see the plan doc).
+- TUI design spec `docs/superpowers/specs/2026-09-08-agentbus-tui-design.md`
+  and canvas sources in `docs/design/tui/`.
+- `golangci-lint run ./...` is clean: 227 findings fixed (224 errcheck, mostly
+  `_ =` on discarded `Close`/`Rollback`/test setup returns; 3 staticcheck).
+  No behavior change.

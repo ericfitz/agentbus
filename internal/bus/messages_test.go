@@ -63,7 +63,7 @@ func TestListChannelsTrimsToWholeRecordPrefix(t *testing.T) {
 func TestSendAndHistory(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	one := int64(1)
 	r1, err := b.Send(sam, SendInput{Channel: "dev", Content: "first", Refs: []Ref{{Kind: "windows_path", Value: `C:\x\y`}}})
 	if err != nil || r1.Seq != 1 {
@@ -91,7 +91,7 @@ func TestSendAndHistory(t *testing.T) {
 func TestHistoryBeforeKeepsRowsNearestCursor(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	// Content sized so each envelope is ~397 bytes; with trimToBytes's
 	// per-record framing allowance (#27) and History's zero reserve (C2),
 	// 2 fit in a 1 KiB page and 3 don't.
@@ -116,7 +116,7 @@ func TestHistoryBeforeKeepsRowsNearestCursor(t *testing.T) {
 func TestSendValidation(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	cases := []SendInput{
 		{Channel: "nope", Content: "x"},
 		{Channel: "dev", Content: ""},
@@ -134,7 +134,7 @@ func TestSendValidation(t *testing.T) {
 func TestSendOnMemoryChannelCreatesMemory(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	r, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
 	if err != nil || r.MemoryID == nil || *r.MemoryID != r.Seq {
 		t.Fatalf("%+v %v", r, err)
@@ -151,7 +151,7 @@ func TestSendOnMemoryChannelCreatesMemory(t *testing.T) {
 func TestSendReceiptReplaysAfterReplyToEvicted(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	base, err := b.Send(sam, SendInput{Channel: "dev", Content: "base"})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestSendRejectsWhenContextPushesEnvelopeOverLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sam := r.Sender
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "short"}); err == nil || !strings.Contains(err.Error(), "validation") {
 		t.Fatalf("send must reject when the registered context pushes the envelope over max_message_kib: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestSendRejectsWhenContextPushesEnvelopeOverLimit(t *testing.T) {
 func TestSendOversizedSkipsHookAndEviction(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	fill(t, b, sam, "dev", 20, 2000)
 	var before int
 	if err := b.db.QueryRow("SELECT count(*) FROM messages").Scan(&before); err != nil {

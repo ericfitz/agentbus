@@ -24,7 +24,7 @@ func (b *Bus) liveSessions(db *sql.DB) ([]Session, error) {
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Session{}
 	for rows.Next() {
 		var s Session
@@ -48,7 +48,7 @@ func (b *Bus) listChannels(db *sql.DB) ([]Channel, error) {
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Channel{}
 	for rows.Next() {
 		var c Channel
@@ -114,7 +114,7 @@ func (b *Bus) Reset() error {
 	if err != nil {
 		return internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for _, t := range []string{"embeddings", "messages", "subscriptions", "sessions", "channels", "receipts", "notices"} {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 			return internal(err)

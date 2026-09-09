@@ -13,13 +13,13 @@ import (
 func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	first, err := b.Send(sam, SendInput{Channel: "dev", Content: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	admin, _ := Open(b.cfg, b.log)
-	defer admin.Close()
+	defer func() { _ = admin.Close() }()
 	if n, _ := admin.LiveSessionCount(); n != 1 {
 		t.Fatal(n)
 	}
@@ -33,7 +33,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	if r.Sender != "Sam" || r.Resumed {
 		t.Fatalf("%+v", r)
 	}
-	b.CreateChannel("Sam", "dev", "ordinary")
+	_, _ = b.CreateChannel("Sam", "dev", "ordinary")
 	s, _ := b.Send("Sam", SendInput{Channel: "dev", Content: "z"})
 	// seq must stay monotonic across a reset (A13.1): it is never reused, so
 	// an in-flight embedding HTTP call from another process keyed by seq
@@ -55,7 +55,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 func TestStatusReportEmbeddingBacklogZeroWithNoEmbedder(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,12 +83,12 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 		var req struct {
 			Input []string `json:"input"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		var data []map[string]any
 		for i := range req.Input {
 			data = append(data, map[string]any{"index": i, "embedding": []float64{1, 0, 0}})
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": data})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	defer srv.Close()
 	// Guarantee the handler unblocks even if an assertion below fails
@@ -98,7 +98,7 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 
 	// Hold embedMu so Send's own background embedSoon pass no-ops; the test
 	// drives embedBatch directly so it controls exactly when the HTTP call
@@ -129,7 +129,7 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close()
+	defer func() { _ = admin.Close() }()
 	if err := admin.Reset(); err != nil {
 		t.Fatal(err)
 	}

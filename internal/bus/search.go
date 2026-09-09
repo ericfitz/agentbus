@@ -96,7 +96,7 @@ func (b *Bus) textSearch(in SearchInput, limit int) ([]SearchHit, error) {
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	hits := []SearchHit{}
 	for rows.Next() {
 		var h SearchHit
@@ -234,22 +234,22 @@ func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, 
 		var seq int64
 		var vec []byte
 		if err := vecRows.Scan(&seq, &vec); err != nil {
-			vecRows.Close()
+			_ = vecRows.Close()
 			return nil, internal(err)
 		}
 		vectors[seq] = vec
 	}
 	if err := vecRows.Err(); err != nil {
-		vecRows.Close()
+		_ = vecRows.Close()
 		return nil, internal(err)
 	}
-	vecRows.Close()
+	_ = vecRows.Close()
 
 	rows, err := b.db.Query("SELECT "+qualifiedColumns("m")+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	msgs, err := scanMessages(rows)
 	if err != nil {
 		return nil, internal(err)

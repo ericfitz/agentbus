@@ -71,7 +71,7 @@ func TestReopenKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b2.Close()
+	defer func() { _ = b2.Close() }()
 	var n int
 	if err := b2.db.QueryRow("SELECT count(*) FROM channels").Scan(&n); err != nil {
 		t.Fatal(err)
@@ -99,14 +99,14 @@ func TestDataDirWithURIMetacharactersOpensAndStaysIsolated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open %q: %v", dir, err)
 		}
-		t.Cleanup(func() { b.Close() })
+		t.Cleanup(func() { _ = b.Close() })
 		return b
 	}
 	a := openAt(dirA)
 	bb := openAt(dirB)
 
 	aSam := reg(t, a, "Sam")
-	a.CreateChannel(aSam, "dev", "ordinary")
+	_, _ = a.CreateChannel(aSam, "dev", "ordinary")
 	if _, err := a.Send(aSam, SendInput{Channel: "dev", Content: "only in a"}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestOpenRejectsNewerSchemaVersion(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		var s string
 		if err := db.QueryRow("SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master ORDER BY name)").Scan(&s); err != nil {
 			t.Fatal(err)

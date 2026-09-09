@@ -314,7 +314,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err != nil {
 		return SendResult{}, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Re-verify ownership on the transaction that is about to write (R3): a
 	// process stalled past the 30s heartbeat window may have lost this name
@@ -397,7 +397,7 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	msgs, err := scanMessages(rows)
 	if err != nil {
 		return nil, internal(err)

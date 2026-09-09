@@ -26,7 +26,7 @@ func testSession(t *testing.T) *mcp.ClientSession {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { b.Close() })
+	t.Cleanup(func() { _ = b.Close() })
 	srv := NewServer(b, cfg)
 	st, ct := mcp.NewInMemoryTransports()
 	ctx := context.Background()
@@ -37,7 +37,7 @@ func testSession(t *testing.T) *mcp.ClientSession {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cs.Close() })
+	t.Cleanup(func() { _ = cs.Close() })
 	return cs
 }
 
@@ -49,7 +49,7 @@ func call(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any)
 	}
 	text := res.Content[0].(*mcp.TextContent).Text
 	var out map[string]any
-	json.Unmarshal([]byte(text), &out)
+	_ = json.Unmarshal([]byte(text), &out)
 	return out, res
 }
 

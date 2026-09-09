@@ -98,7 +98,7 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	if err != nil {
 		return Registration{}, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec("DELETE FROM sessions WHERE heartbeat < ?", now-attachmentExpiryMs); err != nil {
 		return Registration{}, internal(err)
 	}
@@ -145,16 +145,16 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	for rows.Next() {
 		var p PendingChannel
 		if err := rows.Scan(&p.Channel, &p.Pending); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return Registration{}, internal(err)
 		}
 		reg.Pending = append(reg.Pending, p)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return Registration{}, internal(err)
 	}
-	rows.Close()
+	_ = rows.Close()
 	reg.Resumed = len(reg.Pending) > 0
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)

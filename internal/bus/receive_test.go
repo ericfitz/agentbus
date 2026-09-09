@@ -13,7 +13,7 @@ func setupTwo(t *testing.T) (*Bus, string, string) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	kim := reg(t, b, "Kim")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if err := b.Subscribe(kim, "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
@@ -22,8 +22,8 @@ func setupTwo(t *testing.T) (*Bus, string, string) {
 
 func TestReceiveAckRedeliver(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.Send(sam, SendInput{Channel: "dev", Content: "a"})
-	b.Send(sam, SendInput{Channel: "dev", Content: "b"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "a"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "b"})
 	r1, err := b.Receive(kim, ReceiveInput{})
 	if err != nil || len(r1.Messages) != 2 || r1.Batch == "" || r1.Redelivered {
 		t.Fatalf("%+v %v", r1, err)
@@ -32,7 +32,7 @@ func TestReceiveAckRedeliver(t *testing.T) {
 	if len(r2.Messages) != 2 || !r2.Redelivered || r2.Batch != r1.Batch || r2.Instruction == "" {
 		t.Fatalf("unacked batch must be redelivered: %+v", r2)
 	}
-	b.Send(sam, SendInput{Channel: "dev", Content: "c"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "c"})
 	r3, _ := b.Receive(kim, ReceiveInput{Ack: r1.Batch})
 	if len(r3.Messages) != 1 || r3.Messages[0].Content != "c" || r3.Redelivered {
 		t.Fatalf("ack must advance: %+v", r3)
@@ -49,11 +49,11 @@ func TestReceiveAckRedeliver(t *testing.T) {
 
 func TestReceiveExcludesOwnAndMergesBySeq(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.CreateChannel(sam, "ops", "ordinary")
-	b.Subscribe(kim, "ops", "now")
-	b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
-	b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
-	b.Send(sam, SendInput{Channel: "dev", Content: "d1"})
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
+	_ = b.Subscribe(kim, "ops", "now")
+	_, _ = b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "d1"})
 	r, _ := b.Receive(kim, ReceiveInput{})
 	if len(r.Messages) != 2 || r.Messages[0].Content != "o1" || r.Messages[1].Content != "d1" {
 		t.Fatalf("%+v", r.Messages)
@@ -63,8 +63,8 @@ func TestReceiveExcludesOwnAndMergesBySeq(t *testing.T) {
 		t.Fatalf("own message was already before cursor? %+v", r.Messages)
 	}
 	// Fresh subscription from oldest sees everything including own when asked.
-	b.Unsubscribe(kim, "dev")
-	b.Subscribe(kim, "dev", "oldest")
+	_ = b.Unsubscribe(kim, "dev")
+	_ = b.Subscribe(kim, "dev", "oldest")
 	r, _ = b.Receive(kim, ReceiveInput{IncludeOwn: true, Channels: []string{"dev"}})
 	if len(r.Messages) != 2 {
 		t.Fatalf("from oldest with own: %+v", r.Messages)
@@ -74,11 +74,11 @@ func TestReceiveExcludesOwnAndMergesBySeq(t *testing.T) {
 func TestReceiveGapAndExpiry(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	for i := 0; i < 3; i++ {
-		b.Send(sam, SendInput{Channel: "dev", Content: "x"})
+		_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "x"})
 	}
 	// Simulate eviction of seq 1..2.
-	b.db.Exec("DELETE FROM messages WHERE seq<=2")
-	b.db.Exec("UPDATE channels SET evicted_before_seq=3 WHERE name='dev'")
+	_, _ = b.db.Exec("DELETE FROM messages WHERE seq<=2")
+	_, _ = b.db.Exec("UPDATE channels SET evicted_before_seq=3 WHERE name='dev'")
 	r, _ := b.Receive(kim, ReceiveInput{})
 	if len(r.Gaps) != 1 || r.Gaps[0].From != 1 || r.Gaps[0].To != 2 || len(r.Messages) != 1 || r.Messages[0].Seq != 3 {
 		t.Fatalf("%+v", r)
@@ -89,7 +89,7 @@ func TestReceiveGapAndExpiry(t *testing.T) {
 		t.Fatalf("idle subscription must expire: %+v", r)
 	}
 	var n int
-	b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", kim).Scan(&n)
+	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", kim).Scan(&n)
 	if n != 0 {
 		t.Fatal("expired subscription not deleted")
 	}
@@ -98,15 +98,15 @@ func TestReceiveGapAndExpiry(t *testing.T) {
 func TestReceiveCountAndByteLimits(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	for i := 0; i < 5; i++ {
-		b.Send(sam, SendInput{Channel: "dev", Content: "0123456789"})
+		_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "0123456789"})
 	}
 	r, _ := b.Receive(kim, ReceiveInput{Count: 2})
 	if len(r.Messages) != 2 {
 		t.Fatal(len(r.Messages))
 	}
 	b.cfg.ResultDefaultKiB = 1
-	b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 900))})
-	b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 900))})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 900))})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 900))})
 	r, _ = b.Receive(kim, ReceiveInput{Ack: r.Batch, Count: 100})
 	if len(r.Messages) >= 5 {
 		t.Fatalf("byte ceiling not applied: %d", len(r.Messages))
@@ -149,7 +149,7 @@ func TestReceiveRedeliveryIgnoresCountAndByteLimits(t *testing.T) {
 	// limit set below by several times over: the old (broken) behavior of
 	// trimming redelivery to result_default_kib would visibly cut this batch.
 	for i := 0; i < 10; i++ {
-		b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 200))})
+		_, _ = b.Send(sam, SendInput{Channel: "dev", Content: string(make([]byte, 200))})
 	}
 	r1, err := b.Receive(kim, ReceiveInput{Count: 100})
 	if err != nil || len(r1.Messages) != 10 {
@@ -171,14 +171,14 @@ func TestReceiveRedeliveryIgnoresCountAndByteLimits(t *testing.T) {
 // selection), even when the filter names only a different channel.
 func TestReceivePendingBypassesChannelsFilter(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.CreateChannel(sam, "ops", "ordinary")
-	b.Subscribe(kim, "ops", "now")
-	b.Send(sam, SendInput{Channel: "dev", Content: "a"})
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
+	_ = b.Subscribe(kim, "ops", "now")
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "a"})
 	r1, err := b.Receive(kim, ReceiveInput{Channels: []string{"dev"}})
 	if err != nil || len(r1.Messages) != 1 || r1.Batch == "" {
 		t.Fatalf("%+v %v", r1, err)
 	}
-	b.Send(sam, SendInput{Channel: "ops", Content: "b"})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "b"})
 	r2, err := b.Receive(kim, ReceiveInput{Channels: []string{"ops"}})
 	if err != nil || !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 1 || r2.Messages[0].Content != "a" {
 		t.Fatalf("pending dev batch must be redelivered even when filtering to ops: %+v %v", r2, err)
@@ -189,15 +189,15 @@ func TestReceivePendingBypassesChannelsFilter(t *testing.T) {
 // pull that same, now-unfiltered, out-of-filter channel into new selection.
 func TestReceiveAckOfOutOfFilterPendingDoesNotLeakIntoNewSelection(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.CreateChannel(sam, "ops", "ordinary")
-	b.Subscribe(kim, "ops", "now")
-	b.Send(sam, SendInput{Channel: "dev", Content: "a"})
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
+	_ = b.Subscribe(kim, "ops", "now")
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "a"})
 	r1, err := b.Receive(kim, ReceiveInput{Channels: []string{"dev"}})
 	if err != nil || len(r1.Messages) != 1 {
 		t.Fatalf("%+v %v", r1, err)
 	}
-	b.Send(sam, SendInput{Channel: "dev", Content: "a2"})
-	b.Send(sam, SendInput{Channel: "ops", Content: "b"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "a2"})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "b"})
 	r2, err := b.Receive(kim, ReceiveInput{Ack: r1.Batch, Channels: []string{"ops"}})
 	if err != nil || len(r2.Messages) != 1 || r2.Messages[0].Content != "b" {
 		t.Fatalf("ack of an out-of-filter batch must not admit dev into ops-filtered selection: %+v %v", r2, err)
@@ -218,9 +218,9 @@ func TestReceiveRedeliveryPreservesOriginalIncludeOwnAndNeverSkipsExternal(t *te
 	b, sam, kim := setupTwo(t)
 	b.cfg.ResultDefaultKiB = 1
 	for i := 0; i < 5; i++ {
-		b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
+		_, _ = b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
 	}
-	b.Send(sam, SendInput{Channel: "dev", Content: "external"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "external"})
 	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
 	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "external" {
 		t.Fatalf("%+v %v", r1, err)
@@ -240,7 +240,7 @@ func TestReceiveRedeliveryPreservesOriginalIncludeOwnAndNeverSkipsExternal(t *te
 // membership wins over whatever the redelivering call requests.
 func TestReceiveRedeliveryPreservesOriginalIncludeOwnRegardlessOfCurrentCall(t *testing.T) {
 	b, _, kim := setupTwo(t)
-	b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
+	_, _ = b.Send(kim, SendInput{Channel: "dev", Content: "mine"})
 	r1, err := b.Receive(kim, ReceiveInput{IncludeOwn: true})
 	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "mine" {
 		t.Fatalf("%+v %v", r1, err)
@@ -257,10 +257,10 @@ func TestReceiveRedeliveryPreservesOriginalIncludeOwnRegardlessOfCurrentCall(t *
 // still be delivered as new.
 func TestReceivePendingBatchDoesNotBlockAChannelTrimmedOutOfItEntirely(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.CreateChannel(sam, "ops", "ordinary")
-	b.Subscribe(kim, "ops", "now")
-	b.Send(sam, SendInput{Channel: "dev", Content: "d1"})
-	b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
+	_ = b.Subscribe(kim, "ops", "now")
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "d1"})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "o1"})
 	// count=1 trims the merged dev+ops candidate set down to just dev's
 	// earlier-seq message; ops never contributes to this batch at all.
 	r1, err := b.Receive(kim, ReceiveInput{Count: 1})
@@ -292,9 +292,9 @@ func TestReceivePendingBatchDoesNotBlockAChannelTrimmedOutOfItEntirely(t *testin
 // cursor_seq, i.e. nothing pending) — both under the same shared token.
 func TestReceiveRedeliveryReStampsPendingEndSeqWhenAMessageIsTombstoned(t *testing.T) {
 	b, sam, kim := setupTwo(t)
-	b.CreateChannel(sam, "ops", "ordinary")
-	b.Subscribe(kim, "ops", "now")
-	b.Send(sam, SendInput{Channel: "dev", Content: "keep"})
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
+	_ = b.Subscribe(kim, "ops", "now")
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "keep"})
 	res2, err := b.Send(sam, SendInput{Channel: "dev", Content: "superseded"})
 	if err != nil {
 		t.Fatal(err)
@@ -507,11 +507,11 @@ func TestReceiveDefersDeliveryWhileGapsExceedCap(t *testing.T) {
 
 	// An unrelated pending batch, acked in the same call that first hits the
 	// gap cap below, to prove ack processing cannot bury a deferred gap.
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if err := b.Subscribe(kim, "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
-	b.Send(sam, SendInput{Channel: "dev", Content: "unrelated"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "unrelated"})
 	pending, err := b.Receive(kim, ReceiveInput{})
 	if err != nil || pending.Batch == "" {
 		t.Fatalf("setup: expected a pending batch: %+v %v", pending, err)
@@ -520,7 +520,7 @@ func TestReceiveDefersDeliveryWhileGapsExceedCap(t *testing.T) {
 	// c256 gets a real gap (two evicted messages) plus a surviving message
 	// past it, subscribed before any of that happens so its cursor starts
 	// at 0.
-	b.CreateChannel(sam, "c256", "ordinary")
+	_, _ = b.CreateChannel(sam, "c256", "ordinary")
 	if err := b.Subscribe(kim, "c256", "now"); err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ func (f *fakeHarness) run(name string, args ...string) error {
 	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
 	if name == "codex" && len(args) > 1 && args[1] == "add" {
 		p := filepath.Join(f.home, ".codex", "config.toml")
-		os.MkdirAll(filepath.Dir(p), 0o755) // the real CLI creates ~/.codex
+		_ = os.MkdirAll(filepath.Dir(p), 0o755) // the real CLI creates ~/.codex
 		old, _ := os.ReadFile(p)
 		return os.WriteFile(p, append(old, "\n[mcp_servers.agentbus]\ncommand = \"agentbus\"\nargs = [\"mcp\"]\n"...), 0o644)
 	}
@@ -63,12 +63,12 @@ func sessionStartCommands(m map[string]any) []string {
 func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	f := &fakeHarness{home: home}
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
 	// Pre-existing settings with an unrelated hook must survive the merge.
 	settings := filepath.Join(home, ".claude", "settings.json")
-	os.WriteFile(settings, []byte(`{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hi"}]}],"Stop":[]}}`), 0o644)
-	os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644)
+	_ = os.WriteFile(settings, []byte(`{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hi"}]}],"Stop":[]}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644)
 
 	var out bytes.Buffer
 	if err := Init(initOpts(t, home, f), &out); err != nil {
@@ -125,7 +125,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	home := t.TempDir()
 	f := &fakeHarness{home: home}
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	var out bytes.Buffer
 	if err := Init(initOpts(t, home, f), &out); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 
 func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 	home := t.TempDir()
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
 	o.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
@@ -177,8 +177,8 @@ func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 
 func TestInitDryRunWritesNothing(t *testing.T) {
 	home := t.TempDir()
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
 	o.DryRun = true
@@ -201,12 +201,12 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 
 func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	home := t.TempDir()
-	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"agentbus":{}}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"agentbus":{}}}`), 0o644)
 	root := filepath.Join(t.TempDir(), "widgets")
 	sub := filepath.Join(root, "pkg", "deep")
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	os.MkdirAll(sub, 0o755)
-	os.WriteFile(filepath.Join(root, ".gitignore"), []byte("bin/"), 0o644) // no trailing newline
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.WriteFile(filepath.Join(root, ".gitignore"), []byte("bin/"), 0o644) // no trailing newline
 
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
@@ -234,7 +234,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	}
 
 	// Rerun keeps the existing identity and does not duplicate the ignore.
-	os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity":"Sam"}`+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity":"Sam"}`+"\n"), 0o644)
 	out.Reset()
 	if err := Init(o, &out); err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	}
 
 	// No MCP entry anywhere: warn, but still do the repo work.
-	os.Remove(filepath.Join(home, ".claude.json"))
+	_ = os.Remove(filepath.Join(home, ".claude.json"))
 	out.Reset()
 	if err := Init(o, &out); err != nil || !strings.Contains(out.String(), "agentbus init --global") {
 		t.Fatalf("expected the not-configured warning: %v\n%s", err, out.String())
@@ -253,7 +253,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 
 	// --global inside a repo runs the machine step instead.
 	o.Global = true
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	if err := Init(o, &out); err != nil || len(f.calls) == 0 {
 		t.Fatalf("--global in repo did not run the global step: %v calls=%v", err, f.calls)
 	}

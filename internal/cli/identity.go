@@ -54,7 +54,7 @@ func readIdentityFile(dir string, warn io.Writer) (string, bool) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
 		}
 		return "", false
 	}
@@ -62,14 +62,14 @@ func readIdentityFile(dir string, warn io.Writer) (string, bool) {
 		Identity string `json:"identity"`
 	}
 	if err := json.Unmarshal(body, &f); err != nil {
-		fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
 		return "", false
 	}
 	if f.Identity == "" {
 		return "", false
 	}
 	if err := bus.NameRule(f.Identity); err != nil {
-		fmt.Fprintf(warn, "agentbus: %s: identity %q: %v\n", path, f.Identity, err)
+		_, _ = fmt.Fprintf(warn, "agentbus: %s: identity %q: %v\n", path, f.Identity, err)
 		return "", false
 	}
 	return f.Identity, true

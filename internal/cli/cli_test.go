@@ -13,16 +13,16 @@ import (
 func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "myrepo")
 	sub := filepath.Join(root, "a", "b")
-	os.MkdirAll(sub, 0o755)
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
 	var out bytes.Buffer
 	if err := Identity(sub, &out); err != nil || out.String() != "Agentbus: call register with name myrepo\n" {
 		t.Fatalf("%q %v", out.String(), err)
 	}
-	os.MkdirAll(filepath.Join(root, ".local"), 0o755)
-	os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity": "Sam"}`), 0o600)
+	_ = os.MkdirAll(filepath.Join(root, ".local"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity": "Sam"}`), 0o600)
 	out.Reset()
-	Identity(sub, &out)
+	_ = Identity(sub, &out)
 	if out.String() != "Agentbus: call register with name Sam\n" {
 		t.Fatal(out.String())
 	}
@@ -35,24 +35,24 @@ func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {
 func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	outer := filepath.Join(t.TempDir(), "outer")
 	inner := filepath.Join(outer, "inner")
-	os.MkdirAll(filepath.Join(outer, ".git"), 0o755)
-	os.MkdirAll(filepath.Join(inner, ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(outer, ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(inner, ".git"), 0o755)
 	var out bytes.Buffer
 	if err := Identity(inner, &out); err != nil || out.String() != "Agentbus: call register with name inner\n" {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
 	// Outer identity file must not leak into the inner repo's default.
-	os.MkdirAll(filepath.Join(outer, ".local"), 0o755)
-	os.WriteFile(filepath.Join(outer, ".local", "agentbus.json"), []byte(`{"identity": "OuterName"}`), 0o600)
+	_ = os.MkdirAll(filepath.Join(outer, ".local"), 0o755)
+	_ = os.WriteFile(filepath.Join(outer, ".local", "agentbus.json"), []byte(`{"identity": "OuterName"}`), 0o600)
 	out.Reset()
 	if err := Identity(inner, &out); err != nil || out.String() != "Agentbus: call register with name inner\n" {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
 	// An identity file at the inner (nearest) level still applies.
-	os.MkdirAll(filepath.Join(inner, ".local"), 0o755)
-	os.WriteFile(filepath.Join(inner, ".local", "agentbus.json"), []byte(`{"identity": "InnerName"}`), 0o600)
+	_ = os.MkdirAll(filepath.Join(inner, ".local"), 0o755)
+	_ = os.WriteFile(filepath.Join(inner, ".local", "agentbus.json"), []byte(`{"identity": "InnerName"}`), 0o600)
 	out.Reset()
 	if err := Identity(inner, &out); err != nil || out.String() != "Agentbus: call register with name InnerName\n" {
 		t.Fatalf("%q %v", out.String(), err)
@@ -64,12 +64,12 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 // rule, must warn (not silently ignore) and fall back to the next level.
 func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "myrepo")
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	os.MkdirAll(filepath.Join(root, ".local"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, ".local"), 0o755)
 	identityPath := filepath.Join(root, ".local", "agentbus.json")
 
 	// Malformed JSON: warn and fall back to the repo basename.
-	os.WriteFile(identityPath, []byte(`{not json`), 0o600)
+	_ = os.WriteFile(identityPath, []byte(`{not json`), 0o600)
 	var out, warn bytes.Buffer
 	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name myrepo\n" {
 		t.Fatalf("%q %v", out.String(), err)
@@ -79,7 +79,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	}
 
 	// Identity value fails the name rule (contains '/'): warn and fall back.
-	os.WriteFile(identityPath, []byte(`{"identity": "a/b"}`), 0o600)
+	_ = os.WriteFile(identityPath, []byte(`{"identity": "a/b"}`), 0o600)
 	out.Reset()
 	warn.Reset()
 	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name myrepo\n" {
@@ -90,7 +90,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	}
 
 	// A valid identity produces no warning.
-	os.WriteFile(identityPath, []byte(`{"identity": "Sam"}`), 0o600)
+	_ = os.WriteFile(identityPath, []byte(`{"identity": "Sam"}`), 0o600)
 	out.Reset()
 	warn.Reset()
 	if err := identity(root, &out, &warn); err != nil || out.String() != "Agentbus: call register with name Sam\n" {

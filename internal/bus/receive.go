@@ -71,7 +71,7 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	if err != nil {
 		return internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Re-verify ownership on the transaction that is about to write (R3).
 	if err := b.auth(tx, as); err != nil {
 		return err
@@ -103,7 +103,7 @@ func (b *Bus) Unsubscribe(as, channel string) error {
 	if err != nil {
 		return internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Re-verify ownership on the transaction that is about to write (R3).
 	if err := b.auth(tx, as); err != nil {
 		return err
@@ -188,7 +188,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	if err != nil {
 		return res, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Re-verify ownership on every iteration of the long-poll (R3): a
 	// process stalled past the 30s heartbeat window may have lost this name
@@ -223,7 +223,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		var s subRow
 		var last int64
 		if err := rows.Scan(&s.channel, &s.cursor, &last, &s.pendingToken, &s.pendingEnd); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return res, internal(err)
 		}
 		// Outside the filter with nothing pending: not involved in this call,
@@ -244,10 +244,10 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		subs = append(subs, s)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return res, internal(err)
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	for _, ch := range res.Expired {
 		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel=?", as, ch); err != nil {
@@ -497,7 +497,7 @@ func queryMessages(tx *sql.Tx, q string, args []any) ([]Message, error) {
 	if err != nil {
 		return nil, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	msgs, err := scanMessages(rows)
 	return msgs, internal(err)
 }

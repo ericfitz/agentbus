@@ -496,7 +496,7 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 
 	wantCovered := nOld - ackedCount
 	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && !(int64(len(covered)) == wantCovered && len(deliveredLive) == nLive && agedRemaining() == 0) {
+	for time.Now().Before(deadline) && (int64(len(covered)) != wantCovered || len(deliveredLive) != nLive || agedRemaining() != 0) {
 		args := map[string]any{"as": "Sam", "wait_seconds": 0}
 		if ackToken != "" {
 			args["ack"] = ackToken

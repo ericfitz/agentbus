@@ -6,12 +6,12 @@ func TestTextSearchFiltersAndPaging(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	kim := reg(t, b, "Kim")
-	b.CreateChannel(sam, "dev", "ordinary")
-	b.CreateChannel(sam, "ops", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "ops", "ordinary")
 	r1, _ := b.Send(sam, SendInput{Channel: "dev", Content: "deploy the widget service"})
-	b.Send(kim, SendInput{Channel: "dev", Content: "widget deploy failed", ReplyTo: &r1.Seq})
-	b.Send(sam, SendInput{Channel: "ops", Content: "widget rollout ok"})
-	b.Send(sam, SendInput{Channel: "ops", Content: "unrelated"})
+	_, _ = b.Send(kim, SendInput{Channel: "dev", Content: "widget deploy failed", ReplyTo: &r1.Seq})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "widget rollout ok"})
+	_, _ = b.Send(sam, SendInput{Channel: "ops", Content: "unrelated"})
 
 	r, err := b.Search(sam, SearchInput{Query: "widget"})
 	if err != nil || len(r.Hits) != 3 || r.SemanticUnavailable {
@@ -46,9 +46,9 @@ func TestTextSearchFiltersAndPaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Tombstoned rows are invisible.
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "secret widget"})
-	b.DeleteMemory(sam, *c.MemoryID, "")
+	_ = b.DeleteMemory(sam, *c.MemoryID, "")
 	r, _ = b.Search(sam, SearchInput{Query: "secret"})
 	if len(r.Hits) != 0 {
 		t.Fatal("tombstoned memory returned")

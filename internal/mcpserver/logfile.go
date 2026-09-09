@@ -66,10 +66,10 @@ func (w *rotatingWriter) lockAcrossProcesses() (func(), error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
-		lf.Close()
+		_ = lf.Close()
 		return nil, err
 	}
-	return func() { lf.Close() }, nil
+	return func() { _ = lf.Close() }, nil
 }
 
 // ensureCurrent opens w.path if this is the first write, or reopens it if
@@ -83,7 +83,7 @@ func (w *rotatingWriter) ensureCurrent() error {
 				return nil // still the file we have open
 			}
 		}
-		w.f.Close()
+		_ = w.f.Close()
 		w.f = nil
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -92,7 +92,7 @@ func (w *rotatingWriter) ensureCurrent() error {
 	}
 	fi, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	w.f = f

@@ -30,7 +30,7 @@ func (b *Bus) GetMemory(as string, id int64) (Message, error) {
 	if err != nil {
 		return Message{}, internal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	msgs, err := scanMessages(rows)
 	if err != nil {
 		return Message{}, internal(err)
@@ -130,7 +130,7 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if err != nil {
 		return EditResult{}, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Re-verify ownership on the transaction that is about to write (R3): a
 	// process stalled past the 30s heartbeat window may have lost this name
@@ -236,7 +236,7 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 	if err != nil {
 		return internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Re-verify ownership on the transaction that is about to write (R3).
 	if err := b.auth(tx, as); err != nil {

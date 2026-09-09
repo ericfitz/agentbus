@@ -22,7 +22,7 @@ func Reset(cfg config.Config, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	live, err := b.LiveSessionCount()
 	if err != nil {
 		return err

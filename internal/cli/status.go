@@ -17,7 +17,7 @@ func Status(cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	st, err := b.StatusReport()
 	if err != nil {
 		return err

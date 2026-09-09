@@ -17,7 +17,7 @@ import (
 // finished, so tests can assert on committed embeddings deterministically.
 func (b *Bus) waitEmbed() {
 	b.embedMu.Lock()
-	b.embedMu.Unlock()
+	b.embedMu.Unlock() //nolint:staticcheck // SA2001: intentional barrier, not a critical section
 }
 
 func fill(t *testing.T, b *Bus, as, ch string, n int, size int) {
@@ -33,12 +33,12 @@ func fill(t *testing.T, b *Bus, as, ch string, n int, size int) {
 func TestAgeCleanupRecordsBoundary(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	fill(t, b, sam, "dev", 3, 10)
-	b.Send(sam, SendInput{Channel: "mem", Content: "keep me"})
+	_, _ = b.Send(sam, SendInput{Channel: "mem", Content: "keep me"})
 	b.Now = func() time.Time { return time.Now().Add(169 * time.Hour) }
-	b.Send(sam, SendInput{Channel: "dev", Content: "fresh"})
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "fresh"})
 	b.Tick(context.Background())
 	var n int64
 	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE channel='dev'").Scan(&n); err != nil {
@@ -65,9 +65,9 @@ func TestAgeCleanupRecordsBoundary(t *testing.T) {
 func TestTombstonePurgeAndStaleSessions(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
-	b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"})
+	_, _ = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"})
 	b.Tick(context.Background())
 	var n int
 	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=?", *c.MemoryID).Scan(&n); err != nil {
@@ -96,8 +96,8 @@ func TestCapacityEvictionAndExhaustion(t *testing.T) {
 	b := newTestBus(t)
 	b.cfg.SQLiteBudgetMiB = 64 // minimum; usage is measured in pages so we shrink via a test hook
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	fill(t, b, sam, "dev", 200, 4000)
 	before, _ := b.Usage()
 	b.budgetOverride = before / 2
@@ -118,7 +118,7 @@ func TestCapacityEvictionAndExhaustion(t *testing.T) {
 	// Fill the budget with memories, which cannot be evicted.
 	for i := 0; i < 50; i++ {
 		b.limits = newLimiter(b.cfg)
-		b.Send(sam, SendInput{Channel: "mem", Content: strings.Repeat("m", 4000)})
+		_, _ = b.Send(sam, SendInput{Channel: "mem", Content: strings.Repeat("m", 4000)})
 	}
 	b.budgetOverride = 4096
 	err := b.checkCapacity()
@@ -150,7 +150,7 @@ func TestCapacityEvictionAndExhaustion(t *testing.T) {
 func TestCapacitySweepOnlyWhenOverBudget(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	fill(t, b, sam, "dev", 50, 4000)
 	before, err := b.Usage()
 	if err != nil {
@@ -308,7 +308,7 @@ func TestTickDeadlinePropagatesToEmbedding(t *testing.T) {
 	defer close(release)
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	res, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,revision,bytes) VALUES('mem',?,'x',?,'','hello',1,5)",
 		sam, b.nowMs())
 	if err != nil {
@@ -335,7 +335,7 @@ func TestTickDeadlinePropagatesToEmbedding(t *testing.T) {
 func TestTickDoesNotReapSubscriptionsBeforeReceiveReportsExpiry(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if err := b.Subscribe(sam, "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
@@ -387,13 +387,13 @@ func TestCloseWaitsForBackgroundEmbedding(t *testing.T) {
 	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
 	go func() {
-		b.Close()
+		_ = b.Close()
 		close(done)
 	}()
 	select {
@@ -427,25 +427,25 @@ func TestTickSkipsEmbeddingsWhileEmbedSoonHoldsEmbedMu(t *testing.T) {
 		var req struct {
 			Input []string `json:"input"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		var data []map[string]any
 		for i := range req.Input {
 			data = append(data, map[string]any{"index": i, "embedding": []float64{1, 0, 0}})
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": data})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	defer srv.Close()
 	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
 
 	// Hold embedMu while sending so Send's own embedSoon call no-ops; the
 	// explicit embedSoon call below is then the one holding embedMu for the
 	// blocked HTTP call.
 	b.embedMu.Lock()
 	_, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
-	b.embedMu.Unlock()
+	b.embedMu.Unlock() //nolint:staticcheck // SA2001: intentional barrier, not a critical section
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestTickSkipsEmbeddingsWhileEmbedSoonHoldsEmbedMu(t *testing.T) {
 func TestLeaseAllowsOneProcess(t *testing.T) {
 	b := newTestBus(t)
 	other, _ := Open(b.cfg, b.log)
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 	if !b.takeLease() {
 		t.Fatal("first take must succeed")
 	}

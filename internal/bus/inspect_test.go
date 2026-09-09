@@ -42,7 +42,7 @@ func TestInspectionDecisions(t *testing.T) {
 			b.cfg.InspectionCommand = []string{hookScript(t, c.body)}
 			b.cfg.InspectionTimeoutSeconds = 0.5
 			sam := reg(t, b, "Sam")
-			b.CreateChannel(sam, "dev", "ordinary")
+			_, _ = b.CreateChannel(sam, "dev", "ordinary")
 			_, err := b.Send(sam, SendInput{Channel: "dev", Content: "hello"})
 			if c.wantCode == "" && err != nil {
 				t.Fatal(err)

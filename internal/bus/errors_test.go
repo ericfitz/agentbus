@@ -30,7 +30,7 @@ func TestErrorMessagesAreBoundedRegardlessOfCallerInput(t *testing.T) {
 	}
 
 	// receipts.go:48 — idempotency key reused with a different payload.
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "first", IdempotencyKey: big}); err != nil {
 		t.Fatal(err)
 	}

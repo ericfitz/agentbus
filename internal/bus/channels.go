@@ -27,7 +27,7 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	if err != nil {
 		return Channel{}, internal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Re-verify ownership on the transaction that is about to write (R3).
 	if err := b.auth(tx, as); err != nil {
 		return Channel{}, err

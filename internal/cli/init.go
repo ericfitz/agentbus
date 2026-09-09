@@ -89,7 +89,7 @@ type initer struct {
 	out io.Writer
 }
 
-func (in *initer) say(format string, a ...any) { fmt.Fprintf(in.out, format+"\n", a...) }
+func (in *initer) say(format string, a ...any) { _, _ = fmt.Fprintf(in.out, format+"\n", a...) }
 
 // write writes path (creating parents), backing up an existing file first.
 func (in *initer) write(path string, data []byte) error {

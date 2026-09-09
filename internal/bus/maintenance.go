@@ -136,7 +136,7 @@ func (b *Bus) deleteOrdinaryChunk(cond string, args []any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.Query("SELECT seq, channel FROM messages WHERE memory_id IS NULL AND "+cond+" ORDER BY seq LIMIT ?", append(args, cleanupChunk)...)
 	if err != nil {
 		return 0, err
@@ -147,17 +147,17 @@ func (b *Bus) deleteOrdinaryChunk(cond string, args []any) (int, error) {
 		var s int64
 		var ch string
 		if err := rows.Scan(&s, &ch); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		seqs = append(seqs, s)
 		maxByChannel[ch] = s
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return 0, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(seqs) == 0 {
 		return 0, nil
 	}

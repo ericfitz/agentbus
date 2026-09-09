@@ -65,13 +65,13 @@ func TestRegisterRejectsOversizedOrControlParent(t *testing.T) {
 
 func TestStaleOwnerLosesName(t *testing.T) {
 	b := newTestBus(t)
-	b.Register("Sam", "", "", true)
+	_, _ = b.Register("Sam", "", "", true)
 	if err := b.auth(b.db, "Sam"); err != nil {
 		t.Fatal(err)
 	}
 	// Another process, 31 seconds later, registers Sam.
 	other2, _ := Open(b.cfg, b.log)
-	defer other2.Close()
+	defer func() { _ = other2.Close() }()
 	later := b.Now().Add(31 * time.Second)
 	other2.Now = func() time.Time { return later }
 	r, _ := other2.Register("Sam", "", "", true)
@@ -105,7 +105,7 @@ func TestMutationsRejectAfterOwnerTakeover(t *testing.T) {
 
 	// Another process, 31 seconds later, reclaims the stale "Sam" name.
 	other, _ := Open(b.cfg, b.log)
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 	later := b.Now().Add(31 * time.Second)
 	other.Now = func() time.Time { return later }
 	if r, err := other.Register("Sam", "", "", true); err != nil || r.Sender != "Sam" {
@@ -125,16 +125,16 @@ func TestMutationsRejectAfterOwnerTakeover(t *testing.T) {
 
 func TestRegisterReportsResumeAndPending(t *testing.T) {
 	b := newTestBus(t)
-	b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('c','ordinary',0)")
-	b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('Sam','c',0,?)", b.nowMs())
-	b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('c','Other','',1,'','hi',2)")
+	_, _ = b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('c','ordinary',0)")
+	_, _ = b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('Sam','c',0,?)", b.nowMs())
+	_, _ = b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('c','Other','',1,'','hi',2)")
 	r, _ := b.Register("Sam", "", "", true)
 	if !r.Resumed || len(r.Pending) != 1 || r.Pending[0].Pending != 1 {
 		t.Fatalf("%+v", r)
 	}
 	// Fresh registration drops subscriptions.
 	b2, _ := Open(b.cfg, b.log)
-	defer b2.Close()
+	defer func() { _ = b2.Close() }()
 	b2.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
 	r2, _ := b2.Register("Sam", "", "", false)
 	if r2.Resumed || len(r2.Pending) != 0 {
@@ -148,7 +148,7 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 func TestRegisterResumePurgesExpiredSubscriptions(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
-	b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	if err := b.Subscribe(sam, "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestRegisterResumePurgesExpiredSubscriptions(t *testing.T) {
 
 func TestDiscoverListsLiveSessions(t *testing.T) {
 	b := newTestBus(t)
-	b.Register("Sam", "", "tmi", true)
+	_, _ = b.Register("Sam", "", "tmi", true)
 	s, err := b.Discover("Sam")
 	if err != nil || len(s) != 1 || s[0].Context != "tmi" {
 		t.Fatalf("%+v %v", s, err)

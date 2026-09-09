@@ -13,15 +13,52 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	f.agentSend(t, "dev", "hello from sam")
 	f.receive(t)
 	f.run(f.m.statusCmd())
+
+	// Insert mode is the fixture's starting mode: the compose line reads
+	// "dev ›" and the status bar shows the insert-mode key hints.
 	v := f.m.View()
-	for _, want := range []string{"channels", "dev", "◆ notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "? help", "/ search", "m memories", "h health", "q quit", "dev ›"} {
+	for _, want := range []string{"channels", "dev", "◆ notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "esc commands", "alt+enter", "dev ›"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}
 	}
-	if lines := strings.Count(v, "\n") + 1; lines > f.m.height {
-		t.Fatalf("view is %d lines for height %d", lines, f.m.height)
+	assertStatusBarIsLastLine(t, v, f.m.height)
+
+	// Normal mode swaps the status bar for the command-key help.
+	f.key("esc")
+	v = f.m.View()
+	for _, want := range []string{"? help", "/ search", "m memories", "h health", "q quit"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("normal-mode view lacks %q:\n%s", want, v)
+		}
 	}
+	assertStatusBarIsLastLine(t, v, f.m.height)
+}
+
+// assertStatusBarIsLastLine catches both a status bar that wrapped onto two
+// rows (pushing the real last row off screen) and a layout that reserves one
+// row too many or too few for it.
+func assertStatusBarIsLastLine(t *testing.T, v string, height int) {
+	t.Helper()
+	lines := strings.Split(v, "\n")
+	if len(lines) > height {
+		t.Fatalf("view is %d lines for height %d:\n%s", len(lines), height, v)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "db ") {
+		t.Fatalf("status bar must be the last line, got %q:\n%s", last, v)
+	}
+}
+
+func TestLongChannelNameAndShortRailDoNotOverflow(t *testing.T) {
+	f := newFixture(t)
+	long := strings.Repeat("x", 30)
+	if _, err := f.ab.CreateChannel(f.sam, long, "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.m.stream.Height = 1 // fewer rows than channels: rails must not grow past this
+	v := f.m.View()
+	assertStatusBarIsLastLine(t, v, f.m.height)
 }
 
 func TestStreamShowsNewDividerAndGap(t *testing.T) {

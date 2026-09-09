@@ -618,7 +618,10 @@ func (m *Model) layout() {
 		w -= rightRail + 1
 	}
 	m.stream.Width = max(w, 20)
-	extra := 3 // divider, compose label row, status bar
+	// header (1) is already subtracted below; divider and status bar are the
+	// only other always-present rows -- compose's own height is accounted
+	// for separately via composeHeight, so it does not belong here too.
+	extra := 2 // divider, status bar
 	if m.replyTo != nil {
 		extra++
 	}

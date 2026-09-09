@@ -81,13 +81,21 @@ func (m Model) renderHeader() string {
 	if m.status.Notice != "" {
 		s += "   " + m.theme.Style(m.theme.Warn).Render("! capacity: "+m.status.Notice)
 	}
-	return lipgloss.NewStyle().Width(m.stream.Width).Render(s)
+	// MaxWidth truncates a long notice instead of Width's word-wrap, which
+	// would add a row and push the status bar off the bottom of the screen.
+	return lipgloss.NewStyle().MaxWidth(m.stream.Width).Render(s)
 }
 
 // renderRails draws the channel list (left) and the session list (right).
+// Each row is truncated (never wrapped) to its rail's width via MaxWidth --
+// Style.Width word-wraps overlong content instead of clipping it, which would
+// silently grow the rail past the stream's height and push rows below it (the
+// compose line, the status bar) off the bottom of the screen. MaxHeight on
+// the container caps the row count the same way, for more rows than fit.
 func (m Model) renderRails() (string, string) {
 	th := m.theme
 	dim, memc, sel := th.Style(th.Dim), th.Style(th.Mem), lipgloss.NewStyle().Background(th.Sel)
+	leftTrunc := lipgloss.NewStyle().MaxWidth(leftRail)
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
 	for i, c := range m.channels {
@@ -103,14 +111,19 @@ func (m Model) renderRails() (string, string) {
 			line += dim.Render(" (off)")
 		}
 		if i == m.sel {
-			line = sel.Width(leftRail - 1).Render(th.Style(th.Agent).Render("›") + line)
+			line = th.Style(th.Agent).Render("›") + line
+			if pad := leftRail - 1 - lipgloss.Width(line); pad > 0 {
+				line += strings.Repeat(" ", pad)
+			}
+			line = sel.Render(line)
 		} else {
 			line = " " + line
 		}
-		l.WriteString(line + "\n")
+		l.WriteString(leftTrunc.Render(line) + "\n")
 	}
-	left := lipgloss.NewStyle().Width(leftRail).Height(m.stream.Height + 1).Render(l.String())
+	left := lipgloss.NewStyle().Width(leftRail).MaxHeight(m.stream.Height + 1).Render(l.String())
 
+	rightTrunc := lipgloss.NewStyle().MaxWidth(rightRail)
 	var r strings.Builder
 	r.WriteString(dim.Render("sessions") + "\n")
 	live := map[string]bus.Session{}
@@ -123,22 +136,20 @@ func (m Model) renderRails() (string, string) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		var row string
 		if s, ok := live[n]; ok {
-			ctx := s.Context
+			ctx, name := s.Context, th.Style(th.Agent).Render(n)
 			if n == m.c.as {
-				ctx = "you"
+				ctx, name = "you", th.Style(th.User).Render(n)
 			}
-			name := th.Style(th.Agent).Render(n)
-			if n == m.c.as {
-				name = th.Style(th.User).Render(n)
-			}
-			r.WriteString(th.Style(th.Health).Render("● ") + name + " " + dim.Render(ctx) + "\n")
+			row = th.Style(th.Health).Render("● ") + name + " " + dim.Render(ctx)
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
-			r.WriteString(th.Style(th.Warn).Render("○ ") + dim.Render(n+" "+shortDur(age)) + "\n")
+			row = th.Style(th.Warn).Render("○ ") + dim.Render(n+" "+shortDur(age))
 		}
+		r.WriteString(rightTrunc.Render(row) + "\n")
 	}
-	right := lipgloss.NewStyle().Width(rightRail).Height(m.stream.Height + 1).Render(r.String())
+	right := lipgloss.NewStyle().Width(rightRail).MaxHeight(m.stream.Height + 1).Render(r.String())
 	return left, right
 }
 
@@ -207,8 +218,8 @@ func (m Model) renderReplyBanner() string {
 	th := m.theme
 	r := m.replyTo
 	quote := strings.SplitN(r.Content, "\n", 2)[0]
-	if len(quote) > 40 {
-		quote = quote[:40] + "…"
+	if rs := []rune(quote); len(rs) > 40 {
+		quote = string(rs[:40]) + "…"
 	}
 	return th.Style(th.Dim).Render("↳ replying to ") + th.Style(th.Agent).Render(r.Sender) + th.Style(th.Dim).Render(" #"+itoa(r.Seq)+" “"+quote+"”  esc cancel")
 }
@@ -252,8 +263,17 @@ func (m Model) renderStatusBar() string {
 	}
 	help := dim.Render("? help  / search  m memories  h health  q quit")
 	if m.mode == modeInsert {
-		help = dim.Render("esc commands  tab next unread  alt+enter newline  ") + help
+		help = dim.Render("esc commands  tab next unread  alt+enter newline")
 	}
+	// The status bar must stay exactly one row: a narrow terminal or a long
+	// left side can make help too wide to fit; MaxWidth truncates it instead
+	// of letting Width's word-wrap add a row that MaxHeight would then have
+	// to clip from somewhere else on screen.
+	avail := m.width - lipgloss.Width(left) - 1
+	if avail <= 0 {
+		return left
+	}
+	help = lipgloss.NewStyle().MaxWidth(avail).Render(help)
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(help), 1)
 	return left + strings.Repeat(" ", gap) + help
 }

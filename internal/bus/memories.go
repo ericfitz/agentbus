@@ -41,6 +41,29 @@ func (b *Bus) GetMemory(as string, id int64) (Message, error) {
 	return msgs[0], nil
 }
 
+// MemoryRevisions returns every revision of memory id, oldest first,
+// including tombstoned ones, so a reader can browse a memory's history.
+// Old revisions are only kept for tombstone_min_hours; after that the list
+// shrinks to whatever the tick has not purged yet.
+func (b *Bus) MemoryRevisions(as string, id int64) ([]Message, error) {
+	if err := b.auth(b.db, as); err != nil {
+		return nil, err
+	}
+	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? ORDER BY revision ASC", id)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, internal(err)
+	}
+	if len(msgs) == 0 {
+		return nil, errf("not_found", false, "memory %d does not exist", id)
+	}
+	return msgs, nil
+}
+
 // liveRevision reads a memory's current live revision (seq, revision, channel).
 // It runs against either b.db or a *sql.Tx so callers can read outside a
 // transaction first and repeat the read inside one before committing writes.

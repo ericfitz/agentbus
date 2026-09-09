@@ -258,7 +258,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// against a closed bus. Defers run LIFO, so registering wg.Wait before
 	// cancel's defer makes cancel fire first, then wg.Wait, then the
 	// b.Close deferred above.
-	wg := startBackgroundLoops(ctx, b, cfg, log, 10*time.Second)
+	wg := StartBackgroundLoops(ctx, b, cfg, log, 10*time.Second)
 	defer wg.Wait()
 	defer cancel()
 	log.Info("agentbus mcp started", "version", Version, "config", cfg.Path, "data", cfg.DataDirectory)
@@ -269,12 +269,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 	return err
 }
 
-// startBackgroundLoops starts the heartbeat and maintenance-tick goroutines
+// StartBackgroundLoops starts the heartbeat and maintenance-tick goroutines
 // and returns a WaitGroup that completes once both have exited. Both loops
 // exit promptly when ctx is canceled; the caller must wg.Wait() after
 // canceling ctx and before closing b, or an in-flight Heartbeat/Tick call
 // can run against a closed bus.
-func startBackgroundLoops(ctx context.Context, b *bus.Bus, cfg config.Config, log *slog.Logger, heartbeatEvery time.Duration) *sync.WaitGroup {
+func StartBackgroundLoops(ctx context.Context, b *bus.Bus, cfg config.Config, log *slog.Logger, heartbeatEvery time.Duration) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {

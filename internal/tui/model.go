@@ -64,6 +64,7 @@ type Model struct {
 	compose  textarea.Model
 	replyTo  *bus.Message
 	lastSent string
+	prompt   promptState
 
 	status       bus.Status
 	statusErr    error
@@ -196,6 +197,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 			m.layout()
 		}
+	case sentMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.showToast("send: "+errText(msg.err)))
+		}
 	}
 	switch m.mode {
 	case modeInsert:
@@ -216,6 +221,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // tab (next unread), pgup/pgdn (stream), esc (to normal mode) are handled
 // here; everything else types.
 func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
+	if m.prompt.active {
+		return m.updatePrompt(msg)
+	}
 	switch keyString(msg) {
 	case "esc":
 		if m.replyTo != nil {
@@ -255,6 +263,9 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 
 // updateNormal is the letter keymap from the design notes.
 func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
+	if m.prompt.active {
+		return m.updatePrompt(msg)
+	}
 	switch keyString(msg) {
 	case "q":
 		return tea.Quit
@@ -607,9 +618,6 @@ func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
 
 // Stubs replaced by later tasks. Each returns nil so Task 5 compiles alone.
 func (m *Model) renderStream() string           { return "" }
-func (m *Model) submitCompose() tea.Cmd         { return nil }
-func (m *Model) createChannelPrompt() tea.Cmd   { return nil }
-func (m *Model) toggleSubscribe() tea.Cmd       { return nil }
 func (m *Model) openSearch() tea.Cmd            { return nil }
 func (m *Model) openMemories() tea.Cmd          { return nil }
 func (m *Model) openHealth() tea.Cmd            { return nil }

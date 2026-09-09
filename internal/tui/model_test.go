@@ -15,6 +15,7 @@ type fixture struct {
 	c   *client
 	ab  *bus.Bus
 	sam string
+	ack string // batch token from the last receive(), acked on the next one (mirrors client.receiveLoop's own ack variable)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -113,10 +114,11 @@ func (f *fixture) agentSend(t *testing.T, ch, content string) bus.SendResult {
 // would, and feeds it to the model.
 func (f *fixture) receive(t *testing.T) {
 	t.Helper()
-	res, err := f.c.b.Receive(f.c.as, bus.ReceiveInput{IncludeOwn: true, WaitSeconds: 0})
+	res, err := f.c.b.Receive(f.c.as, bus.ReceiveInput{Ack: f.ack, IncludeOwn: true, WaitSeconds: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.ack = res.Batch
 	f.send(batchMsg{res})
 }
 

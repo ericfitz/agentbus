@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -37,6 +38,7 @@ type Config struct {
 	EmbeddingAPIKeyFile          string   `json:"embedding_api_key_file"`
 	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string   `json:"log_level"`
+	TUIName                      string   `json:"tui_name"`
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -64,7 +66,24 @@ func Default() Config {
 		InspectionTimeoutSeconds:     5,
 		EmbeddingQueryTimeoutSeconds: 10,
 		LogLevel:                     "info",
+		TUIName:                      defaultTUIName(),
 	}
+}
+
+// defaultTUIName is the OS user name, the identity `agentbus tui` registers
+// under unless tui_name or --as says otherwise. On Windows user.Current
+// returns DOMAIN\name; keep the part after the last backslash. A '/' would
+// fail the bus's name rule, so it is replaced.
+func defaultTUIName() string {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return "human"
+	}
+	name := u.Username
+	if i := strings.LastIndex(name, `\`); i >= 0 {
+		name = name[i+1:]
+	}
+	return strings.ReplaceAll(name, "/", "-")
 }
 
 // DefaultPath is the config file used when neither --config nor AGENTBUS_CONFIG is set.
@@ -223,6 +242,9 @@ func (c *Config) validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("log_level must be one of debug, info, warn, error, got %q", c.LogLevel)
+	}
+	if c.TUIName == "" {
+		return errors.New("tui_name must not be empty")
 	}
 	return nil
 }

@@ -81,6 +81,11 @@ key or a one-line `export NAME='value'`; its contents are never logged.
 query embedding during a search; past it, `semantic` and `both` searches fall
 back to text results and set `semantic_unavailable`.
 
+`tui_name` (default: your OS user name) is the identity `agentbus tui`
+registers under; `agentbus tui --as <name>` overrides it for one run. It
+follows the same rule as agent names: 1-128 bytes, no `/`, no control
+characters.
+
 Keep `receive_max_wait_seconds` below your harness's MCP tool call timeout:
 Claude Code's default is 300 seconds (the `MCP_TOOL_TIMEOUT` environment
 variable, or a per-server `timeout` field in the MCP config), Codex exposes

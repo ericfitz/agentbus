@@ -130,3 +130,32 @@ func TestRejectsEmbeddingQueryTimeoutOutOfRange(t *testing.T) {
 		t.Fatalf("want range error naming key and bound, got %v", err)
 	}
 }
+
+func TestTUINameDefaultsToOSUser(t *testing.T) {
+	c := Default()
+	if c.TUIName == "" {
+		t.Fatal("tui_name default must not be empty")
+	}
+	if strings.ContainsRune(c.TUIName, '/') {
+		t.Fatalf("tui_name default %q must not contain '/'", c.TUIName)
+	}
+}
+
+func TestTUINameFromFile(t *testing.T) {
+	p := write(t, t.TempDir(), `{"tui_name": "eric"}`)
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TUIName != "eric" {
+		t.Fatalf("want eric, got %q", c.TUIName)
+	}
+}
+
+func TestRejectsEmptyTUIName(t *testing.T) {
+	p := write(t, t.TempDir(), `{"tui_name": ""}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "tui_name") {
+		t.Fatalf("want tui_name error, got %v", err)
+	}
+}

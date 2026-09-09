@@ -183,6 +183,44 @@ func TestMovingCursorClearsStaleRevisionsBeforeReload(t *testing.T) {
 	}
 }
 
+// TestMemoriesDeleteConfirmationFitsOverlay guards F3: a memory whose detail
+// section (multi-line body, type, refs) runs long must not push the delete
+// confirmation's y/n prompt out of the overlay's fixed height.
+func TestMemoriesDeleteConfirmationFitsOverlay(t *testing.T) {
+	f := newFixture(t)
+	for i := 0; i < 5; i++ {
+		f.agentSend(t, "notes", fmt.Sprintf("memo %d", i))
+	}
+	longBody := "Incident review\n" + strings.Repeat("line\n", 5) + "done"
+	res, err := f.ab.Send(f.sam, bus.SendInput{
+		Channel: "notes",
+		Content: longBody,
+		Type:    "note",
+		Refs:    []bus.Ref{{Kind: "unix_path", Value: "/tmp/x.go"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.receive(t)
+	f.m.height = 18
+	f.key("esc")
+	f.key("m")
+	if got := f.m.mem.list[f.m.mem.cursor].MemoryID; got == nil || *got != *res.MemoryID {
+		t.Fatalf("expected the long memory under the cursor, got %+v", f.m.mem.list[f.m.mem.cursor])
+	}
+	f.key("d")
+	if f.m.mode != modeConfirmDelete {
+		t.Fatal("d must ask for confirmation")
+	}
+	v := f.m.View()
+	if !strings.Contains(v, "y yes") {
+		t.Fatalf("delete confirmation must be visible:\n%s", v)
+	}
+	if lines := strings.Count(v, "\n") + 1; lines > f.m.height {
+		t.Fatalf("view has %d lines, want <= height %d:\n%s", lines, f.m.height, v)
+	}
+}
+
 func TestEditorCommandPrecedence(t *testing.T) {
 	t.Setenv("VISUAL", "code -w")
 	t.Setenv("EDITOR", "nano")

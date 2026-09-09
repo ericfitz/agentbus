@@ -168,6 +168,7 @@ func (m *Model) renderStream() string {
 	dim := th.Style(th.Dim)
 	ch := m.selName()
 	ms := m.msgs[ch]
+	m.cursorLine = -1
 	if ch == "" {
 		return ""
 	}
@@ -182,14 +183,17 @@ func (m *Model) renderStream() string {
 	gaps := append([]bus.Gap{}, m.gaps[ch]...)
 	sort.Slice(gaps, func(i, j int) bool { return gaps[i].From < gaps[j].From })
 	var b strings.Builder
+	lineNum := 0
 	gi := 0
 	for i, x := range ms {
 		for gi < len(gaps) && gaps[gi].To < x.Seq {
 			b.WriteString(divider(itoa(gaps[gi].To-gaps[gi].From+1)+" evicted") + "\n")
+			lineNum++
 			gi++
 		}
 		if m.divider >= 0 && x.Seq > m.divider && (i == 0 || ms[i-1].Seq <= m.divider) {
 			b.WriteString(divider("new") + "\n")
+			lineNum++
 		}
 		name := th.Style(th.Agent).Render(x.Sender)
 		if x.Sender == m.c.as {
@@ -209,7 +213,11 @@ func (m *Model) renderStream() string {
 		if i == m.cursor && m.mode == modeNormal {
 			line = lipgloss.NewStyle().Background(th.Sel).Width(w).Render(line)
 		}
+		if i == m.cursor {
+			m.cursorLine = lineNum
+		}
 		b.WriteString(line + "\n")
+		lineNum += strings.Count(line, "\n") + 1
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

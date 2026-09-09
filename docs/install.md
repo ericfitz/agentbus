@@ -178,8 +178,9 @@ separate process has no other way to learn it.
   right, a compose line, and a status bar. It registers as `tui_name` from
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
-  Press `esc` for the command keys (`?` lists them), `/` to search, `m` for
-  the memory browser, `h` for health, `q` to quit. Colours come from
+  Press `esc` for the command keys; `?` opens the health overlay, which lists
+  them. `/` searches, `m` opens the memory browser, `h` opens health, `q`
+  quits. Colours come from
   `AGENTBUS_TUI_*COLOR` environment variables; see below.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
@@ -204,7 +205,7 @@ are rejected with one line on stderr and the default is used.
 | `AGENTBUS_TUI_TEXTCOLOR` | message content | `default` |
 | `AGENTBUS_TUI_DIMCOLOR` | timestamps, dividers, help | `brightblack` |
 | `AGENTBUS_TUI_AGENTCOLOR` | agent names, selected channel, key hints | `cyan` |
-| `AGENTBUS_TUI_USERCOLOR` | your own name and messages | `yellow` |
+| `AGENTBUS_TUI_USERCOLOR` | your own name | `yellow` |
 | `AGENTBUS_TUI_MEMCOLOR` | memory channels and the memory browser | `magenta` |
 | `AGENTBUS_TUI_HEALTHCOLOR` | live heartbeat dot, ok states | `green` |
 | `AGENTBUS_TUI_WARNCOLOR` | warnings such as the text-only search badge | `yellow` |

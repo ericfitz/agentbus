@@ -125,6 +125,15 @@ func TestToggleSubscribe(t *testing.T) {
 	if f.c.subscribed["dev"] {
 		t.Fatal("s unsubscribes the selected channel")
 	}
+	// A status tick must not resubscribe (and so not replay retained history)
+	// while the channel is deliberately off.
+	f.run(f.m.statusCmd())
+	if f.c.subscribed["dev"] {
+		t.Fatal("status tick must not resubscribe an explicitly unsubscribed channel")
+	}
+	if f.c.isSubscribed("dev") {
+		t.Fatal("isSubscribed must still report off after a status tick")
+	}
 	f.key("s")
 	if !f.c.subscribed["dev"] {
 		t.Fatal("s again resubscribes")

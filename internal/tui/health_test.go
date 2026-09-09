@@ -17,7 +17,7 @@ func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 		t.Fatal("h opens health")
 	}
 	v := f.m.View()
-	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 2 (1 memory)", "embeddings unset", "receive", "theme", "AGENTBUS_TUI_AGENTCOLOR", "cyan", "config ·", filepath.Base(f.c.cfg.Path), "\"tui_name\"", "\"sqlite_budget_mib\": 2048"} {
+	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 2 (1 memory)", "embeddings unset", "receive", "theme", "AGENTBUS_TUI_AGENTCOLOR", "cyan", "keys", "q quit", "config ·", filepath.Base(f.c.cfg.Path), "\"tui_name\"", "\"sqlite_budget_mib\": 2048"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("health lacks %q:\n%s", want, v)
 		}

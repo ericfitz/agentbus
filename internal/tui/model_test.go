@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -288,6 +289,32 @@ func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
 	}
 	if old.Seq < 1 {
 		t.Fatalf("test assumption broken: old.Seq = %d, want >= 1", old.Seq)
+	}
+}
+
+// TestNormalModeCursorScrollsIntoView guards F2: moving the cursor far in
+// either direction must keep its rendered line inside the stream viewport,
+// not just re-render in place.
+func TestNormalModeCursorScrollsIntoView(t *testing.T) {
+	f := newFixture(t)
+	for i := 0; i < 40; i++ {
+		f.agentSend(t, "dev", fmt.Sprintf("msg %d", i))
+	}
+	f.receive(t)
+	f.m.height = 20
+	f.m.layout()
+	f.key("esc")
+	for i := 0; i < 30; i++ {
+		f.key("up")
+	}
+	if f.m.cursorLine < f.m.stream.YOffset || f.m.cursorLine >= f.m.stream.YOffset+f.m.stream.Height {
+		t.Fatalf("cursor scrolled out of view going up: cursorLine=%d YOffset=%d Height=%d", f.m.cursorLine, f.m.stream.YOffset, f.m.stream.Height)
+	}
+	for i := 0; i < 30; i++ {
+		f.key("down")
+	}
+	if f.m.cursorLine < f.m.stream.YOffset || f.m.cursorLine >= f.m.stream.YOffset+f.m.stream.Height {
+		t.Fatalf("cursor scrolled out of view going down: cursorLine=%d YOffset=%d Height=%d", f.m.cursorLine, f.m.stream.YOffset, f.m.stream.Height)
 	}
 }
 

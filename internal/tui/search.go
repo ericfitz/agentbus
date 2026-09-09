@@ -121,9 +121,9 @@ func (m Model) viewSearch() string {
 
 	hits := m.search.hits
 	// visible reserves the input line, the blank line after it, and the
-	// summary/badge lines below the list, so the hit rows plus that fixed
-	// chrome never exceed the overlay's body height.
-	visible := max(h-4-4, 1)
+	// summary and (possible) text-only badge lines below the list, so the hit
+	// rows plus that fixed chrome never exceed the overlay's body height.
+	visible := max(h-4-5, 1)
 	start, end := window(m.search.cursor, len(hits), visible)
 	for i := start; i < end; i++ {
 		hit := hits[i]

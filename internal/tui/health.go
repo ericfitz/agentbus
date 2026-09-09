@@ -115,6 +115,10 @@ func (m Model) healthLines() []string {
 	for _, v := range themeVars {
 		p("  %s %s\n", v.env, th.Sources[v.env])
 	}
+	b.WriteString("\n" + dim.Render("keys") + "\n")
+	p("  %s\n", dim.Render("j/k channels · ↑/↓ stream cursor · tab next unread · r reply · c new channel · s toggle subscribe"))
+	p("  %s\n", dim.Render("/ search · m memories · h ? health · i enter compose · esc back · q quit"))
+	p("  %s\n", dim.Render("compose: enter send · alt+enter newline · ↑ recall · ctrl+u clear"))
 	p("\n%s %s\n", dim.Render("config ·"), cfg.Path)
 	js, err := json.MarshalIndent(cfg, "  ", "  ")
 	if err != nil {

@@ -76,13 +76,22 @@ func (c *client) isSubscribed(name string) bool {
 	return c.subscribed[name]
 }
 
-// forget drops the local record of a subscription (after Unsubscribe).
-//
-//nolint:unused // consumed by a later task (Unsubscribe flow)
+// forget records name as explicitly unsubscribed (after Unsubscribe), rather
+// than deleting the map entry: setChannels must be able to tell "known but
+// off" apart from "never subscribed" so it does not resubscribe from
+// "oldest" and replay the whole retained history on the next status tick.
 func (c *client) forget(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.subscribed, name)
+	c.subscribed[name] = false
+}
+
+// known reports whether name has ever been subscribed (on or off).
+func (c *client) known(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.subscribed[name]
+	return ok
 }
 
 // receiveLoop long-polls Receive, acking the previous batch each time, and

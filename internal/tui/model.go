@@ -50,16 +50,17 @@ type Model struct {
 	height int
 	mode   mode
 
-	channels []bus.Channel
-	sel      int
-	msgs     map[string][]bus.Message
-	gaps     map[string][]bus.Gap
-	loaded   map[string]bool
-	seen     map[string]int64
-	divider  int64
-	cursor   int
-	stream   viewport.Model
-	follow   bool
+	channels   []bus.Channel
+	sel        int
+	msgs       map[string][]bus.Message
+	gaps       map[string][]bus.Gap
+	loaded     map[string]bool
+	seen       map[string]int64
+	divider    int64
+	cursor     int
+	cursorLine int // rendered line index of msgs[selName()][cursor]'s first line, from renderStream; -1 with no cursor
+	stream     viewport.Model
+	follow     bool
 
 	compose  textarea.Model
 	replyTo  *bus.Message
@@ -73,8 +74,9 @@ type Model struct {
 	gapCount     int
 	receiveErr   error
 
-	toast    string
-	toastSeq int
+	toast      string
+	toastSeq   int
+	lastNotice string
 
 	search searchState
 	mem    memState
@@ -99,6 +101,7 @@ func New(c *client, th Theme) Model {
 		mode:         modeInsert,
 		sel:          -1,
 		cursor:       -1,
+		cursorLine:   -1,
 		divider:      -1,
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
@@ -186,7 +189,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.channel == m.selName() && m.divider < 0 {
 				m.divider = m.dividerFor(msg.channel)
 			}
-			m.markSeen(msg.channel)
+			if msg.channel == m.selName() {
+				m.markSeen(msg.channel)
+			}
 		}
 		m.refreshStream()
 		switch {
@@ -388,11 +393,12 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 	m.cursor = min(max(m.cursor+d, 0), n-1)
 	m.follow = false
 	m.refreshStream()
+	m.scrollCursorIntoView()
 	return nil
 }
 
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
-// it is not loaded) and scrolls so it sits mid-viewport.
+// it is not loaded) and scrolls just enough to bring it into view.
 func (m *Model) placeCursor(seq int64) {
 	for i, x := range m.msgs[m.selName()] {
 		if x.Seq == seq {
@@ -401,7 +407,22 @@ func (m *Model) placeCursor(seq int64) {
 	}
 	m.follow = false
 	m.refreshStream()
-	m.stream.SetYOffset(max(m.cursor-m.stream.Height/2, 0))
+	m.scrollCursorIntoView()
+}
+
+// scrollCursorIntoView clamps the stream's YOffset so cursorLine (the
+// cursor's first rendered line, set by renderStream) lies within the visible
+// window, scrolling by the minimum amount rather than recentring every move.
+func (m *Model) scrollCursorIntoView() {
+	if m.cursor < 0 || m.cursorLine < 0 || m.stream.Height <= 0 {
+		return
+	}
+	switch {
+	case m.cursorLine < m.stream.YOffset:
+		m.stream.SetYOffset(m.cursorLine)
+	case m.cursorLine >= m.stream.YOffset+m.stream.Height:
+		m.stream.SetYOffset(m.cursorLine - m.stream.Height + 1)
+	}
 }
 
 func (m *Model) scrollStream(msg tea.Msg) tea.Cmd {
@@ -547,9 +568,10 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 	for _, ch := range res.Expired {
 		cmds = append(cmds, m.showToast("subscription to "+ch+" expired; resubscribing"), m.subscribeCmd(bus.Channel{Name: ch}, "now"))
 	}
-	if res.Notice != "" {
+	if res.Notice != "" && res.Notice != m.lastNotice {
 		cmds = append(cmds, m.showToast(res.Notice))
 	}
+	m.lastNotice = res.Notice
 	return tea.Batch(cmds...)
 }
 
@@ -589,7 +611,7 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	for _, c := range chans {
-		if !m.c.isSubscribed(c.Name) {
+		if !m.c.known(c.Name) {
 			cmds = append(cmds, m.subscribeCmd(c, from))
 		}
 	}

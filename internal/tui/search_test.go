@@ -136,7 +136,11 @@ func TestSearchHitListWindowsToFitTheOverlay(t *testing.T) {
 	if f.m.search.cursor != len(f.m.search.hits)-1 {
 		t.Fatalf("cursor=%d want %d", f.m.search.cursor, len(f.m.search.hits)-1)
 	}
+	f.m.search.textOnly = true
 	v := f.m.View()
+	if !strings.Contains(v, "text only") {
+		t.Fatalf("text-only badge must render alongside a full hit list:\n%s", v)
+	}
 	last := f.m.search.hits[len(f.m.search.hits)-1]
 	firstLine := strings.SplitN(last.Content, "\n", 2)[0]
 	if !strings.Contains(v, firstLine) {

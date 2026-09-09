@@ -211,22 +211,96 @@ func (m *Model) applyMemoryEdit(msg memEditedMsg) tea.Cmd {
 	}
 }
 
-// viewMemories draws the memory list windowed to what fits above a detail
-// section (revision content, type, refs), same treatment as viewSearch: the
-// list can hold up to historyPage rows, so every row is width-truncated and
-// only a window around the cursor is shown, with the title noting when it
-// is windowed.
+// memoriesTail renders the detail section (current revision, type, refs)
+// and, while confirming a delete, the confirmation prompt, as one string
+// sized to fit within budget lines total. type, refs, and the confirm
+// prompt are fixed-size overhead; the revision content is truncated harder
+// as that overhead grows, so a long body plus type, refs, and a delete
+// confirmation together can never push the y/n prompt past budget.
+func (m Model) memoriesTail(budget int) string {
+	th := m.theme
+	dim := th.Style(th.Dim)
+	confirming := m.mode == modeConfirmDelete && m.mem.current() != nil
+	confirmLine := func() string {
+		cur := m.mem.current()
+		title := strings.SplitN(cur.Content, "\n", 2)[0]
+		return "\n" + th.Style(th.Error).Render(fmt.Sprintf("delete memory #%d “%s”? tombstones all revisions · y yes  n no", m.mem.currentID(), title))
+	}
+	if len(m.mem.revs) == 0 {
+		if confirming {
+			return confirmLine()
+		}
+		return ""
+	}
+	r := m.mem.revs[min(m.mem.rev, len(m.mem.revs)-1)]
+	overhead := 2 // blank line + revision header
+	if r.Type != "" {
+		overhead++
+	}
+	if len(r.Refs) > 0 {
+		overhead++
+	}
+	if confirming {
+		overhead += 2
+	}
+	contentBudget := max(budget-overhead, 1)
+	var b strings.Builder
+	b.WriteString("\n" + dim.Render(fmt.Sprintf("#%d · revision %d of %d · %s · %s", m.mem.currentID(), m.mem.rev+1, len(m.mem.revs), r.Sender, clock(r.CreatedAt))) + "\n")
+	lines := strings.Split(r.Content, "\n")
+	if len(lines) > contentBudget {
+		show := max(contentBudget-1, 1)
+		more := len(lines) - show
+		b.WriteString(strings.Join(lines[:show], "\n") + "\n")
+		b.WriteString(dim.Render(fmt.Sprintf("… (%d more lines)", more)) + "\n")
+	} else {
+		b.WriteString(r.Content + "\n")
+	}
+	if r.Type != "" {
+		b.WriteString(dim.Render("type ") + r.Type + "\n")
+	}
+	if len(r.Refs) > 0 {
+		refs := make([]string, len(r.Refs))
+		for i, ref := range r.Refs {
+			refs[i] = ref.Value
+		}
+		b.WriteString(dim.Render("refs ") + strings.Join(refs, " · ") + "\n")
+	}
+	if confirming {
+		b.WriteString(confirmLine())
+	}
+	return b.String()
+}
+
+// tailLineCount returns the number of display lines s renders as, counting a
+// final line with no trailing newline.
+func tailLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+// viewMemories draws the memory list windowed to what fits above the detail
+// section (revision content, type, refs) and, while confirming a delete, the
+// confirmation prompt: the list can hold up to historyPage rows, so every row
+// is width-truncated and only a window around the cursor is shown, sized so
+// the tail below it is never clipped.
 func (m Model) viewMemories() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
 	w, h := m.overlaySize()
 	trunc := lipgloss.NewStyle().MaxWidth(w - 4)
 
-	detailRows := 1
-	if len(m.mem.revs) > 0 {
-		detailRows = 8
-	}
-	visible := max(h-4-detailRows-1, 1)
+	// Reserve at least one list row (h-4-1) as the tail's own truncation
+	// budget, so the tail can never grow past what's left for it even before
+	// its actual rendered length is known; the list then gets whatever room
+	// the tail didn't need.
+	tail := m.memoriesTail(max(h-5, 1))
+	visible := max(h-4-tailLineCount(tail), 1)
 	start, end := window(m.mem.cursor, len(m.mem.list), visible)
 
 	var b strings.Builder
@@ -254,34 +328,7 @@ func (m Model) viewMemories() string {
 	if len(m.mem.list) == 0 {
 		b.WriteString(dim.Render("no memories in "+m.mem.channel) + "\n")
 	}
-	if len(m.mem.revs) > 0 {
-		r := m.mem.revs[min(m.mem.rev, len(m.mem.revs)-1)]
-		b.WriteString("\n" + dim.Render(fmt.Sprintf("#%d · revision %d of %d · %s · %s", m.mem.currentID(), m.mem.rev+1, len(m.mem.revs), r.Sender, clock(r.CreatedAt))) + "\n")
-		lines := strings.Split(r.Content, "\n")
-		if maxLines := detailRows - 4; len(lines) > maxLines {
-			more := len(lines) - maxLines
-			b.WriteString(strings.Join(lines[:maxLines], "\n") + "\n")
-			b.WriteString(dim.Render(fmt.Sprintf("… (%d more lines)", more)) + "\n")
-		} else {
-			b.WriteString(r.Content + "\n")
-		}
-		if r.Type != "" {
-			b.WriteString(dim.Render("type ") + r.Type + "\n")
-		}
-		if len(r.Refs) > 0 {
-			refs := make([]string, len(r.Refs))
-			for i, ref := range r.Refs {
-				refs[i] = ref.Value
-			}
-			b.WriteString(dim.Render("refs ") + strings.Join(refs, " · ") + "\n")
-		}
-	}
-	if m.mode == modeConfirmDelete {
-		if cur := m.mem.current(); cur != nil {
-			title := strings.SplitN(cur.Content, "\n", 2)[0]
-			b.WriteString("\n" + th.Style(th.Error).Render(fmt.Sprintf("delete memory #%d “%s”? tombstones all revisions · y yes  n no", m.mem.currentID(), title)))
-		}
-	}
+	b.WriteString(tail)
 	count := fmt.Sprintf(" · %d memories", len(m.mem.list))
 	if end-start < len(m.mem.list) {
 		count = fmt.Sprintf(" · showing %d-%d of %d memories", start+1, end, len(m.mem.list))

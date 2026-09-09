@@ -120,6 +120,24 @@ func (f *fixture) receive(t *testing.T) {
 	f.send(batchMsg{res})
 }
 
+// drainAndAck fully acknowledges whatever is currently pending for the TUI's
+// session without feeding it to the model, as if the human wasn't running
+// the TUI when it arrived: it can only be discovered later via History, the
+// same as any message that predates the client's subscription.
+func (f *fixture) drainAndAck(t *testing.T) {
+	t.Helper()
+	res, err := f.c.b.Receive(f.c.as, bus.ReceiveInput{IncludeOwn: true, WaitSeconds: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Batch == "" {
+		return
+	}
+	if _, err := f.c.b.Receive(f.c.as, bus.ReceiveInput{Ack: res.Batch, IncludeOwn: true, WaitSeconds: 0}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitSelectsFirstChannelAndLoadsHistory(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "old one")
@@ -233,6 +251,41 @@ func TestToastClearsOnKey(t *testing.T) {
 	f.key("x")
 	if f.m.toast != "" {
 		t.Fatal("any key clears the toast")
+	}
+}
+
+func TestDownInNormalModeDrivesCursorNotSelection(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "one")
+	f.m = New(f.c, f.m.theme) // re-init after the message exists
+	f.run(f.m.Init())
+	sel := f.m.sel
+	f.key("esc") // normal mode
+	f.key("down")
+	if f.m.cursor < 0 {
+		t.Fatal("down in normal mode must set the stream cursor")
+	}
+	if f.m.sel != sel {
+		t.Fatalf("down must not change the selected channel: sel=%d want %d", f.m.sel, sel)
+	}
+}
+
+func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
+	f := newFixture(t)
+	old := f.agentSend(t, "notes", "old")
+	f.drainAndAck(t) // "old" is ack'd unseen: only History will ever surface it
+	live := f.agentSend(t, "notes", "live")
+	f.receive(t) // notes now has "live" loaded but not the pre-existing "old" history
+	f.key("esc") // normal mode
+	f.key("j")   // dev -> notes, triggering the first-ever history load
+	if f.m.selected().Name != "notes" {
+		t.Fatalf("j did not select notes: %v", f.m.selected())
+	}
+	if want := live.Seq - 1; f.m.divider != want {
+		t.Fatalf("divider = %d, want %d (== old.Seq %d)", f.m.divider, want, old.Seq)
+	}
+	if old.Seq < 1 {
+		t.Fatalf("test assumption broken: old.Seq = %d, want >= 1", old.Seq)
 	}
 }
 

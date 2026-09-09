@@ -58,17 +58,14 @@ func newClient(cfg config.Config, name string, log *slog.Logger) (*client, error
 // subscribe is idempotent per channel name.
 func (c *client) subscribe(ch bus.Channel, from string) error {
 	c.mu.Lock()
-	already := c.subscribed[ch.Name]
-	c.mu.Unlock()
-	if already {
+	defer c.mu.Unlock()
+	if c.subscribed[ch.Name] {
 		return nil
 	}
 	if err := c.b.Subscribe(c.as, ch.Name, from); err != nil {
 		return err
 	}
-	c.mu.Lock()
 	c.subscribed[ch.Name] = true
-	c.mu.Unlock()
 	return nil
 }
 

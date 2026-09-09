@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -176,6 +177,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addMessages(msg.channel, msg.msgs)
 		if !msg.prepend {
+			// selectChannel already set the divider from whatever was
+			// loaded at open time (e.g. a live message received before
+			// this history page arrived); only fill it in here if nothing
+			// was known to be unread yet, using seen as it stood at open
+			// time (markSeen below hasn't advanced it for this load yet).
+			if msg.channel == m.selName() && m.divider < 0 {
+				m.divider = m.dividerFor(msg.channel)
+			}
 			m.markSeen(msg.channel)
 		}
 		m.refreshStream()
@@ -256,16 +265,20 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
-	case "j", "down":
-		if m.cursor >= 0 {
-			return m.moveCursor(1)
-		}
+	case "j":
 		return m.selectChannel(m.sel + 1)
-	case "k", "up":
-		if m.cursor >= 0 {
-			return m.moveCursor(-1)
-		}
+	case "k":
 		return m.selectChannel(m.sel - 1)
+	case "down":
+		if m.cursor < 0 {
+			m.cursor = len(m.msgs[m.selName()]) - 1
+		}
+		return m.moveCursor(1)
+	case "up":
+		if m.cursor < 0 {
+			m.cursor = len(m.msgs[m.selName()]) - 1
+		}
+		return m.moveCursor(-1)
 	case "tab":
 		return m.nextUnread()
 	case "pgup", "pgdown":
@@ -277,17 +290,6 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "G":
 		m.follow = true
 		m.stream.GotoBottom()
-	case "left", "right":
-		// ← → enter/leave the stream cursor: → puts the cursor on the newest
-		// message, ← clears it.
-		if keyString(msg) == "right" {
-			if n := len(m.msgs[m.selName()]); n > 0 {
-				m.cursor = n - 1
-			}
-		} else {
-			m.cursor = -1
-		}
-		m.refreshStream()
 	case "r":
 		if ms := m.msgs[m.selName()]; m.cursor >= 0 && m.cursor < len(ms) {
 			target := ms[m.cursor]
@@ -395,9 +397,21 @@ func (m *Model) markSeen(ch string) {
 	}
 }
 
-// selectChannel moves the selection (clamped), places the "new" divider at
-// the previous last-seen seq, marks everything seen, and loads history on
-// first visit.
+// dividerFor returns the "new" divider for ch: the seq just before the
+// oldest currently-loaded message newer than the last-seen seq, or -1 if
+// nothing loaded so far is unread. Call before markSeen advances seen[ch].
+func (m *Model) dividerFor(ch string) int64 {
+	for _, x := range m.msgs[ch] {
+		if x.Seq > m.seen[ch] {
+			return x.Seq - 1
+		}
+	}
+	return -1
+}
+
+// selectChannel moves the selection (clamped), places the "new" divider
+// just before the oldest unread message loaded so far, marks everything
+// seen, and loads history on first visit.
 func (m *Model) selectChannel(i int) tea.Cmd {
 	if len(m.channels) == 0 {
 		m.sel = -1
@@ -409,10 +423,7 @@ func (m *Model) selectChannel(i int) tea.Cmd {
 	m.follow = true
 	m.replyTo = nil
 	ch := m.channels[i].Name
-	m.divider = -1
-	if m.unread(ch) > 0 {
-		m.divider = m.seen[ch] // 0 when nothing was ever seen: every message is new
-	}
+	m.divider = m.dividerFor(ch)
 	m.markSeen(ch)
 	m.refreshStream()
 	m.stream.GotoBottom()
@@ -505,6 +516,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 // selection by name, and subscribes to any channel not yet subscribed.
 func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	cur := m.selName()
+	chans = slices.Clone(chans) // don't sort the caller's slice (bus.Status.Channels) in place
 	sort.Slice(chans, func(i, j int) bool { return chans[i].Name < chans[j].Name })
 	m.channels = chans
 	m.sel = -1
@@ -594,39 +606,17 @@ func (m *Model) fitCompose() {
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
 
 // Stubs replaced by later tasks. Each returns nil so Task 5 compiles alone.
-//
-//nolint:unused // consumed by Task 7
-func (m *Model) renderStream() string { return "" }
-
-//nolint:unused // consumed by Task 7
-func (m *Model) submitCompose() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 6
-func (m *Model) createChannelPrompt() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 6
-func (m *Model) toggleSubscribe() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 8
-func (m *Model) openSearch() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 9
-func (m *Model) openMemories() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 10
-func (m *Model) openHealth() tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 8
-func (m *Model) updateSearch(tea.Msg) tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 9
+func (m *Model) renderStream() string           { return "" }
+func (m *Model) submitCompose() tea.Cmd         { return nil }
+func (m *Model) createChannelPrompt() tea.Cmd   { return nil }
+func (m *Model) toggleSubscribe() tea.Cmd       { return nil }
+func (m *Model) openSearch() tea.Cmd            { return nil }
+func (m *Model) openMemories() tea.Cmd          { return nil }
+func (m *Model) openHealth() tea.Cmd            { return nil }
+func (m *Model) updateSearch(tea.Msg) tea.Cmd   { return nil }
 func (m *Model) updateMemories(tea.Msg) tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 10
-func (m *Model) updateHealth(tea.Msg) tea.Cmd { return nil }
-
-//nolint:unused // consumed by Task 7
-func (m Model) View() string { return "" }
+func (m *Model) updateHealth(tea.Msg) tea.Cmd   { return nil }
+func (m Model) View() string                    { return "" }
 
 const (
 	leftRail  = 18

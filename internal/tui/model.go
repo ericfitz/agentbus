@@ -566,6 +566,10 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	for _, ch := range res.Expired {
+		// The bus dropped the subscription but c.subscribed[ch] is still
+		// true, so client.subscribe would no-op; forget it first so the
+		// resubscribe actually reaches the bus.
+		m.c.forget(ch)
 		cmds = append(cmds, m.showToast("subscription to "+ch+" expired; resubscribing"), m.subscribeCmd(bus.Channel{Name: ch}, "now"))
 	}
 	if res.Notice != "" && res.Notice != m.lastNotice {

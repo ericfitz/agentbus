@@ -334,3 +334,25 @@ func TestQuitKeysInNormalModeOnly(t *testing.T) {
 		t.Fatal("q must return tea.Quit")
 	}
 }
+
+// TestExpiredSubscriptionIsResubscribed verifies that an onBatch report of an
+// expired subscription actually restores delivery, rather than leaving the
+// client's stale "subscribed" flag blocking a real resubscribe.
+func TestExpiredSubscriptionIsResubscribed(t *testing.T) {
+	f := newFixture(t)
+	if err := f.c.b.Unsubscribe(f.c.as, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	f.send(batchMsg{res: bus.ReceiveResult{Expired: []string{"dev"}}})
+	if !f.c.isSubscribed("dev") {
+		t.Fatal("expired channel was not resubscribed")
+	}
+	f.agentSend(t, "dev", "after expiry")
+	f.receive(t)
+	for _, msg := range f.m.msgs["dev"] {
+		if msg.Content == "after expiry" {
+			return
+		}
+	}
+	t.Fatal("message sent after resubscribe was not delivered")
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -39,6 +40,16 @@ type Config struct {
 	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string   `json:"log_level"`
 	TUIName                      string   `json:"tui_name"`
+	TUIBackgroundColor           string   `json:"tui_background_color"`
+	TUITextColor                 string   `json:"tui_text_color"`
+	TUIDimColor                  string   `json:"tui_dim_color"`
+	TUIAgentColor                string   `json:"tui_agent_color"`
+	TUIUserColor                 string   `json:"tui_user_color"`
+	TUIMemoryColor               string   `json:"tui_memory_color"`
+	TUIHealthColor               string   `json:"tui_health_color"`
+	TUIWarnColor                 string   `json:"tui_warn_color"`
+	TUIErrorColor                string   `json:"tui_error_color"`
+	TUISelectionColor            string   `json:"tui_selection_color"`
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -67,7 +78,68 @@ func Default() Config {
 		EmbeddingQueryTimeoutSeconds: 10,
 		LogLevel:                     "info",
 		TUIName:                      defaultTUIName(),
+		TUIBackgroundColor:           "default",
+		TUITextColor:                 "default",
+		TUIDimColor:                  "brightblack",
+		TUIAgentColor:                "cyan",
+		TUIUserColor:                 "yellow",
+		TUIMemoryColor:               "magenta",
+		TUIHealthColor:               "green",
+		TUIWarnColor:                 "yellow",
+		TUIErrorColor:                "red",
+		TUISelectionColor:            "brightblack",
 	}
+}
+
+// TUIColors lists the tui_*_color settings as (key, value) pairs in a fixed
+// order, for validation and for the TUI's theme loader.
+func (c Config) TUIColors() [][2]string {
+	return [][2]string{
+		{"tui_background_color", c.TUIBackgroundColor},
+		{"tui_text_color", c.TUITextColor},
+		{"tui_dim_color", c.TUIDimColor},
+		{"tui_agent_color", c.TUIAgentColor},
+		{"tui_user_color", c.TUIUserColor},
+		{"tui_memory_color", c.TUIMemoryColor},
+		{"tui_health_color", c.TUIHealthColor},
+		{"tui_warn_color", c.TUIWarnColor},
+		{"tui_error_color", c.TUIErrorColor},
+		{"tui_selection_color", c.TUISelectionColor},
+	}
+}
+
+var ansiNames = []string{"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"}
+
+// ColorForms is the accepted-values sentence shared by config validation
+// and the TUI's environment-variable warning.
+const ColorForms = "black, red, green, yellow, blue, magenta, cyan, white, their bright forms such as brightblack, 0-15, or default"
+
+// ColorIndex parses a color setting: the sixteen ANSI names (bright forms
+// prefixed with "bright"), the integers 0-15, or "default" (-1);
+// case-insensitive, surrounding whitespace ignored. Only ANSI colors are
+// accepted on purpose: #RGB is rejected so a later version can add it
+// without silently changing behavior.
+func ColorIndex(s string) (int, error) {
+	v := strings.ToLower(strings.TrimSpace(s))
+	if v == "default" {
+		return -1, nil
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 || n > 15 {
+			return 0, errors.New("index out of range")
+		}
+		return n, nil
+	}
+	base, bright := strings.CutPrefix(v, "bright")
+	for i, name := range ansiNames {
+		if base == name {
+			if bright {
+				i += 8
+			}
+			return i, nil
+		}
+	}
+	return 0, errors.New("unknown color")
 }
 
 // defaultTUIName is the OS user name, the identity `agentbus tui` registers
@@ -245,6 +317,11 @@ func (c *Config) validate() error {
 	}
 	if c.TUIName == "" {
 		return errors.New("tui_name must not be empty")
+	}
+	for _, kv := range c.TUIColors() {
+		if _, err := ColorIndex(kv[1]); err != nil {
+			return fmt.Errorf("%s must be one of %s, got %q", kv[0], ColorForms, kv[1])
+		}
 	}
 	return nil
 }

@@ -17,7 +17,7 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	// Insert mode is the fixture's starting mode: the compose line reads
 	// "dev ›" and the status bar shows the insert-mode key hints.
 	v := f.m.View()
-	for _, want := range []string{"channels", "dev", "◆ notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "esc commands", "alt+enter", "dev ›"} {
+	for _, want := range []string{"channels", "dev", "◆ dev-notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "esc commands", "alt+enter", "dev ›"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}
@@ -63,15 +63,15 @@ func TestLongChannelNameAndShortRailDoNotOverflow(t *testing.T) {
 
 func TestStreamShowsNewDividerAndGap(t *testing.T) {
 	f := newFixture(t)
-	one := f.agentSend(t, "notes", "one")
+	one := f.agentSend(t, "dev-notes", "one")
 	f.receive(t)
 	f.key("esc")
-	f.key("j") // visit notes: "one" is now seen
+	f.key("j") // visit dev-notes: "one" is now seen
 	f.key("k") // back to dev
-	f.agentSend(t, "notes", "two")
-	f.send(batchMsg{res: bus.ReceiveResult{Gaps: []bus.Gap{{Channel: "notes", From: one.Seq, To: one.Seq}}}})
+	f.agentSend(t, "dev-notes", "two")
+	f.send(batchMsg{res: bus.ReceiveResult{Gaps: []bus.Gap{{Channel: "dev-notes", From: one.Seq, To: one.Seq}}}})
 	f.receive(t)
-	f.key("j") // notes again: divider sits after "one"
+	f.key("j") // dev-notes again: divider sits after "one"
 	s := f.m.renderStream()
 	if !strings.Contains(s, "new") || !strings.Contains(s, "1 evicted") {
 		t.Fatalf("stream:\n%s", s)

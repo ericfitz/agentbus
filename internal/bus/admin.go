@@ -129,5 +129,5 @@ func (b *Bus) Reset() error {
 	if err := tx.Commit(); err != nil {
 		return internal(err)
 	}
-	return nil
+	return b.ensureDefaults()
 }

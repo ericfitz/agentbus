@@ -4,7 +4,7 @@
 
 **Goal:** `agentbus tui` — a live chat-client dashboard for the bus where a human can watch channels and sessions, send messages, create/edit/delete memories, search, and inspect health, all in one binary with no server.
 
-**Architecture:** A new `internal/tui` package opens the SQLite bus through `internal/bus` exactly as `status` and `reset` do, registers as the human (`tui_name`), subscribes to every channel, and runs one goroutine that long-polls `Receive` and feeds batches into a Bubble Tea program as messages. The model is a single struct with a `mode` enum (insert, normal, search, memories, health, confirm-delete); the view is pure string rendering with Lip Gloss styles built once from environment-variable theme colours. Heartbeat and maintenance ticks reuse the loop the MCP server already runs.
+**Architecture:** A new `internal/tui` package opens the SQLite bus through `internal/bus` exactly as `status` and `reset` do, registers as the human (`tui_name`), subscribes to every channel, and runs one goroutine that long-polls `Receive` and feeds batches into a Bubble Tea program as messages. The model is a single struct with a `mode` enum (insert, normal, search, memories, health, confirm-delete); the view is pure string rendering with Lip Gloss styles built once from environment-variable theme colors. Heartbeat and maintenance ticks reuse the loop the MCP server already runs.
 
 **Tech Stack:** Go 1.27, `github.com/charmbracelet/bubbletea` v1.3.10, `github.com/charmbracelet/lipgloss` v1.1.0, `github.com/charmbracelet/bubbles` v1.0.0 (textarea, textinput, viewport). v1 of the Charm libraries, not v2: v2 moved to the `charm.land` import path and changed the `View` contract; v1 is stable, its API is the one every existing example uses, and the ANSI-only theme needs nothing from v2.
 
@@ -15,11 +15,11 @@
 - Data path is in-process: the TUI opens the bus via `bus.Open(cfg, log)`; never the MCP client.
 - Identity: `tui_name` config key, default the OS user name; `--as` overrides. The bus's `Register` applies the name rule (1-128 bytes, no `/`, no control characters); the TUI does not re-implement it.
 - Theme: ten `AGENTBUS_TUI_*COLOR` variables, read once at startup. Accepted values: the sixteen ANSI names, integers `0`-`15`, `default`; case-insensitive. Anything else prints one stderr line naming the variable and the accepted forms, then uses the role default and continues. `#RGB`/`#RRGGBB` are rejected.
-- Search never errors on embeddings: `SemanticUnavailable` renders as a `text only` badge in the warn colour.
+- Search never errors on embeddings: `SemanticUnavailable` renders as a `text only` badge in the warn color.
 - Errors from the bus render as a one-line toast above the status bar for 5 s or until any key.
 - Quit closes the bus only after the heartbeat and tick goroutines have exited (same ordering as `mcpserver.Run`).
-- Message content is never coloured; only names, timestamps, dividers, badges, borders.
-- Out of scope for v1: mouse, multiple humans, in-place config editing, reset, truecolour, message detail view.
+- Message content is never colored; only names, timestamps, dividers, badges, borders.
+- Out of scope for v1: mouse, multiple humans, in-place config editing, reset, truecolor, message detail view.
 - Every task ends with `gofmt -l .` clean, `go vet ./...`, `golangci-lint run ./...` reporting 0 issues, and `go test ./...` green. The repo is lint-clean at the start; keep it that way (write `_ = x.Close()` for discarded error returns).
 - Commit after each task with a conventional-commit subject. Do not push.
 
@@ -41,7 +41,7 @@
 | `internal/config/config.go` (modify) | `tui_name` key, default from `os/user`, non-empty validation |
 | `internal/bus/memories.go` (modify) | `MemoryRevisions(as, id)` read |
 | `internal/mcpserver/server.go` (modify) | export `StartBackgroundLoops` |
-| `internal/tui/theme.go` (new) | env-var colour parsing → `Theme` of `lipgloss.Style`s |
+| `internal/tui/theme.go` (new) | env-var color parsing → `Theme` of `lipgloss.Style`s |
 | `internal/tui/client.go` (new) | bus session: open, register, subscribe, receive loop, close |
 | `internal/tui/msgs.go` (new) | every `tea.Msg` type the model consumes |
 | `internal/tui/model.go` (new) | `Model` struct, `New`, `Init`, `Update` dispatch, channel/stream state |
@@ -253,7 +253,7 @@ func TestLoadThemeUsesDefaultsAndReportsBadValues(t *testing.T) {
 	var warn bytes.Buffer
 	th := LoadTheme(func(k string) string { return env[k] }, &warn)
 	if th.Agent != lipgloss.Color("2") {
-		t.Fatalf("agent colour not applied: %v", th.Agent)
+		t.Fatalf("agent color not applied: %v", th.Agent)
 	}
 	if th.Mem != lipgloss.Color("5") {
 		t.Fatalf("bad value must fall back to default magenta, got %v", th.Mem)
@@ -299,9 +299,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Theme holds one terminal colour per role. Only ANSI indices 0-15 and the
+// Theme holds one terminal color per role. Only ANSI indices 0-15 and the
 // terminal default are representable in v1, on purpose: the parser rejects
-// #RGB so a later version can add it without silently changing behaviour.
+// #RGB so a later version can add it without silently changing behavior.
 type Theme struct {
 	BG, Text, Dim, Agent, User, Mem, Health, Warn, Error, Sel lipgloss.TerminalColor
 	// Sources records the resolved value per environment variable for the
@@ -353,7 +353,7 @@ func ParseColor(s string) (lipgloss.TerminalColor, error) {
 			return lipgloss.Color(strconv.Itoa(i)), nil
 		}
 	}
-	return nil, errors.New("unknown colour")
+	return nil, errors.New("unknown color")
 }
 
 // LoadTheme reads every theme variable through getenv. A bad value prints one
@@ -365,7 +365,7 @@ func LoadTheme(getenv func(string) string, warn io.Writer) Theme {
 		value := v.def
 		if raw := getenv(v.env); raw != "" {
 			if _, err := ParseColor(raw); err != nil {
-				_, _ = fmt.Fprintf(warn, "agentbus tui: %s=%q is not a colour (%v); accepted: black, red, green, yellow, blue, magenta, cyan, white, their bright forms such as brightblack, 0-15, or default; using %s\n", v.env, raw, err, v.def)
+				_, _ = fmt.Fprintf(warn, "agentbus tui: %s=%q is not a color (%v); accepted: black, red, green, yellow, blue, magenta, cyan, white, their bright forms such as brightblack, 0-15, or default; using %s\n", v.env, raw, err, v.def)
 			} else {
 				value = strings.ToLower(strings.TrimSpace(raw))
 			}
@@ -377,7 +377,7 @@ func LoadTheme(getenv func(string) string, warn io.Writer) Theme {
 	return t
 }
 
-// Style is a foreground-only style in colour c.
+// Style is a foreground-only style in color c.
 func (t Theme) Style(c lipgloss.TerminalColor) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
@@ -2151,7 +2151,7 @@ git commit -m "feat(tui): compose line with send, reply, memory creation, channe
 - Test: `internal/tui/view_test.go`
 
 **Interfaces:**
-- Produces: `func (m Model) View() string`, `func (m *Model) renderStream() string`, `func (m Model) renderStatusBar() string`, `func (m Model) renderRails() (left, right string)`, `func fmtBytes(n int64) string` ("412 MiB", "2.0 GiB"), `func clock(ms int64) string` (HH:MM today, else "Sep 7"), `func (m Model) overlay(title string, border lipgloss.TerminalColor, body string, footer string) string` — centred box used by Tasks 8-10.
+- Produces: `func (m Model) View() string`, `func (m *Model) renderStream() string`, `func (m Model) renderStatusBar() string`, `func (m Model) renderRails() (left, right string)`, `func fmtBytes(n int64) string` ("412 MiB", "2.0 GiB"), `func clock(ms int64) string` (HH:MM today, else "Sep 7"), `func (m Model) overlay(title string, border lipgloss.TerminalColor, body string, footer string) string` — centered box used by Tasks 8-10.
 
 Layout (width W, height H):
 
@@ -2168,7 +2168,7 @@ Layout (width W, height H):
 │ db 412 MiB / 2 GiB  embed ok  backlog 0  as eric          ? help / search m memories … │
 ```
 
-Rails hide when W < 90 (right) and W < 60 (both). Colours per the spec table: agent names `Agent`, own name `User`, memory channel marker and `◆` `Mem`, dividers/timestamps/help `Dim`, selected row background `Sel`, heartbeat dot `Health`, idle dot and badges `Warn`, toast `Error`.
+Rails hide when W < 90 (right) and W < 60 (both). Colors per the spec table: agent names `Agent`, own name `User`, memory channel marker and `◆` `Mem`, dividers/timestamps/help `Dim`, selected row background `Sel`, heartbeat dot `Health`, idle dot and badges `Warn`, toast `Error`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2331,12 +2331,12 @@ func (m Model) View() string {
 	dim := m.theme.Style(m.theme.Dim)
 	left, right := m.renderRails()
 	header := m.renderHeader()
-	centre := lipgloss.JoinVertical(lipgloss.Left, header, m.stream.View())
+	center := lipgloss.JoinVertical(lipgloss.Left, header, m.stream.View())
 	cols := []string{}
 	if m.showLeft() {
 		cols = append(cols, left, dim.Render("│"))
 	}
-	cols = append(cols, centre)
+	cols = append(cols, center)
 	if m.showRight() {
 		cols = append(cols, dim.Render("│"), right)
 	}
@@ -2540,8 +2540,8 @@ func (m Model) renderStatusBar() string {
 	return left + strings.Repeat(" ", gap) + help
 }
 
-// overlay renders a titled, bordered box centred on the screen; the border
-// colour names the overlay (cyan search, magenta memories, green health).
+// overlay renders a titled, bordered box centered on the screen; the border
+// color names the overlay (cyan search, magenta memories, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w := min(max(m.width-8, 40), 100)
 	h := max(m.height-4, 10)
@@ -2595,7 +2595,7 @@ func (m *Model) layout() {
 - [ ] **Step 4: Run the tests**
 
 Run: `go test ./internal/tui/ -v && go vet ./... && golangci-lint run ./...`
-Expected: PASS, 0 issues. Colours do not appear in test output (no TTY, so Lip Gloss renders plain text); assertions are on text only.
+Expected: PASS, 0 issues. Colors do not appear in test output (no TTY, so Lip Gloss renders plain text); assertions are on text only.
 
 - [ ] **Step 5: Look at it**
 
@@ -3696,12 +3696,12 @@ with `"github.com/ericfitz/agentbus/internal/tui"` added to the imports.
 
 ```markdown
 - `agentbus tui` opens a live dashboard: channels with unread counts on the
-  left, the selected channel's stream in the centre, live sessions on the
+  left, the selected channel's stream in the center, live sessions on the
   right, a compose line, and a status bar. It registers as `tui_name` from
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
   Press `esc` for the command keys (`?` lists them), `/` to search, `m` for
-  the memory browser, `h` for health, `q` to quit. Colours come from
+  the memory browser, `h` for health, `q` to quit. Colors come from
   `AGENTBUS_TUI_*COLOR` environment variables; see below.
 ```
 
@@ -3710,10 +3710,10 @@ Add a new section before `## Limits worth knowing`:
 ```markdown
 ## TUI theme
 
-Each variable takes one of the sixteen ANSI colour names (`black`, `red`,
+Each variable takes one of the sixteen ANSI color names (`black`, `red`,
 `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, or a `bright` form
 such as `brightblack`), an index `0`-`15`, or `default` for the terminal's
-own colour. Matching is case-insensitive. Other values, including `#RRGGBB`,
+own color. Matching is case-insensitive. Other values, including `#RRGGBB`,
 are rejected with one line on stderr and the default is used.
 
 | Variable | Used for | Default |
@@ -3786,9 +3786,9 @@ git commit -m "feat: agentbus tui command"
 - Search, memories, health overlays: Tasks 8, 9, 10. Message detail deferred per spec. ✓
 - Bubble Tea + Lip Gloss: Task 2 pins versions. ✓
 - Theming table, accepted values, rejection message, health "theme" heading: Tasks 2, 10, docs in 11. ✓
-- Behaviour: start sequence (4, 5), live goroutine with ack (4), gaps divider (7), unread (5), status every 5 s (5), enter sends / memory channel creates (6), `r` reply (5, 6), search modes and badge (8), memories list/revision/edit/delete with y/n (9), toast 5 s or key (5, 7), quit ordering (4, 11). ✓
+- Behavior: start sequence (4, 5), live goroutine with ack (4), gaps divider (7), unread (5), status every 5 s (5), enter sends / memory channel creates (6), `r` reply (5, 6), search modes and badge (8), memories list/revision/edit/delete with y/n (9), toast 5 s or key (5, 7), quit ordering (4, 11). ✓
 - Canvas keymap: `c` create channel and `s` toggle subscribe (6); `g`/`G`, pgup/pgdn (5); `↑` recall, `ctrl+u` (5); health `o` (10). "shift+enter" is `alt+enter` (interpretation 3). "enter detail" on the stream is the deferred message detail view.
-- Out of scope list honoured: no mouse, one human, no in-place config edit, no reset, no truecolour.
+- Out of scope list honored: no mouse, one human, no in-place config edit, no reset, no truecolor.
 
 **Placeholder scan.** No TBD/TODO. Every stub introduced in Task 5 and 7 is named, and the task that deletes it is named.
 

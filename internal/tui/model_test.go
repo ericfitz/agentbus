@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
-// fixture opens a bus with channels dev (ordinary) and notes (memory), an
+// fixture opens a bus with channels dev (ordinary) and dev-notes (memory), an
 // agent "Sam", and a TUI model registered as "eric" whose Init has run.
 type fixture struct {
 	m   Model
@@ -26,7 +27,7 @@ func newFixture(t *testing.T) *fixture {
 	if _, err := ab.CreateChannel(sam, "dev", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ab.CreateChannel(sam, "notes", "memory"); err != nil {
+	if _, err := ab.CreateChannel(sam, "dev-notes", "memory"); err != nil {
 		t.Fatal(err)
 	}
 	c, err := newClient(cfg, "eric", discardLog())
@@ -35,7 +36,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = c.close() })
 	f := &fixture{c: c, ab: ab, sam: sam}
-	f.m = New(c, LoadTheme(func(string) string { return "" }, nil))
+	f.m = New(c, LoadTheme(cfg, func(string) string { return "" }, nil))
 	f.m.width, f.m.height = 100, 32
 	f.run(f.m.Init())
 	return f
@@ -81,6 +82,10 @@ func (f *fixture) key(k string) {
 		f.send(tea.KeyMsg{Type: tea.KeyEsc})
 	case "tab":
 		f.send(tea.KeyMsg{Type: tea.KeyTab})
+	case "shift+tab":
+		f.send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	case "home":
+		f.send(tea.KeyMsg{Type: tea.KeyHome})
 	case "up":
 		f.send(tea.KeyMsg{Type: tea.KeyUp})
 	case "down":
@@ -162,18 +167,18 @@ func TestInitSelectsFirstChannelAndLoadsHistory(t *testing.T) {
 
 func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	f := newFixture(t)
-	f.agentSend(t, "notes", "remember this")
+	f.agentSend(t, "dev-notes", "remember this")
 	f.receive(t)
-	if f.m.unread("notes") != 1 || f.m.unread("dev") != 0 {
-		t.Fatalf("unread notes=%d dev=%d", f.m.unread("notes"), f.m.unread("dev"))
+	if f.m.unread("dev-notes") != 1 || f.m.unread("dev") != 0 {
+		t.Fatalf("unread dev-notes=%d dev=%d", f.m.unread("dev-notes"), f.m.unread("dev"))
 	}
 	f.key("esc") // normal mode
-	f.key("j")   // select notes
-	if f.m.selected().Name != "notes" {
-		t.Fatalf("j did not select notes: %v", f.m.selected())
+	f.key("j")   // select dev-notes
+	if f.m.selected().Name != "dev-notes" {
+		t.Fatalf("j did not select dev-notes: %v", f.m.selected())
 	}
-	if f.m.unread("notes") != 0 {
-		t.Fatalf("selecting must mark seen, unread=%d", f.m.unread("notes"))
+	if f.m.unread("dev-notes") != 0 {
+		t.Fatalf("selecting must mark seen, unread=%d", f.m.unread("dev-notes"))
 	}
 	if f.m.divider < 0 {
 		t.Fatal("divider must mark where new messages start")
@@ -184,17 +189,89 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	}
 }
 
-func TestTabJumpsToNextUnreadInBothModes(t *testing.T) {
+// TestTabCyclesPanesAndHomeReturnsToChannels: compose -> channels ->
+// messages -> compose, shift+tab back, home from anywhere to channels, and
+// an empty channel's message pane is skipped.
+func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 	f := newFixture(t)
-	f.agentSend(t, "notes", "x")
+	f.agentSend(t, "dev", "x")
 	f.receive(t)
-	f.key("tab") // insert mode
-	if f.m.selected().Name != "notes" {
-		t.Fatal("tab in insert mode must jump to the unread channel")
+	if f.m.pane() != paneCompose {
+		t.Fatalf("start in compose, got %v", f.m.pane())
 	}
-	f.key("k") // typed into compose in insert mode: must not change selection
-	if f.m.selected().Name != "notes" || f.m.compose.Value() != "k" {
-		t.Fatalf("insert mode must type, sel=%v compose=%q", f.m.selected(), f.m.compose.Value())
+	f.key("tab")
+	if f.m.pane() != paneChannels || f.m.mode != modeNormal {
+		t.Fatalf("tab from compose wraps to channels, got pane=%v mode=%v", f.m.pane(), f.m.mode)
+	}
+	f.key("tab")
+	if f.m.pane() != paneStream || f.m.cursor != 0 {
+		t.Fatalf("tab from channels focuses the newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	}
+	f.key("tab")
+	if f.m.pane() != paneCompose || f.m.mode != modeInsert {
+		t.Fatalf("tab from messages focuses compose, got pane=%v", f.m.pane())
+	}
+	f.key("shift+tab")
+	if f.m.pane() != paneStream {
+		t.Fatalf("shift+tab from compose goes back to messages, got %v", f.m.pane())
+	}
+	f.key("tab")
+	f.key("tab") // stream -> compose -> channels: a lap must not leave follow off
+	if !f.m.follow {
+		t.Fatal("leaving the message pane at the bottom must keep following new messages")
+	}
+	f.key("tab")
+	f.key("k") // in normal mode k moves channels: dev is first, so it stays
+	f.key("home")
+	if f.m.pane() != paneChannels || f.m.cursor != -1 {
+		t.Fatalf("home returns to channels, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	}
+	f.key("j") // dev-notes: no messages, so tab must skip the message pane
+	f.key("tab")
+	if f.m.pane() != paneCompose {
+		t.Fatalf("tab skips an empty message pane, got %v", f.m.pane())
+	}
+	f.key("x")
+	if f.m.compose.Value() != "x" {
+		t.Fatalf("compose must type after tab, got %q", f.m.compose.Value())
+	}
+	f.key("home")
+	if f.m.pane() != paneChannels {
+		t.Fatalf("home from compose returns to channels, got %v", f.m.pane())
+	}
+}
+
+func TestHelpOverlayListsKeysAndHealthIsSeparate(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.key("?")
+	if f.m.mode != modeHelp {
+		t.Fatalf("? opens help, got mode %v", f.m.mode)
+	}
+	v := f.m.View()
+	for _, want := range []string{"help", "tab / shift+tab", "next / previous pane", "home", "<name> [memory]", "alt+enter", "quit"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("help lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "storage") {
+		t.Fatalf("help must not be the health overlay:\n%s", v)
+	}
+	f.key("down")
+	if f.m.helpScroll != 1 {
+		t.Fatalf("down scrolls help, got %d", f.m.helpScroll)
+	}
+	f.key("esc")
+	if f.m.mode != modeNormal {
+		t.Fatal("esc closes help")
+	}
+	f.key("h")
+	if f.m.mode != modeHealth {
+		t.Fatal("h opens health")
+	}
+	f.key("?")
+	if f.m.mode != modeHelp {
+		t.Fatal("? inside health switches to help")
 	}
 }
 
@@ -237,7 +314,7 @@ func TestStatusMsgTracksSessionsAndNewChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())
-	if len(f.m.channels) != 3 || !f.c.subscribed["late"] {
+	if len(f.m.channels) != 5 || !f.c.subscribed["late"] {
 		t.Fatalf("new channel not picked up: %v %v", f.m.channels, f.c.subscribed)
 	}
 	if _, ok := f.m.sessionsSeen["Sam"]; !ok {
@@ -275,14 +352,14 @@ func TestDownInNormalModeDrivesCursorNotSelection(t *testing.T) {
 
 func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
 	f := newFixture(t)
-	old := f.agentSend(t, "notes", "old")
+	old := f.agentSend(t, "dev-notes", "old")
 	f.drainAndAck(t) // "old" is ack'd unseen: only History will ever surface it
-	live := f.agentSend(t, "notes", "live")
-	f.receive(t) // notes now has "live" loaded but not the pre-existing "old" history
+	live := f.agentSend(t, "dev-notes", "live")
+	f.receive(t) // dev-notes now has "live" loaded but not the pre-existing "old" history
 	f.key("esc") // normal mode
-	f.key("j")   // dev -> notes, triggering the first-ever history load
-	if f.m.selected().Name != "notes" {
-		t.Fatalf("j did not select notes: %v", f.m.selected())
+	f.key("j")   // dev -> dev-notes, triggering the first-ever history load
+	if f.m.selected().Name != "dev-notes" {
+		t.Fatalf("j did not select dev-notes: %v", f.m.selected())
 	}
 	if want := live.Seq - 1; f.m.divider != want {
 		t.Fatalf("divider = %d, want %d (== old.Seq %d)", f.m.divider, want, old.Seq)

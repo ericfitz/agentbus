@@ -13,8 +13,8 @@ import (
 
 func seedMemories(t *testing.T, f *fixture) (first, second bus.SendResult) {
 	t.Helper()
-	first = f.agentSend(t, "notes", "Release procedure\nbump, tag, push")
-	second = f.agentSend(t, "notes", "Reviewer checklist")
+	first = f.agentSend(t, "dev-notes", "Release procedure\nbump, tag, push")
+	second = f.agentSend(t, "dev-notes", "Reviewer checklist")
 	if _, err := f.ab.EditMemory(f.sam, bus.EditInput{ID: *first.MemoryID, Content: "Release procedure\nbump, tag, push, run release.sh"}); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestMemoriesOverlayListsNewestFirstWithRevisions(t *testing.T) {
 	first, _ := seedMemories(t, f)
 	f.key("esc")
 	f.key("m")
-	if f.m.mode != modeMemories || f.m.mem.channel != "notes" {
+	if f.m.mode != modeMemories || f.m.mem.channel != "dev-notes" {
 		t.Fatalf("mode=%v channel=%q err=%v", f.m.mode, f.m.mem.channel, f.m.mem.err)
 	}
 	if len(f.m.mem.list) != 2 || f.m.mem.list[0].Content != "Reviewer checklist" {
@@ -106,24 +106,23 @@ func TestMemoryDeleteAsksThenTombstones(t *testing.T) {
 	}
 }
 
-func TestMemoriesWithoutMemoryChannelToasts(t *testing.T) {
+// With nothing but the default channels, m opens the memories overlay on
+// the default "memory" channel with an empty list.
+func TestMemoriesOpensDefaultMemoryChannel(t *testing.T) {
 	cfg := testConfig(t)
 	ab, sam := agent(t, cfg, "Sam")
-	if _, err := ab.CreateChannel(sam, "dev", "ordinary"); err != nil {
-		t.Fatal(err)
-	}
 	c, err := newClient(cfg, "eric", discardLog())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.close() })
-	f := &fixture{c: c, ab: ab, sam: sam, m: New(c, LoadTheme(func(string) string { return "" }, nil))}
+	f := &fixture{c: c, ab: ab, sam: sam, m: New(c, LoadTheme(cfg, func(string) string { return "" }, nil))}
 	f.m.width, f.m.height = 100, 32
 	f.run(f.m.Init())
 	f.key("esc")
 	f.key("m")
-	if f.m.mode != modeNormal || !strings.Contains(f.m.toast, "no memory channels") {
-		t.Fatalf("mode=%v toast=%q", f.m.mode, f.m.toast)
+	if f.m.mode != modeMemories || f.m.mem.channel != "memory" || len(f.m.mem.list) != 0 || f.m.mem.err != nil {
+		t.Fatalf("mode=%v channel=%q list=%d err=%v", f.m.mode, f.m.mem.channel, len(f.m.mem.list), f.m.mem.err)
 	}
 }
 
@@ -134,7 +133,7 @@ func TestMemoriesWithoutMemoryChannelToasts(t *testing.T) {
 func TestMemoriesOverlayWindowsALongList(t *testing.T) {
 	f := newFixture(t)
 	for i := 0; i < 12; i++ {
-		f.agentSend(t, "notes", fmt.Sprintf("memo %d", i))
+		f.agentSend(t, "dev-notes", fmt.Sprintf("memo %d", i))
 	}
 	f.receive(t)
 	f.m.height = 14
@@ -189,11 +188,11 @@ func TestMovingCursorClearsStaleRevisionsBeforeReload(t *testing.T) {
 func TestMemoriesDeleteConfirmationFitsOverlay(t *testing.T) {
 	f := newFixture(t)
 	for i := 0; i < 5; i++ {
-		f.agentSend(t, "notes", fmt.Sprintf("memo %d", i))
+		f.agentSend(t, "dev-notes", fmt.Sprintf("memo %d", i))
 	}
 	longBody := "Incident review\n" + strings.Repeat("line\n", 5) + "done"
 	res, err := f.ab.Send(f.sam, bus.SendInput{
-		Channel: "notes",
+		Channel: "dev-notes",
 		Content: longBody,
 		Type:    "note",
 		Refs:    []bus.Ref{{Kind: "unix_path", Value: "/tmp/x.go"}},

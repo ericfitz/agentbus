@@ -13,6 +13,23 @@ type Channel struct {
 	LatestSeq int64  `json:"latest_seq"`
 }
 
+// DefaultChannels exist on every bus so agents have somewhere to talk and
+// remember before anyone creates a channel: "general" (ordinary) and
+// "memory" (memory). Decision of 2026-09-09, ADR 0002.
+var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "memory", Kind: "memory"}}
+
+// ensureDefaults creates any missing default channel. A same-named channel
+// of another kind is left alone (INSERT OR IGNORE), so a user's earlier
+// choice wins over the default.
+func (b *Bus) ensureDefaults() error {
+	for _, c := range DefaultChannels {
+		if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", c.Name, c.Kind); err != nil {
+			return internal(err)
+		}
+	}
+	return nil
+}
+
 func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Channel{}, err

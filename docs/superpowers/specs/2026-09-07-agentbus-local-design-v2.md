@@ -104,7 +104,10 @@ session or harness conversation. Registering a name nobody holds resumes that
 name's unexpired subscriptions. Child names usually carry a task suffix, so
 children are fresh by construction under the same rule. `/clear`, a fresh
 launch, and a resume all look the same to the bus: the agent registers, and
-`resume` says whether to continue.
+`resume` says whether to continue. Registering a name this process already
+holds (a re-register after `/clear`, or a mistyped command) is idempotent:
+the held name comes back with a refreshed context, never a new suffix
+(decision of 2026-09-09, ADR 0002).
 
 **`as` on every call.** Required, never defaulted. A missing `as` is a
 validation error the model fixes on its next call. This keeps the adapter
@@ -121,7 +124,8 @@ the sender regardless.
 
 A per-repo, git-ignored `.local/agentbus.json` found by walking up from the
 working directory holds one field, `identity`. `agentbus identity` reads it and
-prints one line such as `Agentbus: call register with name Sam`; with no file it
+prints one line such as `Agentbus: call register with name Sam; default
+channels: general (chat), memory (memories)`; with no file it
 suggests the repository directory's basename. The documented install is a
 Claude Code SessionStart hook running `agentbus identity`, which fires on
 startup, `/clear`, and resume, and an AGENTS.md line or hook equivalent for

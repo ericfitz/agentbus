@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,18 +107,31 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	if parent != "" {
 		base, sep = parent+"/"+name, "-"
 	}
-	display := base
+	// Walk base, base2, base3, ... to the first name that is free or that
+	// this process already holds. Reusing our own row makes register
+	// idempotent: Claude Code keeps the MCP server across /clear, so a
+	// re-register from the same process must not mint a fresh suffix.
+	display, reused := base, false
 	for n := 2; ; n++ {
-		var taken int
-		if err := tx.QueryRow("SELECT count(*) FROM sessions WHERE sender=?", display).Scan(&taken); err != nil {
+		var owner string
+		err := tx.QueryRow("SELECT owner FROM sessions WHERE sender=?", display).Scan(&owner)
+		if errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+		if err != nil {
 			return Registration{}, internal(err)
 		}
-		if taken == 0 {
+		if owner == b.owner {
+			reused = true
 			break
 		}
 		display = fmt.Sprintf("%s%s%d", base, sep, n)
 	}
-	if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES(?,?,?,?,?)",
+	if reused {
+		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=? WHERE sender=?", context, now, display); err != nil {
+			return Registration{}, internal(err)
+		}
+	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES(?,?,?,?,?)",
 		display, context, b.owner, now, now); err != nil {
 		return Registration{}, internal(err)
 	}
@@ -155,7 +169,7 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		return Registration{}, internal(err)
 	}
 	_ = rows.Close()
-	reg.Resumed = len(reg.Pending) > 0
+	reg.Resumed = reused || len(reg.Pending) > 0
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)
 	}

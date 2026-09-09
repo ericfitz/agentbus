@@ -45,16 +45,18 @@ func (m Model) View() string {
 		return m.viewMemories()
 	case modeHealth:
 		return m.viewHealth()
+	case modeHelp:
+		return m.viewHelp()
 	}
 	dim := m.theme.Style(m.theme.Dim)
 	left, right := m.renderRails()
 	header := m.renderHeader()
-	centre := lipgloss.JoinVertical(lipgloss.Left, header, m.stream.View())
+	center := lipgloss.JoinVertical(lipgloss.Left, header, m.stream.View())
 	cols := []string{}
 	if m.showLeft() {
 		cols = append(cols, left, dim.Render("│"))
 	}
-	cols = append(cols, centre)
+	cols = append(cols, center)
 	if m.showRight() {
 		cols = append(cols, dim.Render("│"), right)
 	}
@@ -257,7 +259,6 @@ func (m Model) renderCompose() string {
 
 func (m Model) renderStatusBar() string {
 	th := m.theme
-	dim := th.Style(th.Dim)
 	embed := "unset"
 	if m.c.cfg.EmbeddingEndpoint != "" {
 		embed = th.Style(th.Health).Render("ok")
@@ -269,9 +270,9 @@ func (m Model) renderStatusBar() string {
 	if m.statusErr != nil {
 		left += "  " + th.Style(th.Error).Render("status: "+errText(m.statusErr))
 	}
-	help := dim.Render("? help  / search  m memories  h health  q quit")
+	help := m.hints("?", "help", "/", "search", "m", "memories", "h", "health", "q", "quit")
 	if m.mode == modeInsert {
-		help = dim.Render("esc commands  tab next unread  alt+enter newline")
+		help = m.hints("esc", "commands", "tab", "next pane", "alt+enter", "newline")
 	}
 	// The status bar must stay exactly one row: a narrow terminal or a long
 	// left side can make help too wide to fit; MaxWidth truncates it instead
@@ -286,14 +287,28 @@ func (m Model) renderStatusBar() string {
 	return left + strings.Repeat(" ", gap) + help
 }
 
+// hints renders key/description pairs as a help line: keys in the agent
+// color, descriptions dim, so a key stands apart from the words around it.
+func (m Model) hints(pairs ...string) string {
+	key, dim := m.theme.Style(m.theme.Agent), m.theme.Style(m.theme.Dim)
+	var b strings.Builder
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if i > 0 {
+			b.WriteString("  ")
+		}
+		b.WriteString(key.Render(pairs[i]) + " " + dim.Render(pairs[i+1]))
+	}
+	return b.String()
+}
+
 // overlaySize returns the box width and height overlay renders at, so a
 // view (e.g. viewSearch) can size and window its own content to match.
 func (m Model) overlaySize() (w, h int) {
 	return min(max(m.width-8, 40), 100), max(m.height-4, 10)
 }
 
-// overlay renders a titled, bordered box centred on the screen; the border
-// colour names the overlay (cyan search, magenta memories, green health).
+// overlay renders a titled, bordered box centered on the screen; the border
+// color names the overlay (cyan search, magenta memories, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	inner := lipgloss.JoinVertical(lipgloss.Left,
@@ -306,7 +321,7 @@ func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer
 }
 
 // window returns the [start, end) slice bounds that keep cursor visible
-// among n items when only visible of them fit, centring cursor when the
+// among n items when only visible of them fit, centering cursor when the
 // list is longer than that.
 func window(cursor, n, visible int) (start, end int) {
 	start = 0

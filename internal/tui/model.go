@@ -76,14 +76,14 @@ type Model struct {
 	toast    string
 	toastSeq int
 
-	search searchState //nolint:unused // consumed by Task 8
+	search searchState
 	mem    memState    //nolint:unused // consumed by Task 9
 	health healthState //nolint:unused // consumed by Task 10
 }
 
-// Placeholders until Tasks 8-10 define the real overlay state.
+// Placeholders until Tasks 9-10 define the real overlay state.
 type (
-	searchState struct{} //nolint:unused // consumed by Task 8
+	searchState struct{ semanticDown bool }
 	memState    struct{} //nolint:unused // consumed by Task 9
 	healthState struct{} //nolint:unused // consumed by Task 10
 )
@@ -176,6 +176,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ms := m.msgs[msg.channel]; msg.channel == m.selName() && m.cursor >= 0 && m.cursor < len(ms) {
 			cursorSeq = ms[m.cursor].Seq
 		}
+		// A pgup-at-top prepend grows the content above what's on screen;
+		// remember the line count so the offset can grow by the same
+		// amount below and the row the user was reading stays put.
+		prevLines := 0
+		if msg.prepend && msg.channel == m.selName() {
+			prevLines = m.stream.TotalLineCount()
+		}
 		m.addMessages(msg.channel, msg.msgs)
 		if !msg.prepend {
 			// selectChannel already set the divider from whatever was
@@ -189,8 +196,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markSeen(msg.channel)
 		}
 		m.refreshStream()
-		if cursorSeq > 0 {
+		switch {
+		case cursorSeq > 0:
 			m.placeCursor(cursorSeq)
+		case msg.prepend && msg.channel == m.selName():
+			m.stream.SetYOffset(m.stream.YOffset + (m.stream.TotalLineCount() - prevLines))
 		}
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
@@ -596,12 +606,27 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// layout, fitCompose, refreshStream are completed in Task 7; these minimal
-// versions keep the stream viewport sized and the compose line 1-3 rows.
+// layout sizes the stream viewport and compose line against the rails
+// (hidden when the terminal is narrow) and the extra rows the reply banner
+// and toast add.
 func (m *Model) layout() {
-	m.stream.Width = max(m.width-leftRail-rightRail-2, 20)
-	m.stream.Height = max(m.height-composeHeight(m.compose)-4, 3)
-	m.compose.SetWidth(max(m.stream.Width-len(m.selName())-3, 10))
+	w := m.width
+	if m.showLeft() {
+		w -= leftRail + 1
+	}
+	if m.showRight() {
+		w -= rightRail + 1
+	}
+	m.stream.Width = max(w, 20)
+	extra := 3 // divider, compose label row, status bar
+	if m.replyTo != nil {
+		extra++
+	}
+	if m.toast != "" {
+		extra++
+	}
+	m.stream.Height = max(m.height-1-composeHeight(m.compose)-extra, 3)
+	m.compose.SetWidth(max(m.stream.Width-len(m.selName())-16, 10))
 	m.refreshStream()
 }
 
@@ -616,15 +641,14 @@ func (m *Model) fitCompose() {
 
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
 
-// Stubs replaced by later tasks. Each returns nil so Task 5 compiles alone.
-func (m *Model) renderStream() string           { return "" }
+// Stubs replaced by later tasks. Each returns nil so this package compiles
+// before Tasks 8-10 land.
 func (m *Model) openSearch() tea.Cmd            { return nil }
 func (m *Model) openMemories() tea.Cmd          { return nil }
 func (m *Model) openHealth() tea.Cmd            { return nil }
 func (m *Model) updateSearch(tea.Msg) tea.Cmd   { return nil }
 func (m *Model) updateMemories(tea.Msg) tea.Cmd { return nil }
 func (m *Model) updateHealth(tea.Msg) tea.Cmd   { return nil }
-func (m Model) View() string                    { return "" }
 
 const (
 	leftRail  = 18

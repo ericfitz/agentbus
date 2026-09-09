@@ -45,4 +45,7 @@ Pushed to `main` and tagged `v0.1.1`:
   `release/agentbus.rb.tmpl` into the `ericfitz/homebrew-tap` formula.
 - `docs/install.md` documents `brew install ericfitz/tap/agentbus`.
 
-Next: run `./release/release.sh v0.1.1` to cut the first Homebrew release.
+- **v0.1.1 shipped** (2026-09-08): signed, notarized universal binary on the
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.1);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. Verified with
+  `brew install ericfitz/tap/agentbus` and `brew test agentbus`.

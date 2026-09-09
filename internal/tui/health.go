@@ -67,7 +67,8 @@ func (m Model) healthLines() []string {
 	if st.BudgetBytes > 0 {
 		pct = int(st.UsageBytes * 100 / st.BudgetBytes)
 	}
-	bar := strings.Repeat("█", pct/5) + dim.Render(strings.Repeat("█", 20-pct/5))
+	filled := min(pct/5, 20)
+	bar := strings.Repeat("█", filled) + dim.Render(strings.Repeat("█", 20-filled))
 	p("%s %s of %s %s %d%%\n", dim.Render("storage"), fmtBytes(st.UsageBytes), fmtBytes(st.BudgetBytes), bar, pct)
 	notice := "none"
 	if st.Notice != "" {
@@ -121,7 +122,7 @@ func (m Model) healthLines() []string {
 	} else {
 		b.WriteString("  " + string(js) + "\n")
 	}
-	return strings.Split(b.String(), "\n")
+	return strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
 }
 
 func (m Model) viewHealth() string {

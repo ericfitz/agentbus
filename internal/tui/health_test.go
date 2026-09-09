@@ -30,18 +30,41 @@ func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 
 // TestHealthOverlayScrollReachesConfigJSON covers the fixture's default
 // (shorter) terminal height, where the body is taller than the box and the
-// config JSON near the bottom is only reachable by scrolling.
+// config JSON near the bottom is only reachable by scrolling. It scrolls
+// well past the end (200 downs against a body far shorter than that) to
+// confirm the clamp stops at the last line rather than running off into a
+// blank body.
 func TestHealthOverlayScrollReachesConfigJSON(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
 	f.key("esc")
 	f.key("h")
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 200; i++ {
 		f.key("down")
 	}
+	if want := len(f.m.healthLines()) - 1; f.m.health.scroll != want {
+		t.Fatalf("scroll = %d, want clamped at %d", f.m.health.scroll, want)
+	}
 	v := f.m.View()
-	if !strings.Contains(v, "\"tui_name\"") {
-		t.Fatalf("scrolling down must reach the config JSON, got:\n%s", v)
+	if !strings.Contains(v, "}") {
+		t.Fatalf("scrolling to the clamp must still show the config JSON's closing brace, got:\n%s", v)
+	}
+}
+
+// TestHealthOverlaySurvivesUsageOverBudget covers the reachable state where
+// usage has grown past the budget (the bus only starts evicting once it's
+// over, and the capacity notice exists for exactly that moment): the
+// storage bar's fill must clamp rather than passing strings.Repeat a
+// negative count.
+func TestHealthOverlaySurvivesUsageOverBudget(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.key("h") // openHealth also issues its own statusCmd; set the override after it lands
+	f.m.status.UsageBytes = 3 << 30
+	f.m.status.BudgetBytes = 2 << 30
+	v := f.m.View()
+	if !strings.Contains(v, "150%") {
+		t.Fatalf("over-budget usage must still show its percentage, got:\n%s", v)
 	}
 }
 

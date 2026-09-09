@@ -211,7 +211,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
 			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq)."},
+	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Search(in.As, in.SearchInput))
 		})

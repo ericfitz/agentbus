@@ -232,6 +232,9 @@ func (b *Bus) senderContext(q queryRower, as string) (string, error) {
 func (b *Bus) sendEnvelope(q queryRower, as string, in SendInput, memoryKind bool) (context string, size int, err error) {
 	context, err = b.senderContext(q, as)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", 0, errf("not_registered", false, "%q is not registered in this process; call register", as)
+		}
 		return "", 0, internal(err)
 	}
 	size = envelopeUpperBound(as, context, in, memoryKind)

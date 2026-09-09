@@ -197,7 +197,7 @@ func (b *Bus) rankedSearch(in SearchInput) ([]SearchHit, bool, error) {
 		hits, err := b.textSearch(in, searchPageMax)
 		return hits, true, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), embedQueryTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), b.embedder.queryTimeout)
 	defer cancel()
 	sem, err := b.semanticSearch(ctx, in)
 	if err != nil {

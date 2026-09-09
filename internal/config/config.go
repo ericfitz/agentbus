@@ -14,28 +14,29 @@ import (
 )
 
 type Config struct {
-	DataDirectory            string   `json:"data_directory"`
-	SQLiteBudgetMiB          int      `json:"sqlite_budget_mib"`
-	MessageRetentionHours    int      `json:"message_retention_hours"`
-	CleanupFreePercent       int      `json:"cleanup_free_percent"`
-	CleanupIntervalSeconds   int      `json:"cleanup_interval_seconds"`
-	CursorIdleHours          int      `json:"cursor_idle_hours"`
-	TombstoneMinHours        int      `json:"tombstone_min_hours"`
-	ReceiptRetentionMinutes  int      `json:"receipt_retention_minutes"`
-	MaxMessageKiB            int      `json:"max_message_kib"`
-	SendMessagesPerSecond    int      `json:"send_messages_per_second"`
-	SendKiBPerSecond         int      `json:"send_kib_per_second"`
-	ReceiveDefaultCount      int      `json:"receive_default_count"`
-	ReceiveMaxCount          int      `json:"receive_max_count"`
-	ReceiveMaxWaitSeconds    int      `json:"receive_max_wait_seconds"`
-	ResultDefaultKiB         int      `json:"result_default_kib"`
-	DiscoveryEnabled         bool     `json:"discovery_enabled"`
-	InspectionCommand        []string `json:"inspection_command"`
-	InspectionTimeoutSeconds float64  `json:"inspection_timeout_seconds"`
-	EmbeddingEndpoint        string   `json:"embedding_endpoint"`
-	EmbeddingModel           string   `json:"embedding_model"`
-	EmbeddingAPIKeyFile      string   `json:"embedding_api_key_file"`
-	LogLevel                 string   `json:"log_level"`
+	DataDirectory                string   `json:"data_directory"`
+	SQLiteBudgetMiB              int      `json:"sqlite_budget_mib"`
+	MessageRetentionHours        int      `json:"message_retention_hours"`
+	CleanupFreePercent           int      `json:"cleanup_free_percent"`
+	CleanupIntervalSeconds       int      `json:"cleanup_interval_seconds"`
+	CursorIdleHours              int      `json:"cursor_idle_hours"`
+	TombstoneMinHours            int      `json:"tombstone_min_hours"`
+	ReceiptRetentionMinutes      int      `json:"receipt_retention_minutes"`
+	MaxMessageKiB                int      `json:"max_message_kib"`
+	SendMessagesPerSecond        int      `json:"send_messages_per_second"`
+	SendKiBPerSecond             int      `json:"send_kib_per_second"`
+	ReceiveDefaultCount          int      `json:"receive_default_count"`
+	ReceiveMaxCount              int      `json:"receive_max_count"`
+	ReceiveMaxWaitSeconds        int      `json:"receive_max_wait_seconds"`
+	ResultDefaultKiB             int      `json:"result_default_kib"`
+	DiscoveryEnabled             bool     `json:"discovery_enabled"`
+	InspectionCommand            []string `json:"inspection_command"`
+	InspectionTimeoutSeconds     float64  `json:"inspection_timeout_seconds"`
+	EmbeddingEndpoint            string   `json:"embedding_endpoint"`
+	EmbeddingModel               string   `json:"embedding_model"`
+	EmbeddingAPIKeyFile          string   `json:"embedding_api_key_file"`
+	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
+	LogLevel                     string   `json:"log_level"`
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -43,25 +44,26 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		DataDirectory:            "~/.local/share/agentbus",
-		SQLiteBudgetMiB:          2048,
-		MessageRetentionHours:    168,
-		CleanupFreePercent:       25,
-		CleanupIntervalSeconds:   60,
-		CursorIdleHours:          72,
-		TombstoneMinHours:        72,
-		ReceiptRetentionMinutes:  60,
-		MaxMessageKiB:            64,
-		SendMessagesPerSecond:    100,
-		SendKiBPerSecond:         1024,
-		ReceiveDefaultCount:      100,
-		ReceiveMaxCount:          1000,
-		ReceiveMaxWaitSeconds:    60,
-		ResultDefaultKiB:         64,
-		DiscoveryEnabled:         true,
-		InspectionCommand:        []string{},
-		InspectionTimeoutSeconds: 5,
-		LogLevel:                 "info",
+		DataDirectory:                "~/.local/share/agentbus",
+		SQLiteBudgetMiB:              2048,
+		MessageRetentionHours:        168,
+		CleanupFreePercent:           25,
+		CleanupIntervalSeconds:       60,
+		CursorIdleHours:              72,
+		TombstoneMinHours:            72,
+		ReceiptRetentionMinutes:      60,
+		MaxMessageKiB:                64,
+		SendMessagesPerSecond:        100,
+		SendKiBPerSecond:             1024,
+		ReceiveDefaultCount:          100,
+		ReceiveMaxCount:              1000,
+		ReceiveMaxWaitSeconds:        60,
+		ResultDefaultKiB:             64,
+		DiscoveryEnabled:             true,
+		InspectionCommand:            []string{},
+		InspectionTimeoutSeconds:     5,
+		EmbeddingQueryTimeoutSeconds: 10,
+		LogLevel:                     "info",
 	}
 }
 
@@ -194,6 +196,9 @@ func (c *Config) validate() error {
 	}
 	if c.InspectionTimeoutSeconds < 0.1 || c.InspectionTimeoutSeconds > 60 {
 		return fmt.Errorf("inspection_timeout_seconds must be between 0.1 and 60, got %v", c.InspectionTimeoutSeconds)
+	}
+	if c.EmbeddingQueryTimeoutSeconds < 0.1 || c.EmbeddingQueryTimeoutSeconds > 120 {
+		return fmt.Errorf("embedding_query_timeout_seconds must be between 0.1 and 120, got %v", c.EmbeddingQueryTimeoutSeconds)
 	}
 	if len(c.InspectionCommand) > 64 {
 		return errors.New("inspection_command may have at most 64 entries")

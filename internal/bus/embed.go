@@ -19,12 +19,12 @@ import (
 const (
 	embedBatchSize      = 64
 	embedRequestTimeout = 30 * time.Second
-	embedQueryTimeout   = 10 * time.Second
 )
 
 type embedder struct {
 	endpoint, model, key string
 	client               *http.Client
+	queryTimeout         time.Duration // embedding_query_timeout_seconds; bounds the query embedding in Search
 }
 
 var exportLine = regexp.MustCompile(`^\s*export\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*'?"?([^'"\s]+)'?"?\s*$`)
@@ -43,7 +43,7 @@ func readKeyFile(path string) (string, error) {
 }
 
 func newEmbedder(cfg config.Config) (*embedder, error) {
-	e := &embedder{endpoint: cfg.EmbeddingEndpoint, model: cfg.EmbeddingModel, client: &http.Client{}}
+	e := &embedder{endpoint: cfg.EmbeddingEndpoint, model: cfg.EmbeddingModel, client: &http.Client{}, queryTimeout: time.Duration(cfg.EmbeddingQueryTimeoutSeconds * float64(time.Second))}
 	if cfg.EmbeddingAPIKeyFile != "" {
 		k, err := readKeyFile(cfg.EmbeddingAPIKeyFile)
 		if err != nil {

@@ -359,3 +359,40 @@ func TestSemanticFallsBackWhenEndpointDown(t *testing.T) {
 		t.Fatalf("embedBatch must report the endpoint failure: %v", err)
 	}
 }
+
+// embedding_query_timeout_seconds bounds the query embedding: a hung
+// endpoint yields the text fallback after the configured timeout, not the
+// old fixed 10 s.
+func TestSemanticQueryTimeoutIsConfigurable(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release) // runs before srv.Close so the handler can return
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.DataDirectory = dir
+	cfg.Path = filepath.Join(dir, "config.json")
+	cfg.EmbeddingEndpoint = srv.URL
+	cfg.EmbeddingModel = "fake-1"
+	cfg.EmbeddingQueryTimeoutSeconds = 0.2
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	sam := reg(t, b, "Sam")
+	b.CreateChannel(sam, "mem", "memory")
+	start := time.Now()
+	r, err := b.Search(sam, SearchInput{Query: "roses", Mode: "semantic"})
+	if err != nil || !r.SemanticUnavailable {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("search took %v; the 0.2 s query timeout was not applied", d)
+	}
+}

@@ -26,7 +26,7 @@ func (b *Bus) GetMemory(as string, id int64) (Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Message{}, err
 	}
-	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? AND tombstone=0", id)
+	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? AND tombstone=0 ORDER BY revision DESC LIMIT 1", id)
 	if err != nil {
 		return Message{}, internal(err)
 	}

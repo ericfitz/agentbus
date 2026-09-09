@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/ericfitz/agentbus/internal/bus"
 )
 
 // InitPrompt is what the `init` MCP prompt (Claude Code) and the Codex
@@ -309,7 +311,7 @@ func (in *initer) repo(root string) error {
 		in.say("identity file already present: %s", idPath)
 	} else {
 		name := filepath.Base(root)
-		if err := validIdentityName(name); err != nil {
+		if err := bus.NameRule(name); err != nil {
 			return fmt.Errorf("repository name %q is not a valid identity (%v); write %s by hand", name, err, idPath)
 		}
 		data, _ := json.Marshal(map[string]string{"identity": name})

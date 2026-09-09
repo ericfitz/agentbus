@@ -77,6 +77,9 @@ its own). For a remote provider, set `embedding_endpoint` and
 `embedding_model` to that provider's values and add
 `"embedding_api_key_file": "~/.keys/VOYAGE_API_KEY"`. The file may be a bare
 key or a one-line `export NAME='value'`; its contents are never logged.
+`embedding_query_timeout_seconds` (default 10, range 0.1-120) bounds the
+query embedding during a search; past it, `semantic` and `both` searches fall
+back to text results and set `semantic_unavailable`.
 
 Keep `receive_max_wait_seconds` below your harness's MCP tool call timeout:
 Claude Code's default is 300 seconds (the `MCP_TOOL_TIMEOUT` environment

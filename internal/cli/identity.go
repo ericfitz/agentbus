@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
-	"unicode"
+
+	"github.com/ericfitz/agentbus/internal/bus"
 )
 
 // Identity prints the registration prompt for cwd: the identity in the
@@ -68,26 +68,9 @@ func readIdentityFile(dir string, warn io.Writer) (string, bool) {
 	if f.Identity == "" {
 		return "", false
 	}
-	if err := validIdentityName(f.Identity); err != nil {
+	if err := bus.NameRule(f.Identity); err != nil {
 		fmt.Fprintf(warn, "agentbus: %s: identity %q: %v\n", path, f.Identity, err)
 		return "", false
 	}
 	return f.Identity, true
-}
-
-// validIdentityName applies the same name rule Register enforces: 1-128
-// UTF-8 bytes, no control characters, no '/'.
-func validIdentityName(name string) error {
-	if len(name) == 0 || len(name) > 128 {
-		return fmt.Errorf("must be 1-128 bytes")
-	}
-	if strings.ContainsRune(name, '/') {
-		return fmt.Errorf("must not contain '/'")
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("must not contain control characters")
-		}
-	}
-	return nil
 }

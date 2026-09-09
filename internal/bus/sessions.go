@@ -2,6 +2,7 @@ package bus
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -26,15 +27,25 @@ type Session struct {
 
 // validateName enforces 1–128 UTF-8 bytes, no control characters, no '/'.
 func validateName(name string) error {
+	if err := NameRule(name); err != nil {
+		return errf("validation", false, "name %v", err)
+	}
+	return nil
+}
+
+// NameRule is the identity name rule shared by Register and the CLI: 1-128
+// UTF-8 bytes, no control characters, no '/'. The error is a plain
+// sentence without the "name" subject so callers can supply their own.
+func NameRule(name string) error {
 	if len(name) == 0 || len(name) > 128 {
-		return errf("validation", false, "name must be 1-128 bytes")
+		return errors.New("must be 1-128 bytes")
 	}
 	if strings.ContainsRune(name, '/') {
-		return errf("validation", false, "name must not contain '/'")
+		return errors.New("must not contain '/'")
 	}
 	for _, r := range name {
 		if unicode.IsControl(r) {
-			return errf("validation", false, "name must not contain control characters")
+			return errors.New("must not contain control characters")
 		}
 	}
 	return nil

@@ -122,3 +122,11 @@ func TestRelativePathResolvesAgainstConfigDir(t *testing.T) {
 		t.Fatalf("relative paths not resolved: %+v", c)
 	}
 }
+
+func TestRejectsEmbeddingQueryTimeoutOutOfRange(t *testing.T) {
+	p := write(t, t.TempDir(), `{"embedding_query_timeout_seconds": 200}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "embedding_query_timeout_seconds") || !strings.Contains(err.Error(), "120") {
+		t.Fatalf("want range error naming key and bound, got %v", err)
+	}
+}

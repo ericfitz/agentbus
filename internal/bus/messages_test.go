@@ -221,3 +221,13 @@ func TestSendOversizedSkipsHookAndEviction(t *testing.T) {
 		t.Fatalf("oversized send must not trigger eviction: before=%d after=%d", before, after)
 	}
 }
+
+// A sender whose session vanished between auth and the envelope preflight
+// (name takeover, reset) is reported as not_registered, not internal.
+func TestSendEnvelopeMissingSessionIsNotRegistered(t *testing.T) {
+	b := newTestBus(t)
+	_, _, err := b.sendEnvelope(b.db, "Nobody", SendInput{Channel: "general", Content: "hi"}, false)
+	if err == nil || !strings.Contains(err.Error(), "not_registered") {
+		t.Fatalf("want not_registered, got %v", err)
+	}
+}

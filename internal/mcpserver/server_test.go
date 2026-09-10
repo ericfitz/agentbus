@@ -502,3 +502,13 @@ func TestSubscribePersistentCreatesMissingFileAtGitRoot(t *testing.T) {
 		t.Fatalf("%s %v", body, err)
 	}
 }
+
+func TestPersistErrClassifiesIOAsInternalRetryable(t *testing.T) {
+	var be *bus.Error
+	if !errors.As(persistErr(&os.PathError{Op: "open", Path: "x", Err: os.ErrPermission}), &be) || be.Code != "internal" || !be.Retryable {
+		t.Fatalf("I/O error: %+v", be)
+	}
+	if !errors.As(persistErr(errors.New("channel \"a/b\": must not contain '/'")), &be) || be.Code != "validation" || be.Retryable {
+		t.Fatalf("validation error: %+v", be)
+	}
+}

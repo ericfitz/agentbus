@@ -181,8 +181,16 @@ func persistFile(cwd string) (*repoconfig.File, error) {
 
 // persistErr wraps a repo-file problem in the bus's error envelope so the
 // agent sees the same {code,message,retryable} shape as every other failure.
+// A filesystem failure (unreadable or unwritable file) is internal and
+// retryable, matching how the bus reports its own I/O errors; a bad channel
+// name, a malformed file, or no enclosing git repository is validation.
 func persistErr(err error) error {
-	return &bus.Error{Code: "validation", Message: bus.TruncateErrorMessage(err.Error()), Retryable: false}
+	msg := bus.TruncateErrorMessage(err.Error())
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return &bus.Error{Code: "internal", Message: msg, Retryable: true}
+	}
+	return &bus.Error{Code: "validation", Message: msg, Retryable: false}
 }
 
 // wrapSchemaErrorsInEnvelope normalizes go-sdk's own JSON-schema validation

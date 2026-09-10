@@ -178,3 +178,18 @@ func TestWriteUsesInitFileMode(t *testing.T) {
 		t.Fatalf("mode %v err %v", st.Mode(), err)
 	}
 }
+
+func TestWriteLeavesNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	f, err := Create(dir, "Sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AddChannel("reviews"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, ".local"))
+	if len(entries) != 1 || entries[0].Name() != "agentbus.json" {
+		t.Fatalf("unexpected entries: %v", entries)
+	}
+}

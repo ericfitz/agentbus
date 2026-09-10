@@ -5,6 +5,7 @@ package repoconfig
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,6 +161,22 @@ func (f *File) write() error {
 	if err != nil {
 		return err
 	}
-	// 0o644 matches what agentbus init writes; the file holds no secrets.
-	return os.WriteFile(f.Path, append(data, '\n'), 0o644)
+	// Write to a sibling temp file and rename it into place so a concurrent
+	// reader (another persistent edit, or a register) never sees a truncated
+	// file. 0o644 matches what agentbus init writes; the file holds no secrets.
+	tmp, err := os.CreateTemp(filepath.Dir(f.Path), ".agentbus-*.json")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(append(data, '\n'))
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(tmp.Name())
+		return errors.Join(werr, cerr)
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), f.Path)
 }

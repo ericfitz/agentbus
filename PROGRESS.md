@@ -102,3 +102,23 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.1.3);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (879038e).
   Verified with `brew upgrade agentbus` (0.1.2 -> 0.1.3) and `brew test`.
+
+## 2026-09-10: persistent subscriptions, JSONL logs, session protocol
+
+Pushed to `main` (merge of `persistent-subscriptions`, 12 commits, 68d6fa6):
+
+- **Spec** `docs/superpowers/specs/2026-09-09-persistent-subscriptions-design.md`
+  and plan `docs/superpowers/plans/2026-09-09-persistent-subscriptions.md`.
+- **`internal/repoconfig`** owns `.local/agentbus.json`: `identity` plus an
+  optional `channels` list (absent = `general`, `memory`; empty = none).
+- **`register`** subscribes the session to that list on every register and
+  reports `subscribed` / `subscribe_failed`.
+- **CLI** `agentbus subscribe <channel>` / `agentbus unsubscribe <channel>`
+  edit the file from the repository root; MCP `subscribe` / `unsubscribe`
+  gain `persistent: true`.
+- **Log** `agentbus.log` is now JSON lines with UTC millisecond `time` and
+  `pid`; rotation unchanged.
+- **Hook / init prompt** print a prescriptive session protocol from one
+  shared constant.
+- Deferred minors (final review): `validation` code on repo-file I/O
+  errors, 0644 vs 0600 file mode, non-atomic file write.

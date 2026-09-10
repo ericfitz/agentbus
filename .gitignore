@@ -3,3 +3,4 @@ HANDOFF.md
 .local/
 /dist/
 /docs/design/**/agentbus-*.html
+.worktrees/

@@ -95,3 +95,70 @@ func (f *File) Channels() (channels []string, bad []string) {
 	}
 	return channels, bad
 }
+
+// Create writes a new file at dir/.local/agentbus.json with the given identity
+// and no channels key, creating .local/ if needed. It fails if the file exists.
+func Create(dir, identity string) (*File, error) {
+	if err := bus.NameRule(identity); err != nil {
+		return nil, fmt.Errorf("identity %q: %w", identity, err)
+	}
+	f := &File{Path: pathIn(dir), Identity: identity, Raw: map[string]any{"identity": identity}}
+	if _, err := os.Stat(f.Path); err == nil {
+		return nil, fmt.Errorf("%s already exists", f.Path)
+	}
+	return f, f.write()
+}
+
+// AddChannel appends channel to the file's list (materializing DefaultChannels
+// first when the key is absent), dedupes, writes the file, and returns the
+// resulting list. channel must pass bus.NameRule.
+func (f *File) AddChannel(channel string) ([]string, error) {
+	if err := bus.NameRule(channel); err != nil {
+		return nil, fmt.Errorf("channel %q: %w", channel, err)
+	}
+	list, _ := f.Channels()
+	found := false
+	for _, c := range list {
+		if c == channel {
+			found = true
+		}
+	}
+	if !found {
+		list = append(list, channel)
+	}
+	return list, f.setChannels(list)
+}
+
+// RemoveChannel removes channel from the list (materializing DefaultChannels
+// first when the key is absent), writes the file, and returns the resulting
+// list. Removing an absent channel is a no-op that still writes.
+func (f *File) RemoveChannel(channel string) ([]string, error) {
+	list, _ := f.Channels()
+	out := []string{}
+	for _, c := range list {
+		if c != channel {
+			out = append(out, c)
+		}
+	}
+	return out, f.setChannels(out)
+}
+
+func (f *File) setChannels(list []string) error {
+	arr := make([]any, len(list))
+	for i, c := range list {
+		arr[i] = c
+	}
+	f.Raw["channels"] = arr
+	return f.write()
+}
+
+func (f *File) write() error {
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(f.Raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(f.Path, append(data, '\n'), 0o600)
+}

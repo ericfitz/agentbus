@@ -93,3 +93,74 @@ func TestChannelsDedupesAndReportsBad(t *testing.T) {
 		t.Fatal(bad)
 	}
 }
+
+func TestAddChannelMaterializesDefaultsAndPreservesUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)
+	f, _ := Load(dir)
+	got, err := f.AddChannel("reviews")
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "reviews"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	f2, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f2.Raw["future"]; !ok {
+		t.Fatal("unknown key dropped")
+	}
+	again, _ := f2.AddChannel("reviews")
+	if !reflect.DeepEqual(again, []string{"general", "memory", "reviews"}) {
+		t.Fatal("duplicate added:", again)
+	}
+	body, _ := os.ReadFile(f.Path)
+	if body[len(body)-1] != '\n' {
+		t.Fatal("file must end with newline")
+	}
+}
+
+func TestAddChannelRejectsInvalidName(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam"}`)
+	f, _ := Load(dir)
+	if _, err := f.AddChannel("bad/name"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestRemoveChannel(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam"}`)
+	f, _ := Load(dir)
+	got, err := f.RemoveChannel("memory")
+	if err != nil || !reflect.DeepEqual(got, []string{"general"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	got, err = f.RemoveChannel("nope")
+	if err != nil || !reflect.DeepEqual(got, []string{"general"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	f2, _ := Load(dir)
+	ch, _ := f2.Channels()
+	if !reflect.DeepEqual(ch, []string{"general"}) {
+		t.Fatal(ch)
+	}
+}
+
+func TestCreate(t *testing.T) {
+	dir := t.TempDir()
+	f, err := Create(dir, "Sam")
+	if err != nil || f.Identity != "Sam" {
+		t.Fatalf("%v %v", f, err)
+	}
+	if _, err := Create(dir, "Sam"); err == nil {
+		t.Fatal("second create must fail")
+	}
+	if _, err := Create(t.TempDir(), "bad/name"); err == nil {
+		t.Fatal("invalid identity must fail")
+	}
+	ch, _ := f.Channels()
+	if !reflect.DeepEqual(ch, []string{"general", "memory"}) {
+		t.Fatal(ch)
+	}
+}

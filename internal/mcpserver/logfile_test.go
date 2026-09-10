@@ -1,12 +1,16 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 func TestRotatingWriterRotates(t *testing.T) {
@@ -139,5 +143,37 @@ func TestRotatingWriterRecoversAfterFailedRotate(t *testing.T) {
 	}
 	if string(got) != "0123456789y" {
 		t.Fatalf("recovery write did not append correctly: got %q", got)
+	}
+}
+
+func TestOpenLogWritesJSONLWithUTCMillisAndPid(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	log, err := OpenLog(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.Info("hello", "k", "v")
+	body, err := os.ReadFile(filepath.Join(cfg.DataDirectory, "agentbus.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want one line, got %d: %q", len(lines), body)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("not JSON: %v: %s", err, lines[0])
+	}
+	ts, _ := rec["time"].(string)
+	if ok, _ := regexp.MatchString(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`, ts); !ok {
+		t.Fatalf("time %q is not UTC RFC3339 with milliseconds", ts)
+	}
+	if rec["msg"] != "hello" || rec["level"] != "INFO" || rec["k"] != "v" {
+		t.Fatal(rec)
+	}
+	if pid, _ := rec["pid"].(float64); int(pid) != os.Getpid() {
+		t.Fatalf("pid %v != %d", rec["pid"], os.Getpid())
 	}
 }

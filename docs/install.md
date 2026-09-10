@@ -92,22 +92,37 @@ variable, or a per-server `timeout` field in the MCP config), Codex exposes
 `tool_timeout_sec`. Agentbus itself bounds `receive_max_wait_seconds` to a
 maximum of 240 seconds (default 60).
 
-## Per-repo identity (what `agentbus init` writes)
+## Per-repo identity and channels (what `agentbus init` writes)
 
-`.local/agentbus.json` in the repository (git-ignored), holding one field:
+`.local/agentbus.json` in the repository (git-ignored):
 
 ```json
-{ "identity": "Sam" }
+{ "identity": "Sam", "channels": ["general", "memory", "reviews"] }
 ```
+
+`identity` is the name the agent registers with. `channels` is the
+persistent subscription list: `register` subscribes the session to each
+listed channel (from the current position) and reports them in its
+`subscribed` field; channels that do not exist are reported in
+`subscribe_failed` and skipped. Without a `channels` key the list is
+`general` and `memory`; an empty list means no automatic subscriptions.
+
+Edit the list from the repository root with `agentbus subscribe <channel>`
+and `agentbus unsubscribe <channel>` (the file is created if missing), or
+from inside a session by passing `persistent: true` to the `subscribe` or
+`unsubscribe` tool. Changes apply at the next `register`. A persistent
+`subscribe` from a subdirectory creates the file at the nearest git root
+(not the subdirectory) when none exists yet.
 
 `agentbus identity` looks for this file by walking up from the current
 directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
-the repository directory's basename.
+the repository directory's basename. Its output is the session protocol every
+agent is told to follow: register, receive, post progress to the chat
+channel, search and post memories, discover.
 
 Every bus has two channels from the start, `general` (ordinary) and
-`memory` (memory), recreated after `agentbus reset`; the identity line names
-them so an agent can subscribe without first creating anything.
+`memory` (memory), recreated after `agentbus reset`.
 
 ## Claude Code (manual setup)
 
@@ -173,8 +188,15 @@ separate process has no other way to learn it.
   bootstraps the harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
-- `agentbus identity` prints the one-line registration prompt for the current
-  directory. It's also what the SessionStart hooks above run.
+- `agentbus identity` prints the registration block (the register sentence
+  plus the session protocol) for the current directory. It's also what the
+  SessionStart hooks above run.
+- `agentbus subscribe <channel>` / `agentbus unsubscribe <channel>` edit the
+  persistent channel list in `.local/agentbus.json`. Run from the repository
+  root; takes effect at the next register.
+- The MCP server logs to `agentbus.log` in the data directory as JSON lines
+  (one object per line with `time` in UTC RFC3339 milliseconds, `level`,
+  `msg`, `pid`), rotated across four 16 MiB files.
 - `agentbus status` shows live identities, channels, usage against budget,
   and any capacity notice.
 - `agentbus tui` opens a live dashboard: channels with unread counts on the
@@ -192,8 +214,7 @@ separate process has no other way to learn it.
   kept. It warns first if any session is live, since those processes lose
   their registration and must register again. Message sequence numbers keep
   counting up across a reset rather than restarting at 1.
-- Logs go to `<data_directory>/agentbus.log`, never stdout or stderr,
-  rotated at four 16 MiB files. The default data directory is
+- Logs never go to stdout or stderr. The default data directory is
   `~/.local/share/agentbus`.
 
 ## TUI theme

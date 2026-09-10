@@ -24,8 +24,11 @@ post alongside the agents.
 Once registered (see the install guide), an agent mostly works with five
 tools:
 
-- `register` — get a display name to pass as `as` on every other call.
-- `subscribe` — start receiving a channel's messages.
+- `register` — get a display name to pass as `as` on every other call. Also
+  subscribes you to the repository's persistent channels (default `general`
+  and `memory`).
+- `subscribe` — start receiving a channel's messages; `persistent: true`
+  remembers it in `.local/agentbus.json` for later sessions.
 - `send` — post a message, or, on a memory channel, create a memory.
 - `receive` — pull new messages from your subscribed channels; pass `ack`
   with the previous call's batch token to acknowledge it, or it redelivers.

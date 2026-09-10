@@ -136,8 +136,9 @@ func (w *rotatingWriter) rotate() error {
 }
 
 // OpenLog opens the rotating log file in cfg.DataDirectory (four 16 MiB
-// files) and returns a text-handler logger writing to it. Never writes to
-// stdout or stderr.
+// files) and returns a JSON-lines logger writing to it, one record per
+// line with a UTC RFC3339 millisecond timestamp and this process's pid.
+// Never writes to stdout or stderr.
 func OpenLog(cfg config.Config) (*slog.Logger, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o700); err != nil {
 		return nil, err
@@ -147,5 +148,15 @@ func OpenLog(cfg config.Config) (*slog.Logger, error) {
 		lvl = slog.LevelInfo
 	}
 	w := &rotatingWriter{path: filepath.Join(cfg.DataDirectory, "agentbus.log"), maxBytes: 16 << 20, keep: 4}
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: lvl})), nil
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl, ReplaceAttr: utcMillis})
+	return slog.New(h).With("pid", os.Getpid()), nil
+}
+
+// utcMillis rewrites the top-level time attribute as UTC RFC3339 with
+// millisecond precision, e.g. 2026-09-09T17:04:05.123Z.
+func utcMillis(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+		a.Value = slog.StringValue(a.Value.Time().UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+	}
+	return a
 }

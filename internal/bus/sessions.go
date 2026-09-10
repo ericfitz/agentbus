@@ -13,6 +13,11 @@ type Registration struct {
 	Sender  string           `json:"as"`
 	Resumed bool             `json:"resumed"`
 	Pending []PendingChannel `json:"pending"`
+	// Subscribed and SubscribeFailed report the persistent channel list the
+	// MCP server applied after registering (from .local/agentbus.json). The
+	// bus itself never sets them.
+	Subscribed      []string          `json:"subscribed"`
+	SubscribeFailed map[string]string `json:"subscribe_failed,omitempty"`
 }
 
 type PendingChannel struct {
@@ -155,7 +160,7 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	if err != nil {
 		return Registration{}, internal(err)
 	}
-	reg := Registration{Sender: display, Pending: []PendingChannel{}}
+	reg := Registration{Sender: display, Pending: []PendingChannel{}, Subscribed: []string{}}
 	for rows.Next() {
 		var p PendingChannel
 		if err := rows.Scan(&p.Channel, &p.Pending); err != nil {

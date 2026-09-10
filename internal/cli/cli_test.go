@@ -101,6 +101,29 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	}
 }
 
+func TestIdentityLineIsPrescriptive(t *testing.T) {
+	got := identityLine("Sam")
+	for _, want := range []string{
+		`Agentbus: call the register tool now with the name parameter set to "Sam"`,
+		"Then follow this protocol:",
+		"- Call receive right after registering",
+		"- Post to your subscribed chat channel",
+		"- Search all your subscribed memory channels",
+		"- Post to a memory channel whenever you discover a non-obvious fact",
+		"- Call discover before assuming you are the only agent working.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Fatal("must end with newline")
+	}
+	if !strings.Contains(InitPrompt, protocol) {
+		t.Fatal("InitPrompt must embed protocol")
+	}
+}
+
 func TestResetRequiresYes(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()

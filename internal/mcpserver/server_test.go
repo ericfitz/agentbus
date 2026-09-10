@@ -274,3 +274,231 @@ func TestInitPromptListed(t *testing.T) {
 		t.Fatalf("get prompt: %+v, err %v", got, err)
 	}
 }
+
+// testSessionIn is testSession with the server's working directory set to
+// dir, so register finds dir/.local/agentbus.json.
+func testSessionIn(t *testing.T, dir string) *mcp.ClientSession {
+	t.Helper()
+	t.Chdir(dir)
+	return testSession(t)
+}
+
+func writeRepoFile(t *testing.T, dir, body string) {
+	t.Helper()
+	p := filepath.Join(dir, ".local", "agentbus.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stringsOf(v any) []string {
+	list, _ := v.([]any)
+	out := []string{}
+	for _, e := range list {
+		out = append(out, e.(string))
+	}
+	return out
+}
+
+func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+		t.Fatal(reg)
+	}
+	if _, ok := reg["subscribe_failed"]; ok {
+		t.Fatal("subscribe_failed must be omitted when empty", reg)
+	}
+	// A message on general is now received without an explicit subscribe.
+	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "hi"})
+	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
+	if msgs, _ := got["messages"].([]any); len(msgs) != 1 {
+		t.Fatal(got)
+	}
+}
+
+func TestRegisterSubscribesDefaultsWhenChannelsKeyAbsent(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam"}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+		t.Fatal(reg)
+	}
+}
+
+func TestRegisterMalformedRepoFileReportsFailureUnderPath(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{not json`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if _, ok := failed[".local/agentbus.json"]; !ok {
+		t.Fatal("malformed file must be reported under its path:", reg)
+	}
+}
+
+func TestRegisterInvalidChannelNameReportsFailureUnderName(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general","bad/name"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if msg, _ := failed["bad/name"].(string); !strings.Contains(msg, "invalid channel name") {
+		t.Fatal(reg)
+	}
+}
+
+func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["memory","reviews"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "memory" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if msg, _ := failed["reviews"].(string); !strings.Contains(msg, "does not exist") {
+		t.Fatal(reg)
+	}
+	// Once the channel exists, the next register picks it up; general stays out.
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "reviews", "kind": "ordinary"})
+	reg, _ = call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[1] != "reviews" {
+		t.Fatal(reg)
+	}
+	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "unseen"})
+	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
+	if msgs, _ := got["messages"].([]any); len(msgs) != 0 {
+		t.Fatal("Sam must not be subscribed to general:", got)
+	}
+}
+
+func TestRegisterEmptyListSubscribesNothing(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":[]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 0 {
+		t.Fatal(reg)
+	}
+}
+
+func TestRegisterPersistentAppliesToSubagentsAndNoResume(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	sub, _ := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam"})
+	if got := stringsOf(sub["subscribed"]); len(got) != 2 {
+		t.Fatal(sub)
+	}
+	call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "channel": "general"})
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam", "resume": false})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" {
+		t.Fatal(reg)
+	}
+}
+
+func TestRegisterExistingCursorUntouched(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "before"})
+	// Re-register; the general cursor must still be behind the message.
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
+	if msgs, _ := got["messages"].([]any); len(msgs) != 1 {
+		t.Fatal("cursor moved on re-register:", got)
+	}
+}
+
+func TestSubscribePersistentWritesRepoFile(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam"}`)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "reviews", "kind": "ordinary"})
+	out, _ := call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "reviews", "persistent": true})
+	if out["subscribed"] != "reviews" || out["persistent"] != true {
+		t.Fatal(out)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".local", "agentbus.json"))
+	if !strings.Contains(string(body), `"reviews"`) || !strings.Contains(string(body), `"general"`) {
+		t.Fatalf("%s", body)
+	}
+	out, _ = call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "channel": "memory", "persistent": true})
+	if out["unsubscribed"] != "memory" || out["persistent"] != true {
+		t.Fatal(out)
+	}
+	body, _ = os.ReadFile(filepath.Join(dir, ".local", "agentbus.json"))
+	if strings.Contains(string(body), `"memory"`) {
+		t.Fatalf("memory still listed: %s", body)
+	}
+}
+
+func TestSubscribePersistentNotWrittenWhenSessionSubscribeFails(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam"}`)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	_, res := call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "nope", "persistent": true})
+	if !res.IsError {
+		t.Fatal("expected not_found error")
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".local", "agentbus.json"))
+	if strings.Contains(string(body), "channels") {
+		t.Fatalf("file must be untouched: %s", body)
+	}
+}
+
+func TestSubscribeNonPersistentLeavesFileAlone(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	out, _ := call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "general"})
+	if _, ok := out["persistent"]; ok {
+		t.Fatal(out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".local", "agentbus.json")); !os.IsNotExist(err) {
+		t.Fatal("no file must be created without persistent")
+	}
+}
+
+func TestSubscribePersistentCreatesMissingFileAtGitRoot(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "myrepo")
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	out, _ := call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "general", "persistent": true})
+	if out["persistent"] != true {
+		t.Fatal(out)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".local", "agentbus.json"))
+	if err != nil || !strings.Contains(string(body), `"identity": "myrepo"`) {
+		t.Fatalf("%s %v", body, err)
+	}
+}

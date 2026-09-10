@@ -2,13 +2,12 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/repoconfig"
 )
 
 // Identity prints the registration prompt for cwd: the identity in the
@@ -24,59 +23,63 @@ func Identity(cwd string, out io.Writer) error {
 
 func identity(cwd string, out, warn io.Writer) error {
 	name := filepath.Base(cwd)
-	dir := cwd
-	for {
-		if got, ok := readIdentityFile(dir, warn); ok {
-			name = got
-			break
+	f, err := repoconfig.Find(cwd)
+	switch {
+	case err != nil:
+		_, _ = fmt.Fprintf(warn, "agentbus: %v\n", err)
+		name = gitBaseOr(cwd, name)
+	case f != nil:
+		name = f.Identity
+		if _, bad := f.Channels(); len(bad) > 0 {
+			_, _ = fmt.Fprintf(warn, "agentbus: %s: ignoring invalid channels %q\n", f.Path, bad)
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			name = filepath.Base(dir)
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	default:
+		name = gitBaseOr(cwd, name)
 	}
-	_, err := fmt.Fprint(out, identityLine(name))
+	_, err = fmt.Fprint(out, identityLine(name))
 	return err
 }
 
-// identityLine is the one line the SessionStart hook prints: the name to
-// register and the channels that always exist.
-func identityLine(name string) string {
-	return "Agentbus: call register with name " + name + "; default channels: general (chat), memory (memories)\n"
+// gitBaseOr returns the basename of the nearest directory at or above cwd
+// that contains .git, or fallback when there is none.
+func gitBaseOr(cwd, fallback string) string {
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return filepath.Base(dir)
+		}
+		if filepath.Dir(dir) == dir {
+			return fallback
+		}
+	}
 }
 
-// readIdentityFile reads dir/.local/agentbus.json, returning (identity,
-// true) only when the file is present, parses, and names a valid identity.
-// A missing file is silently absent; any other problem (unreadable,
-// malformed JSON, or an identity failing validIdentityName) is reported to
-// warn and treated as absent, so the walk continues upward.
-func readIdentityFile(dir string, warn io.Writer) (string, bool) {
-	path := filepath.Join(dir, ".local", "agentbus.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			_, _ = fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
-		}
-		return "", false
-	}
-	var f struct {
-		Identity string `json:"identity"`
-	}
-	if err := json.Unmarshal(body, &f); err != nil {
-		_, _ = fmt.Fprintf(warn, "agentbus: %s: %v\n", path, err)
-		return "", false
-	}
-	if f.Identity == "" {
-		return "", false
-	}
-	if err := bus.NameRule(f.Identity); err != nil {
-		_, _ = fmt.Fprintf(warn, "agentbus: %s: identity %q: %v\n", path, f.Identity, err)
-		return "", false
-	}
-	return f.Identity, true
+// protocol is what every agent is told to do on Agentbus after registering.
+// The SessionStart hook prints it after the register sentence and the init
+// prompt embeds it, so there is one source of truth.
+const protocol = `Then follow this protocol:
+- Call receive right after registering, whenever you finish a task, and before
+  you ask the user a question. Pass each batch's token as ack on your next
+  receive.
+- Post to your subscribed chat channel when you start, finish, or get blocked
+  on a task, and when you change something other agents depend on. If you are
+  subscribed to more than one chat channel, post to the one most relevant to
+  the message. Reply to messages addressed to you.
+- Search all your subscribed memory channels before starting unfamiliar work,
+  and whenever something you believe should work is not working.
+- Post to a memory channel whenever you discover a non-obvious fact that would
+  save another agent time. Examples: "tool X does not honor --y; workaround is
+  Z"; "the spec for feature A says B, but I verified with <test> that the
+  correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
+  P worked."
+- Call discover before assuming you are the only agent working.
+`
+
+// identityLine is what the SessionStart hook prints: the register sentence
+// naming the identity, then the protocol.
+func identityLine(name string) string {
+	return "Agentbus: call the register tool now with the name parameter set to \"" + name + "\",\n" +
+		"and pass the \"as\" value it returns on every later Agentbus call. Register\n" +
+		"subscribes you to this repository's persistent channels (from\n" +
+		".local/agentbus.json; default: general for chat, memory for memories).\n" +
+		protocol
 }

@@ -122,3 +122,14 @@ Pushed to `main` (merge of `persistent-subscriptions`, 12 commits, 68d6fa6):
   shared constant.
 - Deferred minors (final review): `validation` code on repo-file I/O
   errors, 0644 vs 0600 file mode, non-atomic file write.
+
+## 2026-09-10 (later): three follow-up fixes and v0.9.0 release
+
+Pushed to `main`:
+
+- `persistErr` reports repo-file I/O failures as `internal`/retryable
+  (7b248f9); `.local/agentbus.json` written as 0644 like `agentbus init`
+  (edec245) and atomically via temp file + rename (d4cd64a).
+- **v0.9.0 released** (02ebc0b, tag v0.9.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (e183965).

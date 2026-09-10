@@ -151,7 +151,7 @@ func TestFindReportsMalformedAndInvalidIdentity(t *testing.T) {
 	if _, err := Find(dir); err == nil {
 		t.Fatal("malformed file must error")
 	}
-	writeFile(t, dir, `{"identity":"has space"}`)
+	writeFile(t, dir, `{"identity":"has/slash"}`)
 	if _, err := Find(dir); err == nil {
 		t.Fatal("invalid identity must error")
 	}
@@ -189,13 +189,13 @@ func TestChannelsEmptyListMeansNone(t *testing.T) {
 
 func TestChannelsDedupesAndReportsBad(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, `{"identity":"Sam","channels":["reviews","general","reviews","bad name",7]}`)
+	writeFile(t, dir, `{"identity":"Sam","channels":["reviews","general","reviews","bad/name",7]}`)
 	f, _ := Load(dir)
 	got, bad := f.Channels()
 	if !reflect.DeepEqual(got, []string{"reviews", "general"}) {
 		t.Fatal(got)
 	}
-	if !reflect.DeepEqual(bad, []string{"bad name", "7"}) {
+	if !reflect.DeepEqual(bad, []string{"bad/name", "7"}) {
 		t.Fatal(bad)
 	}
 }
@@ -387,7 +387,7 @@ func TestAddChannelRejectsInvalidName(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, `{"identity":"Sam"}`)
 	f, _ := Load(dir)
-	if _, err := f.AddChannel("bad name"); err == nil {
+	if _, err := f.AddChannel("bad/name"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -420,7 +420,7 @@ func TestCreate(t *testing.T) {
 	if _, err := Create(dir, "Sam"); err == nil {
 		t.Fatal("second create must fail")
 	}
-	if _, err := Create(t.TempDir(), "bad name"); err == nil {
+	if _, err := Create(t.TempDir(), "bad/name"); err == nil {
 		t.Fatal("invalid identity must fail")
 	}
 	ch, _ := f.Channels()
@@ -754,7 +754,7 @@ func TestSubscribeCreatesFileAndAddsChannel(t *testing.T) {
 
 func TestSubscribeRejectsBadName(t *testing.T) {
 	root := repoRoot(t, "myrepo")
-	if err := Subscribe(root, "bad name", &bytes.Buffer{}); err == nil {
+	if err := Subscribe(root, "bad/name", &bytes.Buffer{}); err == nil {
 		t.Fatal("expected error")
 	}
 }

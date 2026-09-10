@@ -323,6 +323,47 @@ func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 	}
 }
 
+func TestRegisterSubscribesDefaultsWhenChannelsKeyAbsent(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam"}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+		t.Fatal(reg)
+	}
+}
+
+func TestRegisterMalformedRepoFileReportsFailureUnderPath(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{not json`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if _, ok := failed[".local/agentbus.json"]; !ok {
+		t.Fatal("malformed file must be reported under its path:", reg)
+	}
+}
+
+func TestRegisterInvalidChannelNameReportsFailureUnderName(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general","bad/name"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if msg, _ := failed["bad/name"].(string); !strings.Contains(msg, "invalid channel name") {
+		t.Fatal(reg)
+	}
+}
+
 func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)

@@ -130,7 +130,7 @@ func TestAddChannelRejectsInvalidName(t *testing.T) {
 
 func TestRemoveChannel(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, `{"identity":"Sam"}`)
+	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)
 	f, _ := Load(dir)
 	got, err := f.RemoveChannel("memory")
 	if err != nil || !reflect.DeepEqual(got, []string{"general"}) {
@@ -144,6 +144,9 @@ func TestRemoveChannel(t *testing.T) {
 	ch, _ := f2.Channels()
 	if !reflect.DeepEqual(ch, []string{"general"}) {
 		t.Fatal(ch)
+	}
+	if _, ok := f2.Raw["future"]; !ok {
+		t.Fatal("unknown key dropped by RemoveChannel")
 	}
 }
 

@@ -50,6 +50,14 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "build agentbus: %v\n%s", err, out)
 		os.Exit(1)
 	}
+	// Chdir out of the package directory (inside this repo's own .git) so
+	// neither in-process servers (testSession) nor spawned binaries walk up
+	// into a real .local/agentbus.json this repo's own dogfooding might
+	// create; testSessionIn tests still control cwd via t.Chdir per test.
+	if err := os.Chdir(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "chdir to agentbus-bin temp dir:", err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if err := os.RemoveAll(dir); err != nil {
 		fmt.Fprintln(os.Stderr, "remove agentbus-bin temp dir:", err)

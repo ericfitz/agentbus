@@ -125,13 +125,14 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 // channel list (from the nearest .local/agentbus.json above cwd, or
 // repoconfig.DefaultChannels when there is none) and records the outcome on
 // reg. A file that cannot be read counts as absent, so register still
-// succeeds; the problem is surfaced in SubscribeFailed under the key "".
+// succeeds; the problem is surfaced in SubscribeFailed under the key
+// ".local/agentbus.json".
 func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	reg.Subscribed = []string{}
 	channels := repoconfig.DefaultChannels
 	f, err := repoconfig.Find(cwd)
 	if err != nil {
-		reg.SubscribeFailed = map[string]string{"": err.Error()}
+		reg.SubscribeFailed = map[string]string{".local/agentbus.json": err.Error()}
 	} else if f != nil {
 		var bad []string
 		channels, bad = f.Channels()

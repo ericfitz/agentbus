@@ -14,7 +14,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|version> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|subscribe|unsubscribe|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -109,6 +109,26 @@ func run(cmd string, args []string) int {
 			return 1
 		}
 		if err := cli.Reset(cfg, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "subscribe", "unsubscribe":
+		if len(args) != 1 {
+			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel>\n", cmd)
+			return 2
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		if cmd == "subscribe" {
+			err = cli.Subscribe(cwd, args[0], os.Stdout)
+		} else {
+			err = cli.Unsubscribe(cwd, args[0], os.Stdout)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}

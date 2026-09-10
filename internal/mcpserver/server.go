@@ -43,13 +43,15 @@ type channelIn struct {
 	Kind string `json:"kind" jsonschema:"ordinary or memory"`
 }
 type subscribeIn struct {
-	As      string `json:"as,omitempty"`
-	Channel string `json:"channel"`
-	From    string `json:"from,omitempty" jsonschema:"now (default) or oldest"`
+	As         string `json:"as,omitempty"`
+	Channel    string `json:"channel"`
+	From       string `json:"from,omitempty" jsonschema:"now (default) or oldest"`
+	Persistent bool   `json:"persistent,omitempty" jsonschema:"also add the channel to this repository's .local/agentbus.json so register subscribes it in later sessions"`
 }
 type unsubscribeIn struct {
-	As      string `json:"as,omitempty"`
-	Channel string `json:"channel"`
+	As         string `json:"as,omitempty"`
+	Channel    string `json:"channel"`
+	Persistent bool   `json:"persistent,omitempty" jsonschema:"also remove the channel from this repository's .local/agentbus.json"`
 }
 type sendIn struct {
 	As string `json:"as,omitempty"`
@@ -157,6 +159,31 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	}
 }
 
+// persistFile returns the repository file for persistent subscribe and
+// unsubscribe: the nearest .local/agentbus.json above cwd, or a new one at
+// the nearest git root (identity = that directory's basename) when none
+// exists. Outside a git repository it fails.
+func persistFile(cwd string) (*repoconfig.File, error) {
+	f, err := repoconfig.Find(cwd)
+	if err != nil || f != nil {
+		return f, err
+	}
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return repoconfig.Create(dir, filepath.Base(dir))
+		}
+		if filepath.Dir(dir) == dir || dir == "" {
+			return nil, errors.New("not inside a git repository; nothing to persist to")
+		}
+	}
+}
+
+// persistErr wraps a repo-file problem in the bus's error envelope so the
+// agent sees the same {code,message,retryable} shape as every other failure.
+func persistErr(err error) error {
+	return &bus.Error{Code: "validation", Message: bus.TruncateErrorMessage(err.Error()), Retryable: false}
+}
+
 // wrapSchemaErrorsInEnvelope normalizes go-sdk's own JSON-schema validation
 // failures (a missing required field, a wrong-typed argument) into the same
 // {code,message,retryable} JSON envelope every bus.Error already produces.
@@ -236,13 +263,41 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.ListChannels(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message."},
+	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in subscribeIn) (*mcp.CallToolResult, any, error) {
-			return result(map[string]any{"subscribed": in.Channel}, b.Subscribe(in.As, in.Channel, in.From))
+			if err := b.Subscribe(in.As, in.Channel, in.From); err != nil {
+				return nil, nil, err
+			}
+			out := map[string]any{"subscribed": in.Channel}
+			if in.Persistent {
+				f, err := persistFile(cwd)
+				if err != nil {
+					return nil, nil, persistErr(err)
+				}
+				if _, err := f.AddChannel(in.Channel); err != nil {
+					return nil, nil, persistErr(err)
+				}
+				out["persistent"] = true
+			}
+			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor."},
+	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in unsubscribeIn) (*mcp.CallToolResult, any, error) {
-			return result(map[string]any{"unsubscribed": in.Channel}, b.Unsubscribe(in.As, in.Channel))
+			if err := b.Unsubscribe(in.As, in.Channel); err != nil {
+				return nil, nil, err
+			}
+			out := map[string]any{"unsubscribed": in.Channel}
+			if in.Persistent {
+				f, err := persistFile(cwd)
+				if err != nil {
+					return nil, nil, persistErr(err)
+				}
+				if _, err := f.RemoveChannel(in.Channel); err != nil {
+					return nil, nil, persistErr(err)
+				}
+				out["persistent"] = true
+			}
+			return result(out, nil)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {

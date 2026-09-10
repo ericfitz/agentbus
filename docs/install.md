@@ -110,7 +110,9 @@ listed channel (from the current position) and reports them in its
 Edit the list from the repository root with `agentbus subscribe <channel>`
 and `agentbus unsubscribe <channel>` (the file is created if missing), or
 from inside a session by passing `persistent: true` to the `subscribe` or
-`unsubscribe` tool. Changes apply at the next `register`.
+`unsubscribe` tool. Changes apply at the next `register`. A persistent
+`subscribe` from a subdirectory creates the file at the nearest git root
+(not the subdirectory) when none exists yet.
 
 `agentbus identity` looks for this file by walking up from the current
 directory, stopping at the nearest `.git`, so a nested repository reports its
@@ -186,8 +188,9 @@ separate process has no other way to learn it.
   bootstraps the harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
-- `agentbus identity` prints the one-line registration prompt for the current
-  directory. It's also what the SessionStart hooks above run.
+- `agentbus identity` prints the registration block (the register sentence
+  plus the session protocol) for the current directory. It's also what the
+  SessionStart hooks above run.
 - `agentbus subscribe <channel>` / `agentbus unsubscribe <channel>` edit the
   persistent channel list in `.local/agentbus.json`. Run from the repository
   root; takes effect at the next register.

@@ -79,10 +79,16 @@ agentbus subscribe <channel>
 agentbus unsubscribe <channel>
 ```
 
-- Edit the repo file found by the upward walk from cwd. If no file is found,
-  `subscribe` writes a new one in `<git root>/.local/agentbus.json` with the
-  identity `agentbus init` would have chosen, and errors outside a git
-  repository.
+- Edit `<cwd>/.local/agentbus.json`. cwd must be a repository root (contain
+  `.git`); otherwise print `agentbus: run this from the repository root` and
+  exit 1. No upward walk: the file being edited should be unambiguous.
+- If the file is missing, `subscribe` creates it with the identity
+  `agentbus init` would have chosen (basename of cwd, validated by the name
+  rule). `unsubscribe` on a missing file is an error.
+- No `--persistent` or `--as` flags. The command only edits the file, so it
+  is persistent by definition, and the file holds exactly one identity.
+  Session-scoped subscriptions belong to the MCP tools; a CLI process cannot
+  act on another process's session because the bus's owner check rejects it.
 - `subscribe` on a file without a `channels` key writes
   `["general", "memory", "<channel>"]` so the defaults are not silently lost.
 - `unsubscribe` on a file without a `channels` key writes the defaults minus
@@ -166,7 +172,7 @@ that compare against `identityLine(name)` need only the new expected text.
   the list, existing cursor untouched.
 - MCP `subscribe`/`unsubscribe` with `persistent`: file written only after a
   successful session action; result carries `persistent: true`.
-- CLI: `subscribe` creates the file at the git root when missing, adds
+- CLI: `subscribe` creates the file when missing, errors outside a repo root, adds
   without duplicates, `unsubscribe` removes and is a no-op when absent, both
   refuse invalid names.
 - Logs: one emitted line parses as JSON; `time` matches

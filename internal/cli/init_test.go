@@ -226,7 +226,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if string(gi) != "bin/\n.local/\n" {
 		t.Fatalf(".gitignore = %q", gi)
 	}
-	if !strings.Contains(out.String(), "Agentbus: call register with name widgets") {
+	if !strings.Contains(out.String(), "call the register tool now with the name parameter set to \"widgets\"") {
 		t.Fatalf("no registration line:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "warning") {
@@ -240,7 +240,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 	gi, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
-	if strings.Count(string(gi), ".local/") != 1 || !strings.Contains(out.String(), "name Sam") {
+	if strings.Count(string(gi), ".local/") != 1 || !strings.Contains(out.String(), "set to \"Sam\"") {
 		t.Fatalf("rerun: gitignore=%q out=%s", gi, out.String())
 	}
 

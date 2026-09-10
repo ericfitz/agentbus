@@ -167,3 +167,14 @@ func TestCreate(t *testing.T) {
 		t.Fatal(ch)
 	}
 }
+
+func TestWriteUsesInitFileMode(t *testing.T) {
+	f, err := Create(t.TempDir(), "Sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(f.Path)
+	if err != nil || st.Mode().Perm() != 0o644 {
+		t.Fatalf("mode %v err %v", st.Mode(), err)
+	}
+}

@@ -160,5 +160,6 @@ func (f *File) write() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(f.Path, append(data, '\n'), 0o600)
+	// 0o644 matches what agentbus init writes; the file holds no secrets.
+	return os.WriteFile(f.Path, append(data, '\n'), 0o644)
 }

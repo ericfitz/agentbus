@@ -22,7 +22,7 @@ const InitPrompt = `Set up Agentbus for this repository:
    "as" value on every later Agentbus call. Register subscribes you to the
    repository's persistent channels (default: general for chat, memory for
    memories).
-` + Protocol + `If the command reports that the MCP server is not configured yet, tell the
+` + protocol + `If the command reports that the MCP server is not configured yet, tell the
 user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
 
 // codexPrompt is written to ~/.codex/prompts/agentbus.md so Codex users get

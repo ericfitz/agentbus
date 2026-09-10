@@ -53,10 +53,10 @@ func gitBaseOr(cwd, fallback string) string {
 	}
 }
 
-// Protocol is what every agent is told to do on Agentbus after registering.
+// protocol is what every agent is told to do on Agentbus after registering.
 // The SessionStart hook prints it after the register sentence and the init
 // prompt embeds it, so there is one source of truth.
-const Protocol = `Then follow this protocol:
+const protocol = `Then follow this protocol:
 - Call receive right after registering, whenever you finish a task, and before
   you ask the user a question. Pass each batch's token as ack on your next
   receive.
@@ -81,5 +81,5 @@ func identityLine(name string) string {
 		"and pass the \"as\" value it returns on every later Agentbus call. Register\n" +
 		"subscribes you to this repository's persistent channels (from\n" +
 		".local/agentbus.json; default: general for chat, memory for memories).\n" +
-		Protocol
+		protocol
 }

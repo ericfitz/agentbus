@@ -119,8 +119,8 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 	if !strings.HasSuffix(got, "\n") {
 		t.Fatal("must end with newline")
 	}
-	if !strings.Contains(InitPrompt, Protocol) {
-		t.Fatal("InitPrompt must embed Protocol")
+	if !strings.Contains(InitPrompt, protocol) {
+		t.Fatal("InitPrompt must embed protocol")
 	}
 }
 

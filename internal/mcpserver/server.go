@@ -4,6 +4,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math/rand/v2"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/repoconfig"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -117,6 +119,44 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 	return filepath.Base(cwd)
 }
 
+// applyPersistent subscribes reg.Sender to the repository's persistent
+// channel list (from the nearest .local/agentbus.json above cwd, or
+// repoconfig.DefaultChannels when there is none) and records the outcome on
+// reg. A file that cannot be read counts as absent, so register still
+// succeeds; the problem is surfaced in SubscribeFailed under the key "".
+func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
+	reg.Subscribed = []string{}
+	channels := repoconfig.DefaultChannels
+	f, err := repoconfig.Find(cwd)
+	if err != nil {
+		reg.SubscribeFailed = map[string]string{"": err.Error()}
+	} else if f != nil {
+		var bad []string
+		channels, bad = f.Channels()
+		for _, c := range bad {
+			if reg.SubscribeFailed == nil {
+				reg.SubscribeFailed = map[string]string{}
+			}
+			reg.SubscribeFailed[c] = "invalid channel name in " + f.Path
+		}
+	}
+	for _, c := range channels {
+		if err := b.Subscribe(reg.Sender, c, "now"); err != nil {
+			if reg.SubscribeFailed == nil {
+				reg.SubscribeFailed = map[string]string{}
+			}
+			var be *bus.Error
+			if errors.As(err, &be) {
+				reg.SubscribeFailed[c] = be.Message
+			} else {
+				reg.SubscribeFailed[c] = err.Error()
+			}
+			continue
+		}
+		reg.Subscribed = append(reg.Subscribed, c)
+	}
+}
+
 // wrapSchemaErrorsInEnvelope normalizes go-sdk's own JSON-schema validation
 // failures (a missing required field, a wrong-typed argument) into the same
 // {code,message,retryable} JSON envelope every bus.Error already produces.
@@ -174,14 +214,19 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. The channels general (chat) and memory (memories) always exist. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {
 				c = defaultContext
 			}
 			resume := in.Resume == nil || *in.Resume
-			return result(b.Register(in.Name, in.Parent, c, resume))
+			reg, err := b.Register(in.Name, in.Parent, c, resume)
+			if err != nil {
+				return nil, nil, err
+			}
+			applyPersistent(b, cwd, &reg)
+			return result(reg, nil)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "create_channel", Description: "Agentbus: create a named channel of kind ordinary or memory. Idempotent when the kind matches."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in channelIn) (*mcp.CallToolResult, any, error) {

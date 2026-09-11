@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = c.close() })
 	f := &fixture{c: c, ab: ab, sam: sam}
-	f.m = New(c, LoadTheme(cfg, func(string) string { return "" }, nil))
+	f.m = New(c, LoadTheme(cfg, io.Discard))
 	f.m.width, f.m.height = 100, 32
 	f.run(f.m.Init())
 	return f
@@ -172,10 +173,10 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	if f.m.unread("dev-notes") != 1 || f.m.unread("dev") != 0 {
 		t.Fatalf("unread dev-notes=%d dev=%d", f.m.unread("dev-notes"), f.m.unread("dev"))
 	}
-	f.key("esc") // normal mode
-	f.key("j")   // select dev-notes
+	f.key("esc")  // normal mode
+	f.key("down") // select dev-notes
 	if f.m.selected().Name != "dev-notes" {
-		t.Fatalf("j did not select dev-notes: %v", f.m.selected())
+		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
 	}
 	if f.m.unread("dev-notes") != 0 {
 		t.Fatalf("selecting must mark seen, unread=%d", f.m.unread("dev-notes"))
@@ -183,9 +184,9 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	if f.m.divider < 0 {
 		t.Fatal("divider must mark where new messages start")
 	}
-	f.key("k")
+	f.key("up")
 	if f.m.selected().Name != "dev" {
-		t.Fatal("k did not go back to dev")
+		t.Fatal("up did not go back to dev")
 	}
 }
 
@@ -221,12 +222,12 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 		t.Fatal("leaving the message pane at the bottom must keep following new messages")
 	}
 	f.key("tab")
-	f.key("k") // in normal mode k moves channels: dev is first, so it stays
+	f.key("up") // in the channel pane up moves channels: dev is first, so it stays
 	f.key("home")
 	if f.m.pane() != paneChannels || f.m.cursor != -1 {
 		t.Fatalf("home returns to channels, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
 	}
-	f.key("j") // dev-notes: no messages, so tab must skip the message pane
+	f.key("down") // dev-notes: no messages, so tab must skip the message pane
 	f.key("tab")
 	if f.m.pane() != paneCompose {
 		t.Fatalf("tab skips an empty message pane, got %v", f.m.pane())
@@ -334,19 +335,36 @@ func TestToastClearsOnKey(t *testing.T) {
 	}
 }
 
-func TestDownInNormalModeDrivesCursorNotSelection(t *testing.T) {
+// TestArrowsFollowTheFocusedPane: in the channel pane up/down move the
+// selection and right expands the channel into its messages; in the
+// message pane up/down move the cursor and left collapses back.
+func TestArrowsFollowTheFocusedPane(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "one")
-	f.m = New(f.c, f.m.theme) // re-init after the message exists
+	f.agentSend(t, "dev", "two")
+	f.m = New(f.c, f.m.theme) // re-init after the messages exist
 	f.run(f.m.Init())
-	sel := f.m.sel
-	f.key("esc") // normal mode
+	f.key("esc") // normal mode, channel pane
 	f.key("down")
-	if f.m.cursor < 0 {
-		t.Fatal("down in normal mode must set the stream cursor")
+	if f.m.selected().Name != "dev-notes" || f.m.cursor >= 0 {
+		t.Fatalf("down in the channel pane selects the next channel, got %v cursor=%d", f.m.selected(), f.m.cursor)
 	}
-	if f.m.sel != sel {
-		t.Fatalf("down must not change the selected channel: sel=%d want %d", f.m.sel, sel)
+	f.key("right")
+	if f.m.pane() != paneChannels {
+		t.Fatal("right on a channel with no messages stays in the channel pane")
+	}
+	f.key("up")
+	f.key("right")
+	if f.m.pane() != paneStream || f.m.cursor != 1 {
+		t.Fatalf("right expands dev onto its newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	}
+	f.key("up")
+	if f.m.cursor != 0 || f.m.selected().Name != "dev" {
+		t.Fatalf("up in the message pane moves the cursor, not the channel: cursor=%d sel=%v", f.m.cursor, f.m.selected())
+	}
+	f.key("left")
+	if f.m.pane() != paneChannels || f.m.cursor != -1 {
+		t.Fatalf("left collapses back to the channel pane, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
 	}
 }
 
@@ -355,11 +373,11 @@ func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
 	old := f.agentSend(t, "dev-notes", "old")
 	f.drainAndAck(t) // "old" is ack'd unseen: only History will ever surface it
 	live := f.agentSend(t, "dev-notes", "live")
-	f.receive(t) // dev-notes now has "live" loaded but not the pre-existing "old" history
-	f.key("esc") // normal mode
-	f.key("j")   // dev -> dev-notes, triggering the first-ever history load
+	f.receive(t)  // dev-notes now has "live" loaded but not the pre-existing "old" history
+	f.key("esc")  // normal mode
+	f.key("down") // dev -> dev-notes, triggering the first-ever history load
 	if f.m.selected().Name != "dev-notes" {
-		t.Fatalf("j did not select dev-notes: %v", f.m.selected())
+		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
 	}
 	if want := live.Seq - 1; f.m.divider != want {
 		t.Fatalf("divider = %d, want %d (== old.Seq %d)", f.m.divider, want, old.Seq)
@@ -381,6 +399,7 @@ func TestNormalModeCursorScrollsIntoView(t *testing.T) {
 	f.m.height = 20
 	f.m.layout()
 	f.key("esc")
+	f.key("right") // into the message pane
 	for i := 0; i < 30; i++ {
 		f.key("up")
 	}

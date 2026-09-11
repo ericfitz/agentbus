@@ -36,22 +36,34 @@ func TestRejectsUnknownKey(t *testing.T) {
 	}
 }
 
-func TestTUIColorsDefaultAndReject(t *testing.T) {
-	p := write(t, t.TempDir(), `{"tui_agent_color": "BrightBlue"}`)
+func TestThemesFromFileAndOldColorKeysRejected(t *testing.T) {
+	p := write(t, t.TempDir(), `{"theme": "night", "themes": [{"name": "night", "agent": "BrightBlue"}]}`)
 	c, _, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.TUIAgentColor != "BrightBlue" || c.TUISelectionColor != "brightblack" || c.TUIBackgroundColor != "default" {
-		t.Fatalf("colors wrong: %+v", c)
+	if c.Theme != "night" || len(c.Themes) != 2 || c.Themes[0].Agent != "BrightBlue" || c.Themes[0].Dim != "" {
+		t.Fatalf("themes wrong: %+v", c.Themes)
 	}
-	if n, err := ColorIndex(c.TUIAgentColor); err != nil || n != 12 {
-		t.Fatalf("ColorIndex(BrightBlue) = %d, %v", n, err)
+	if th, ok := c.FindTheme("night"); !ok || th.Agent != "BrightBlue" {
+		t.Fatalf("FindTheme: %+v %v", th, ok)
 	}
-	p = write(t, t.TempDir(), `{"tui_warn_color": "#ff0"}`)
-	_, _, err = Load(p)
-	if err == nil || !strings.Contains(err.Error(), "tui_warn_color") || !strings.Contains(err.Error(), "brightblack") {
-		t.Fatalf("want color error naming key and accepted forms, got %v", err)
+	if th, ok := c.FindTheme("default"); !ok || th != DefaultTheme() {
+		t.Fatal("the built-in default theme stays available when the file's list lacks one")
+	}
+	c, _, err = Load(write(t, t.TempDir(), `{"themes": [{"name": "default", "agent": "white"}]}`))
+	if err != nil || len(c.Themes) != 1 || c.Themes[0].Agent != "white" {
+		t.Fatalf("a file may redefine default: %v %+v", err, c.Themes)
+	}
+	if d := Default(); d.Theme != "default" || len(d.Themes) != 1 || d.Themes[0] != DefaultTheme() || DefaultTheme().Agent != "cyan" {
+		t.Fatalf("default theme wrong: %+v", d.Themes)
+	}
+	// A bad color is not a load error; the TUI substitutes the default.
+	if _, _, err := Load(write(t, t.TempDir(), `{"themes": [{"name": "x", "warn": "#ff0"}]}`)); err != nil {
+		t.Fatalf("theme colors must not be validated at load: %v", err)
+	}
+	if _, _, err := Load(write(t, t.TempDir(), `{"tui_warn_color": "red"}`)); err == nil || !strings.Contains(err.Error(), "tui_warn_color") {
+		t.Fatalf("the old per-color keys are unknown fields now, got %v", err)
 	}
 }
 

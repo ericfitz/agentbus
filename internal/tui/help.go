@@ -16,9 +16,9 @@ func (m *Model) updateHelp(msg tea.Msg) tea.Cmd {
 	switch keyString(msg) {
 	case "esc", "?", "q":
 		m.mode = modeNormal
-	case "up", "k":
+	case "up":
 		m.helpScroll = max(m.helpScroll-1, 0)
-	case "down", "j":
+	case "down":
 		m.helpScroll = min(m.helpScroll+1, max(len(m.helpLines())-1, 0))
 	}
 	return nil
@@ -32,8 +32,8 @@ func (m Model) helpLines() []string {
 		{"home", "channel list"},
 		{"esc", "leave compose; clear the message cursor"},
 		{"i / enter", "compose"},
-		{"j / k", "previous / next channel"},
-		{"↑ / ↓", "move the message cursor"},
+		{"↑ / ↓", "previous / next in the focused pane"},
+		{"→ / ←", "expand the channel into its messages / collapse back"},
 		{"pgup / pgdn", "scroll (pgup at the top loads older history)"},
 		{"g / G", "oldest / newest"},
 		{"r", "reply to the cursor message"},

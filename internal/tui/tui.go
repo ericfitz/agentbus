@@ -2,7 +2,6 @@ package tui
 
 import (
 	"io"
-	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -20,7 +19,7 @@ func Run(cfg config.Config, as string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	theme := LoadTheme(cfg, os.Getenv, stderr)
+	theme := LoadTheme(cfg, stderr)
 	c, err := newClient(cfg, as, log)
 	if err != nil {
 		return err

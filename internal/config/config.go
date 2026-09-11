@@ -40,16 +40,8 @@ type Config struct {
 	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string   `json:"log_level"`
 	TUIName                      string   `json:"tui_name"`
-	TUIBackgroundColor           string   `json:"tui_background_color"`
-	TUITextColor                 string   `json:"tui_text_color"`
-	TUIDimColor                  string   `json:"tui_dim_color"`
-	TUIAgentColor                string   `json:"tui_agent_color"`
-	TUIUserColor                 string   `json:"tui_user_color"`
-	TUIMemoryColor               string   `json:"tui_memory_color"`
-	TUIHealthColor               string   `json:"tui_health_color"`
-	TUIWarnColor                 string   `json:"tui_warn_color"`
-	TUIErrorColor                string   `json:"tui_error_color"`
-	TUISelectionColor            string   `json:"tui_selection_color"`
+	Theme                        string   `json:"theme"`  // name of the entry in Themes the TUI applies
+	Themes                       []Theme  `json:"themes"` // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -78,40 +70,63 @@ func Default() Config {
 		EmbeddingQueryTimeoutSeconds: 10,
 		LogLevel:                     "info",
 		TUIName:                      defaultTUIName(),
-		TUIBackgroundColor:           "default",
-		TUITextColor:                 "default",
-		TUIDimColor:                  "brightblack",
-		TUIAgentColor:                "cyan",
-		TUIUserColor:                 "yellow",
-		TUIMemoryColor:               "magenta",
-		TUIHealthColor:               "green",
-		TUIWarnColor:                 "yellow",
-		TUIErrorColor:                "red",
-		TUISelectionColor:            "brightblack",
+		Theme:                        "default",
+		Themes:                       []Theme{DefaultTheme()},
 	}
 }
 
-// TUIColors lists the tui_*_color settings as (key, value) pairs in a fixed
-// order, for validation and for the TUI's theme loader.
-func (c Config) TUIColors() [][2]string {
+// Theme is one named set of TUI colors. Values are not validated at load
+// time: the TUI substitutes DefaultTheme's value for any that is missing or
+// not a color (see ColorIndex).
+type Theme struct {
+	Name       string `json:"name"`
+	Background string `json:"background"`
+	Text       string `json:"text"`
+	Dim        string `json:"dim"`
+	Agent      string `json:"agent"`
+	User       string `json:"user"`
+	Memory     string `json:"memory"`
+	Health     string `json:"health"`
+	Warn       string `json:"warn"`
+	Error      string `json:"error"`
+	Selection  string `json:"selection"`
+}
+
+// DefaultTheme is the built-in "default" theme and the per-value fallback.
+func DefaultTheme() Theme {
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Health: "green", Warn: "yellow", Error: "red", Selection: "brightblack"}
+}
+
+// Colors lists the theme's values as (key, value) pairs in a fixed order,
+// keyed by the JSON field names.
+func (t Theme) Colors() [][2]string {
 	return [][2]string{
-		{"tui_background_color", c.TUIBackgroundColor},
-		{"tui_text_color", c.TUITextColor},
-		{"tui_dim_color", c.TUIDimColor},
-		{"tui_agent_color", c.TUIAgentColor},
-		{"tui_user_color", c.TUIUserColor},
-		{"tui_memory_color", c.TUIMemoryColor},
-		{"tui_health_color", c.TUIHealthColor},
-		{"tui_warn_color", c.TUIWarnColor},
-		{"tui_error_color", c.TUIErrorColor},
-		{"tui_selection_color", c.TUISelectionColor},
+		{"background", t.Background},
+		{"text", t.Text},
+		{"dim", t.Dim},
+		{"agent", t.Agent},
+		{"user", t.User},
+		{"memory", t.Memory},
+		{"health", t.Health},
+		{"warn", t.Warn},
+		{"error", t.Error},
+		{"selection", t.Selection},
 	}
+}
+
+// FindTheme returns the entry of Themes named name, or false.
+func (c Config) FindTheme(name string) (Theme, bool) {
+	for _, t := range c.Themes {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return Theme{}, false
 }
 
 var ansiNames = []string{"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"}
 
-// ColorForms is the accepted-values sentence shared by config validation
-// and the TUI's environment-variable warning.
+// ColorForms is the accepted-values sentence for the TUI's theme warning.
 const ColorForms = "black, red, green, yellow, blue, magenta, cyan, white, their bright forms such as brightblack, 0-15, or default"
 
 // ColorIndex parses a color setting: the sixteen ANSI names (bright forms
@@ -187,10 +202,18 @@ func Load(path string) (Config, string, error) {
 	case err != nil:
 		return c, path, fmt.Errorf("read %s: %w", path, err)
 	default:
+		// Decoding a JSON array into a non-empty slice reuses its elements,
+		// so the file's first theme would inherit the built-in default's
+		// values; start from an empty list instead and put the built-in
+		// "default" back below if the file did not define one.
+		c.Themes = nil
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&c); err != nil {
 			return c, path, fmt.Errorf("%s: %w", path, err)
+		}
+		if _, ok := c.FindTheme("default"); !ok {
+			c.Themes = append(c.Themes, DefaultTheme())
 		}
 		// The config file must hold exactly one JSON object: Decoder.Decode
 		// only reads one value and, unlike json.Unmarshal, silently ignores
@@ -317,11 +340,6 @@ func (c *Config) validate() error {
 	}
 	if c.TUIName == "" {
 		return errors.New("tui_name must not be empty")
-	}
-	for _, kv := range c.TUIColors() {
-		if _, err := ColorIndex(kv[1]); err != nil {
-			return fmt.Errorf("%s must be one of %s, got %q", kv[0], ColorForms, kv[1])
-		}
 	}
 	return nil
 }

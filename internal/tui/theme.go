@@ -18,30 +18,10 @@ import (
 // config.ColorIndex).
 type Theme struct {
 	BG, Text, Dim, Agent, User, Mem, Health, Warn, Error, Sel lipgloss.TerminalColor
-	// Sources records the resolved value per config key ("cyan", "default",
-	// ...) and Overrides names the environment variable that replaced the
-	// config value, for the Health overlay.
-	Sources   map[string]string
-	Overrides map[string]string
-}
-
-type themeVar struct {
-	key string // config key, e.g. tui_agent_color
-	env string // environment variable that overrides it
-	set func(*Theme, lipgloss.TerminalColor)
-}
-
-var themeVars = []themeVar{
-	{"tui_background_color", "AGENTBUS_TUI_BGCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.BG = c }},
-	{"tui_text_color", "AGENTBUS_TUI_TEXTCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Text = c }},
-	{"tui_dim_color", "AGENTBUS_TUI_DIMCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Dim = c }},
-	{"tui_agent_color", "AGENTBUS_TUI_AGENTCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Agent = c }},
-	{"tui_user_color", "AGENTBUS_TUI_USERCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.User = c }},
-	{"tui_memory_color", "AGENTBUS_TUI_MEMCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Mem = c }},
-	{"tui_health_color", "AGENTBUS_TUI_HEALTHCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Health = c }},
-	{"tui_warn_color", "AGENTBUS_TUI_WARNCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Warn = c }},
-	{"tui_error_color", "AGENTBUS_TUI_ERRORCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Error = c }},
-	{"tui_selection_color", "AGENTBUS_TUI_SELCOLOR", func(t *Theme, c lipgloss.TerminalColor) { t.Sel = c }},
+	// Name is the config theme applied and Sources the resolved value per
+	// color key ("cyan", "default", ...), for the Health overlay.
+	Name    string
+	Sources map[string]string
 }
 
 // ParseColor is config.ColorIndex as a Lip Gloss color.
@@ -56,31 +36,60 @@ func ParseColor(s string) (lipgloss.TerminalColor, error) {
 	return lipgloss.Color(strconv.Itoa(n)), nil
 }
 
-// LoadTheme starts from the validated tui_*_color config values and lets
-// each AGENTBUS_TUI_*COLOR environment variable, read through getenv,
-// override its key. A bad variable prints one line to warn naming it and
-// the accepted forms, then keeps the config value; the TUI still starts.
-func LoadTheme(cfg config.Config, getenv func(string) string, warn io.Writer) Theme {
-	t := Theme{Sources: map[string]string{}, Overrides: map[string]string{}}
-	values := map[string]string{}
-	for _, kv := range cfg.TUIColors() {
-		values[kv[0]] = kv[1]
+// LoadTheme applies the entry of cfg.Themes named cfg.Theme. A name that
+// is not in the list, and any value that is empty or not a color, falls
+// back to config.DefaultTheme; a bad value prints one line to warn naming
+// it and the accepted forms. The TUI always starts.
+func LoadTheme(cfg config.Config, warn io.Writer) Theme {
+	def := config.DefaultTheme()
+	sel, ok := cfg.FindTheme(cfg.Theme)
+	if !ok {
+		_, _ = fmt.Fprintf(warn, "agentbus tui: theme %q is not in themes; using %s\n", cfg.Theme, def.Name)
+		sel = def
 	}
-	for _, v := range themeVars {
-		value := strings.ToLower(strings.TrimSpace(values[v.key]))
-		if raw := getenv(v.env); raw != "" {
-			if _, err := ParseColor(raw); err != nil {
-				_, _ = fmt.Fprintf(warn, "agentbus tui: %s=%q is not a color (%v); accepted: %s; using %s\n", v.env, raw, err, config.ColorForms, value)
-			} else {
-				value = strings.ToLower(strings.TrimSpace(raw))
-				t.Overrides[v.key] = v.env
-			}
+	defaults := map[string]string{}
+	for _, kv := range def.Colors() {
+		defaults[kv[0]] = kv[1]
+	}
+	t := Theme{Name: sel.Name, Sources: map[string]string{}}
+	for _, kv := range sel.Colors() {
+		key, value := kv[0], strings.ToLower(strings.TrimSpace(kv[1]))
+		if value == "" {
+			value = defaults[key]
+		} else if _, err := ParseColor(value); err != nil {
+			_, _ = fmt.Fprintf(warn, "agentbus tui: theme %q %s=%q is not a color (%v); accepted: %s; using %s\n", sel.Name, key, kv[1], err, config.ColorForms, defaults[key])
+			value = defaults[key]
 		}
-		c, _ := ParseColor(value) // the config value and the validated raw both parse
-		v.set(&t, c)
-		t.Sources[v.key] = value
+		c, _ := ParseColor(value) // defaults and validated values both parse
+		t.set(key, c)
+		t.Sources[key] = value
 	}
 	return t
+}
+
+func (t *Theme) set(key string, c lipgloss.TerminalColor) {
+	switch key {
+	case "background":
+		t.BG = c
+	case "text":
+		t.Text = c
+	case "dim":
+		t.Dim = c
+	case "agent":
+		t.Agent = c
+	case "user":
+		t.User = c
+	case "memory":
+		t.Mem = c
+	case "health":
+		t.Health = c
+	case "warn":
+		t.Warn = c
+	case "error":
+		t.Error = c
+	case "selection":
+		t.Sel = c
+	}
 }
 
 // Style is a foreground-only style in color c.

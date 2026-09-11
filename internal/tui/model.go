@@ -348,20 +348,27 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
-	case "j":
-		return m.selectChannel(m.sel + 1)
-	case "k":
-		return m.selectChannel(m.sel - 1)
+	// Arrows act on the focused pane: up/down move within it, right expands
+	// the selected channel into its messages, left collapses back to the
+	// channel list.
 	case "down":
-		if m.cursor < 0 {
-			m.cursor = len(m.msgs[m.selName()]) - 1
+		if m.pane() == paneStream {
+			return m.moveCursor(1)
 		}
-		return m.moveCursor(1)
+		return m.selectChannel(m.sel + 1)
 	case "up":
-		if m.cursor < 0 {
-			m.cursor = len(m.msgs[m.selName()]) - 1
+		if m.pane() == paneStream {
+			return m.moveCursor(-1)
 		}
-		return m.moveCursor(-1)
+		return m.selectChannel(m.sel - 1)
+	case "right":
+		if m.pane() == paneChannels && len(m.msgs[m.selName()]) > 0 {
+			return m.focusPane(paneStream)
+		}
+	case "left":
+		if m.pane() == paneStream {
+			return m.focusPane(paneChannels)
+		}
 	case "tab", "shift+tab", "home":
 		return m.paneKey(msg)
 	case "pgup", "pgdown":

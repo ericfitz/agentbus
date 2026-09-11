@@ -81,7 +81,7 @@ func TestReplySetsReplyToAndEscCancels(t *testing.T) {
 func TestEnterOnMemoryChannelCreatesMemory(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
-	f.key("j") // dev-notes
+	f.key("down") // dev-notes
 	f.key("i")
 	f.key("Reviewer checklist")
 	f.key("enter")

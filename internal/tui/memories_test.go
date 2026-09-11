@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +117,7 @@ func TestMemoriesOpensDefaultMemoryChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.close() })
-	f := &fixture{c: c, ab: ab, sam: sam, m: New(c, LoadTheme(cfg, func(string) string { return "" }, nil))}
+	f := &fixture{c: c, ab: ab, sam: sam, m: New(c, LoadTheme(cfg, io.Discard))}
 	f.m.width, f.m.height = 100, 32
 	f.run(f.m.Init())
 	f.key("esc")
@@ -221,21 +222,41 @@ func TestMemoriesDeleteConfirmationFitsOverlay(t *testing.T) {
 }
 
 func TestEditorCommandPrecedence(t *testing.T) {
+	// The editor runs through sh -c with the path as $1, so a value with
+	// arguments or with spaces in its path both work.
+	line := func() string {
+		got := editorCommand("x.md").Args
+		if len(got) != 5 || got[0] != "/bin/sh" || got[1] != "-c" || got[4] != "x.md" {
+			t.Fatalf("editor must run as sh -c <line> sh <path>: %v", got)
+		}
+		return got[2]
+	}
 	t.Setenv("VISUAL", "code -w")
 	t.Setenv("EDITOR", "nano")
-	if got := editorCommand("x.md").Args; len(got) != 3 || got[0] != "code" || got[1] != "-w" {
-		t.Fatalf("VISUAL must win over EDITOR, with its own args: %v", got)
+	if got := line(); got != `code -w "$1"` {
+		t.Fatalf("VISUAL must win over EDITOR, with its own args: %q", got)
+	}
+	spaced := filepath.Join(t.TempDir(), "Visual Studio Code.app", "Electron")
+	if err := os.MkdirAll(filepath.Dir(spaced), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spaced, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VISUAL", spaced)
+	if got := editorCommand("x.md").Args; len(got) != 2 || got[0] != spaced || got[1] != "x.md" {
+		t.Fatalf("an existing file with spaces in its path must run as-is, got %v", got)
 	}
 	t.Setenv("VISUAL", "")
-	if got := editorCommand("x.md").Args[0]; got != "nano" {
+	if got := line(); got != `nano "$1"` {
 		t.Fatalf("EDITOR must win when VISUAL is unset, got %q", got)
 	}
 	t.Setenv("EDITOR", "")
-	if got := editorCommand("x.md").Args[0]; got != "vi" {
+	if got := line(); got != `vi "$1"` {
 		t.Fatalf("default must be vi, got %q", got)
 	}
 	t.Setenv("VISUAL", "   ") // whitespace-only used to panic on parts[0]
-	if got := editorCommand("x.md").Args[0]; got != "vi" {
+	if got := line(); got != `vi "$1"` {
 		t.Fatalf("whitespace-only VISUAL must fall back to vi without panicking, got %q", got)
 	}
 }

@@ -213,8 +213,10 @@ separate process has no other way to learn it.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
   `shift+tab` move between the channel list, the message list, and the
   compose line; `home` returns to the channel list. `/` searches, `m` opens
-  the memory browser, `h` opens health and config, `q` quits. Colors are
-  `tui_*_color` config settings; see below.
+  the memory browser, `h` opens health and config, `q` quits. Arrow keys act
+  on the focused pane: `↑`/`↓` move within it, `→` expands the selected
+  channel into its messages, `←` collapses back to the channel list. Colors
+  come from the `theme` and `themes` config settings; see below.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose
@@ -225,29 +227,45 @@ separate process has no other way to learn it.
 
 ## TUI theme
 
-Each color is a config setting; the environment variable in the second
-column overrides it for one run. A value is one of the sixteen ANSI color
-names (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
-`white`, or a `bright` form such as `brightblack`), an index `0`-`15`, or
-`default` for the terminal's own color. Matching is case-insensitive. Other
-values, including `#RRGGBB`, fail config load; in an environment variable
-they are rejected with one line on stderr and the config value is used.
+Colors live in named themes. `themes` is an array of them and `theme` names
+the one the TUI applies (default `default`). The built-in `default` theme
+is always available unless the file defines its own entry of that name:
 
-| Config key | Environment override | Used for | Default |
-|------------|----------------------|----------|---------|
-| `tui_background_color` | `AGENTBUS_TUI_BGCOLOR` | screen background | `default` |
-| `tui_text_color` | `AGENTBUS_TUI_TEXTCOLOR` | message content | `default` |
-| `tui_dim_color` | `AGENTBUS_TUI_DIMCOLOR` | timestamps, dividers, help | `brightblack` |
-| `tui_agent_color` | `AGENTBUS_TUI_AGENTCOLOR` | agent names, selected channel, key hints | `cyan` |
-| `tui_user_color` | `AGENTBUS_TUI_USERCOLOR` | your own name | `yellow` |
-| `tui_memory_color` | `AGENTBUS_TUI_MEMCOLOR` | memory channels and the memory browser | `magenta` |
-| `tui_health_color` | `AGENTBUS_TUI_HEALTHCOLOR` | live heartbeat dot, ok states | `green` |
-| `tui_warn_color` | `AGENTBUS_TUI_WARNCOLOR` | warnings such as the text-only search badge | `yellow` |
-| `tui_error_color` | `AGENTBUS_TUI_ERRORCOLOR` | errors and the delete confirmation | `red` |
-| `tui_selection_color` | `AGENTBUS_TUI_SELCOLOR` | selected row background | `brightblack` |
+```json
+{
+  "theme": "night",
+  "themes": [
+    { "name": "night", "background": "black", "agent": "brightcyan", "user": "brightyellow" }
+  ]
+}
+```
 
-The health overlay (`h`) lists the resolved theme and marks each value an
-environment variable overrode.
+A value is one of the sixteen ANSI color names (`black`, `red`, `green`,
+`yellow`, `blue`, `magenta`, `cyan`, `white`, or a `bright` form such as
+`brightblack`), an index `0`-`15`, or `default` for the terminal's own
+color. Matching is case-insensitive. Nothing here fails config load: a
+`theme` name that is not in `themes`, a key a theme leaves out, and a value
+that is not a color (including `#RRGGBB`) all fall back to the `default`
+theme's value; bad values and unknown theme names print one line on stderr
+before the TUI starts.
+
+| Theme key | Used for | Default |
+|-----------|----------|---------|
+| `background` | screen background | `default` |
+| `text` | message content | `default` |
+| `dim` | timestamps, dividers, help | `brightblack` |
+| `agent` | agent names, selected channel, key hints | `cyan` |
+| `user` | your own name | `yellow` |
+| `memory` | memory channels and the memory browser | `magenta` |
+| `health` | live heartbeat dot, ok states | `green` |
+| `warn` | warnings such as the text-only search badge | `yellow` |
+| `error` | errors and the delete confirmation | `red` |
+| `selection` | selected row background | `brightblack` |
+
+The health overlay (`h`) shows the log file path, the theme in use with
+each resolved value, and the loaded config. `o` opens the config file in
+`$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with
+arguments or spaces works.
 
 ## Limits worth knowing
 

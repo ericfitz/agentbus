@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
 type healthState struct {
@@ -33,9 +34,9 @@ func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 		m.mode = modeNormal
 	case "?":
 		return m.openHelp()
-	case "up", "k":
+	case "up":
 		m.health.scroll = max(m.health.scroll-1, 0)
-	case "down", "j":
+	case "down":
 		maxScroll := max(len(m.healthLines())-1, 0)
 		m.health.scroll = min(m.health.scroll+1, maxScroll)
 	case "o":
@@ -112,14 +113,11 @@ func (m Model) healthLines() []string {
 	if !m.lastBatchAt.IsZero() {
 		lastB = m.lastBatchAt.Format("15:04:05")
 	}
-	p("%s %s · %s %s · %d gaps\n\n", dim.Render("receive"), recv, dim.Render("last batch"), lastB, m.gapCount)
-	b.WriteString(dim.Render("theme") + dim.Render(" · config value, or the environment variable that overrides it") + "\n")
-	for _, v := range themeVars {
-		p("  %s %s", v.key, th.Sources[v.key])
-		if env := th.Overrides[v.key]; env != "" {
-			p(" %s", dim.Render("← "+env))
-		}
-		b.WriteString("\n")
+	p("%s %s · %s %s · %d gaps\n", dim.Render("receive"), recv, dim.Render("last batch"), lastB, m.gapCount)
+	p("%s %s\n\n", dim.Render("log ·"), mcpserver.LogPath(cfg))
+	p("%s %s\n", dim.Render("theme ·"), th.Name)
+	for _, kv := range config.DefaultTheme().Colors() {
+		p("  %s %s\n", kv[0], th.Sources[kv[0]])
 	}
 	p("\n%s %s\n", dim.Render("config ·"), cfg.Path)
 	js, err := json.MarshalIndent(cfg, "  ", "  ")

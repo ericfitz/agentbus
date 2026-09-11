@@ -116,10 +116,10 @@ func (m *Model) updateMemories(msg tea.Msg) tea.Cmd {
 	switch k {
 	case "esc":
 		m.mode = modeNormal
-	case "up", "k":
+	case "up":
 		m.mem.cursor = max(m.mem.cursor-1, 0)
 		return m.loadRevisions()
-	case "down", "j":
+	case "down":
 		m.mem.cursor = min(m.mem.cursor+1, max(len(m.mem.list)-1, 0))
 		return m.loadRevisions()
 	case "left":
@@ -136,19 +136,25 @@ func (m *Model) updateMemories(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// editorCommand names $VISUAL, else $EDITOR, else vi; a blank or
-// whitespace-only value (unset, or set to "") falls back the same way
-// rather than leaving an empty argv[0] that would panic below.
+// editorCommand runs $VISUAL, else $EDITOR, else vi, on path. A value that
+// is itself an existing file is run as-is, so a bare path with spaces
+// ("/Applications/Visual Studio Code.app/Contents/MacOS/Electron") works;
+// splitting it on whitespace used to break it at "/Applications/Visual".
+// Anything else goes through the shell the way git runs GIT_EDITOR, so
+// arguments and quoting work ("code --wait"). A blank or whitespace-only
+// value falls back the same as unset.
 func editorCommand(path string) *exec.Cmd {
-	ed := os.Getenv("VISUAL")
+	ed := strings.TrimSpace(os.Getenv("VISUAL"))
 	if ed == "" {
-		ed = os.Getenv("EDITOR")
+		ed = strings.TrimSpace(os.Getenv("EDITOR"))
 	}
-	parts := strings.Fields(ed)
-	if len(parts) == 0 {
-		parts = []string{"vi"}
+	if ed == "" {
+		ed = "vi"
 	}
-	return exec.Command(parts[0], append(parts[1:], path)...)
+	if st, err := os.Stat(ed); err == nil && !st.IsDir() {
+		return exec.Command(ed, path)
+	}
+	return exec.Command("/bin/sh", "-c", ed+` "$1"`, "sh", path)
 }
 
 // editMemoryInEditor writes the current revision to a fresh, unique temp

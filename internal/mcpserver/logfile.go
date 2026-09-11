@@ -139,6 +139,10 @@ func (w *rotatingWriter) rotate() error {
 // files) and returns a JSON-lines logger writing to it, one record per
 // line with a UTC RFC3339 millisecond timestamp and this process's pid.
 // Never writes to stdout or stderr.
+// LogPath is the log file every agentbus process on this data directory
+// writes to.
+func LogPath(cfg config.Config) string { return filepath.Join(cfg.DataDirectory, "agentbus.log") }
+
 func OpenLog(cfg config.Config) (*slog.Logger, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o700); err != nil {
 		return nil, err
@@ -147,7 +151,7 @@ func OpenLog(cfg config.Config) (*slog.Logger, error) {
 	if err := lvl.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
 		lvl = slog.LevelInfo
 	}
-	w := &rotatingWriter{path: filepath.Join(cfg.DataDirectory, "agentbus.log"), maxBytes: 16 << 20, keep: 4}
+	w := &rotatingWriter{path: LogPath(cfg), maxBytes: 16 << 20, keep: 4}
 	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl, ReplaceAttr: utcMillis})
 	return slog.New(h).With("pid", os.Getpid()), nil
 }

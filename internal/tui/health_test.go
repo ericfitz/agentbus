@@ -17,9 +17,17 @@ func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 		t.Fatal("h opens health")
 	}
 	v := f.m.View()
-	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 4 (2 memory)", "embeddings unset", "receive", "theme", "tui_agent_color cyan", "config ·", "\"tui_agent_color\": \"cyan\"", filepath.Base(f.c.cfg.Path), "\"tui_name\"", "\"sqlite_budget_mib\": 2048"} {
+	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 4 (2 memory)", "embeddings unset", "receive", "log ·", "agentbus.log", "theme · default", "agent cyan", "config ·", filepath.Base(f.c.cfg.Path), "\"tui_name\""} {
 		if !strings.Contains(v, want) {
 			t.Errorf("health lacks %q:\n%s", want, v)
+		}
+	}
+	// The box wraps long lines and the config JSON runs past the fixture's
+	// height; check the unwrapped body for the full log path and the JSON.
+	body := strings.Join(f.m.healthLines(), "\n")
+	for _, want := range []string{filepath.Join(f.c.cfg.DataDirectory, "agentbus.log"), "\"agent\": \"cyan\"", "\"sqlite_budget_mib\": 2048"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("health body lacks %q:\n%s", want, body)
 		}
 	}
 	f.key("esc")

@@ -311,6 +311,10 @@ func (m Model) overlaySize() (w, h int) {
 // color names the overlay (cyan search, magenta memories, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
+	if m.toast != "" {
+		footer = m.theme.Style(m.theme.Error).Render("✗ "+m.toast) + "\n" + footer
+		h--
+	}
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		m.theme.Style(border).Bold(true).Render(title),
 		lipgloss.NewStyle().Width(w-4).Height(h-4).MaxHeight(h-4).Render(body),

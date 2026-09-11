@@ -151,3 +151,15 @@ Pushed to `main`:
 - **v0.9.1 released** (ce683c0, tag v0.9.1):
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
+
+## 2026-09-10 (evening): skill installed by init --global, v0.9.2 release
+
+Pushed to `main`:
+
+- The `using-agentbus` skill moved to `internal/cli/skills/` and is
+  embedded in the binary; `agentbus init --global` installs it to
+  `~/.claude/skills/` (Claude Code) and `~/.agents/skills/` (Codex)
+  (0a83558).
+- **v0.9.2 released** (9861f4a, tag v0.9.2):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.2);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (1485943).

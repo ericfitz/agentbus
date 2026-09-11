@@ -32,8 +32,12 @@ For each harness it finds (`~/.claude` or `~/.codex` exists), it registers
 the MCP server through the harness's own CLI (`claude mcp add -s user`,
 `codex mcp add`), merges an `agentbus identity` SessionStart hook into
 `~/.claude/settings.json` or `~/.codex/hooks.json` (backing the file up to
-`.bak` first), and for Codex sets `tool_timeout_sec = 300` and writes the
-`~/.codex/prompts/agentbus.md` custom prompt. `--harness claude` or
+`.bak` first), installs the `using-agentbus` skill (channel scope and what
+to post; `~/.claude/skills/using-agentbus/SKILL.md` for Claude Code,
+`~/.agents/skills/using-agentbus/SKILL.md` for Codex), and for Codex sets
+`tool_timeout_sec = 300` and writes the `~/.codex/prompts/agentbus.md`
+custom prompt. The skill ships inside the binary, so rerun `init --global`
+after upgrading to refresh it. `--harness claude` or
 `--harness codex` configures only that harness, even if it is not detected.
 `--dry-run` prints what would change without writing. Restart the harness
 afterwards.

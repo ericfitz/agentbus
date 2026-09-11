@@ -1,6 +1,7 @@
 package cli
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,17 @@ const codexPrompt = "# Agentbus\n\nThe user asked for: agentbus $ARGUMENTS\n\n" 
 	"For anything else, run `agentbus $ARGUMENTS` in a shell and report the output.\n"
 
 const hookCommand = "agentbus identity"
+
+// skillMD is the using-agentbus skill, installed by `init --global` into
+// each harness's personal skills directory so it ships with the binary it
+// describes: ~/.claude/skills for Claude Code and ~/.agents/skills for
+// Codex (also read by Copilot CLI and Gemini CLI).
+//
+//go:embed skills/using-agentbus/SKILL.md
+var skillMD []byte
+
+// skillPath is where the skill goes under a skills directory.
+var skillPath = filepath.Join("skills", "using-agentbus", "SKILL.md")
 
 // InitOptions configures Init. Zero values mean "detect".
 type InitOptions struct {
@@ -181,7 +193,10 @@ func (in *initer) claude(dir string) error {
 		`{ "mcpServers": { "agentbus": { "command": "agentbus", "args": ["mcp"] } } }`+" in ~/.claude.json"); err != nil {
 		return err
 	}
-	return in.hook(filepath.Join(dir, "settings.json"), "")
+	if err := in.hook(filepath.Join(dir, "settings.json"), ""); err != nil {
+		return err
+	}
+	return in.write(filepath.Join(dir, skillPath), skillMD)
 }
 
 func (in *initer) codex(dir string) error {
@@ -197,6 +212,9 @@ func (in *initer) codex(dir string) error {
 		return err
 	}
 	if err := in.write(filepath.Join(dir, "prompts", "agentbus.md"), []byte(codexPrompt)); err != nil {
+		return err
+	}
+	if err := in.write(filepath.Join(in.Home, ".agents", skillPath), skillMD); err != nil {
 		return err
 	}
 	in.say("  Codex asks you to trust the SessionStart hook the first time it runs; accept it")

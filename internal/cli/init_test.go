@@ -111,6 +111,13 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	if err != nil || !strings.Contains(string(prompt), "$ARGUMENTS") || !strings.Contains(string(prompt), "agentbus init") {
 		t.Fatalf("codex prompt: %v\n%s", err, prompt)
 	}
+	// The using-agentbus skill lands in each harness's personal skills dir.
+	for _, p := range []string{".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
+		skill, err := os.ReadFile(filepath.Join(home, p))
+		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "<repo>-memory") {
+			t.Fatalf("skill %s: %v\n%s", p, err, skill)
+		}
+	}
 
 	// Second run: hooks and timeout are not duplicated.
 	out.Reset()
@@ -196,7 +203,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatal("dry run invoked CLIs:", f.calls)
 	}
-	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md"} {
+	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(home, p)); err == nil {
 			t.Fatal("dry run wrote", p)
 		}

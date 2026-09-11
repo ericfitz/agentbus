@@ -45,7 +45,9 @@ agentbus init
 ```
 
 This writes the repository's identity file (`.local/agentbus.json`, from the
-repository directory's name), adds `.local/` to `.gitignore` if it is not
+repository directory's name), creates the repository's own chat and memory
+channels on the bus (`<identity>` and `<identity>-memory`) and adds them to
+the persistent channel list, adds `.local/` to `.gitignore` if it is not
 already ignored, and prints the registration line. From inside a session
 the same thing is one command: `/agentbus:init` in Claude Code (an MCP
 prompt the server advertises, so nothing is installed for it) or
@@ -97,7 +99,7 @@ maximum of 240 seconds (default 60).
 `.local/agentbus.json` in the repository (git-ignored):
 
 ```json
-{ "identity": "Sam", "channels": ["general", "memory", "reviews"] }
+{ "identity": "Sam", "channels": ["general", "memory", "Sam", "Sam-memory"] }
 ```
 
 `identity` is the name the agent registers with. `channels` is the
@@ -106,6 +108,10 @@ listed channel (from the current position) and reports them in its
 `subscribed` field; channels that do not exist are reported in
 `subscribe_failed` and skipped. Without a `channels` key the list is
 `general` and `memory`; an empty list means no automatic subscriptions.
+`init` writes the two machine-wide channels plus the repository's own pair,
+`<identity>` (chat) and `<identity>-memory` (memory), creating the pair on
+the bus if missing. Rerunning `init` recreates the pair for whatever identity
+the file names.
 
 Edit the list from the repository root with `agentbus subscribe <channel>`
 and `agentbus unsubscribe <channel>` (the file is created if missing), or

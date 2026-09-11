@@ -23,9 +23,22 @@ var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "mem
 // choice wins over the default.
 func (b *Bus) ensureDefaults() error {
 	for _, c := range DefaultChannels {
-		if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", c.Name, c.Kind); err != nil {
-			return internal(err)
+		if err := b.EnsureChannel(c.Name, c.Kind); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// EnsureChannel creates the channel if it is missing, without a registration
+// (it is the CLI's, for `agentbus init`). A same-named channel of another
+// kind is left alone, like ensureDefaults.
+func (b *Bus) EnsureChannel(name, kind string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", name, kind); err != nil {
+		return internal(err)
 	}
 	return nil
 }

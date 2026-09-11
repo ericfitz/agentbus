@@ -3,10 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // fakeHarness records CLI invocations and simulates `codex mcp add` writing
@@ -31,7 +36,9 @@ func (f *fakeHarness) run(name string, args ...string) error {
 
 func initOpts(t *testing.T, home string, f *fakeHarness) InitOptions {
 	t.Helper()
-	return InitOptions{Home: home, Cwd: t.TempDir(), LookPath: f.lookPath, Run: f.run}
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	return InitOptions{Home: home, Cwd: t.TempDir(), LookPath: f.lookPath, Run: f.run, Config: cfg}
 }
 
 func readJSON(t *testing.T, path string) map[string]any {
@@ -218,9 +225,12 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatal("repo init touched harness CLIs:", f.calls)
 	}
-	id, err := os.ReadFile(filepath.Join(root, ".local", "agentbus.json"))
-	if err != nil || strings.TrimSpace(string(id)) != `{"identity":"widgets"}` {
-		t.Fatalf("identity file: %v %q", err, id)
+	id := readJSON(t, filepath.Join(root, ".local", "agentbus.json"))
+	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","widgets","widgets-memory"]`) {
+		t.Fatalf("identity file: %v", id)
+	}
+	if got := channelKinds(t, o.Config); got["widgets"] != "ordinary" || got["widgets-memory"] != "memory" {
+		t.Fatalf("project channels not created on the bus: %v", got)
 	}
 	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if string(gi) != "bin/\n.local/\n" {
@@ -243,6 +253,9 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if strings.Count(string(gi), ".local/") != 1 || !strings.Contains(out.String(), "set to \"Sam\"") {
 		t.Fatalf("rerun: gitignore=%q out=%s", gi, out.String())
 	}
+	if got := channelKinds(t, o.Config); got["Sam"] != "ordinary" || got["Sam-memory"] != "memory" {
+		t.Fatalf("rerun did not create channels for the existing identity: %v", got)
+	}
 
 	// No MCP entry anywhere: warn, but still do the repo work.
 	_ = os.Remove(filepath.Join(home, ".claude.json"))
@@ -257,4 +270,32 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if err := Init(o, &out); err != nil || len(f.calls) == 0 {
 		t.Fatalf("--global in repo did not run the global step: %v calls=%v", err, f.calls)
 	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// channelKinds opens the bus at cfg and returns name -> kind for every channel.
+func channelKinds(t *testing.T, cfg config.Config) map[string]string {
+	t.Helper()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	st, err := b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, c := range st.Channels {
+		out[c.Name] = c.Kind
+	}
+	return out
 }

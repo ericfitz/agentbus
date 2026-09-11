@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/repoconfig"
 )
 
 // InitPrompt is what the `init` MCP prompt (Claude Code) and the Codex
@@ -36,11 +39,12 @@ const hookCommand = "agentbus identity"
 
 // InitOptions configures Init. Zero values mean "detect".
 type InitOptions struct {
-	Global  bool   // force the machine-level bootstrap even inside a repo
-	Harness string // "", "claude", or "codex": force one harness
-	DryRun  bool   // print actions, write nothing
-	Home    string // home directory; defaults to os.UserHomeDir
-	Cwd     string // working directory; defaults to os.Getwd
+	Global  bool          // force the machine-level bootstrap even inside a repo
+	Harness string        // "", "claude", or "codex": force one harness
+	DryRun  bool          // print actions, write nothing
+	Home    string        // home directory; defaults to os.UserHomeDir
+	Cwd     string        // working directory; defaults to os.Getwd
+	Config  config.Config // bus config, for creating the repository's channels
 	// LookPath and Run are the harness CLI seams (exec.LookPath / exec.Command).
 	LookPath func(string) (string, error)
 	Run      func(name string, args ...string) error
@@ -302,8 +306,10 @@ func hasHookCommand(entry any, cmd string) bool {
 	return false
 }
 
-// repo writes the repository's identity file and makes sure .local/ is
-// git-ignored, then prints the registration line.
+// repo writes the repository's identity file, creates the repository's own
+// chat and memory channels (<identity> and <identity>-memory) on the bus and
+// in the persistent channel list, makes sure .local/ is git-ignored, then
+// prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
 		in.say("warning: no agentbus MCP entry found in ~/.claude.json or ~/.codex/config.toml; run `agentbus init --global` first")
@@ -327,7 +333,34 @@ func (in *initer) repo(root string) error {
 	if in.DryRun {
 		return nil
 	}
+	if err := in.projectChannels(root); err != nil {
+		return err
+	}
 	return identity(in.Cwd, in.out, os.Stderr)
+}
+
+// projectChannels creates <identity> (ordinary) and <identity>-memory
+// (memory) on the bus and adds them to the persistent channel list.
+func (in *initer) projectChannels(root string) error {
+	f, err := repoconfig.Load(root)
+	if err != nil {
+		return err
+	}
+	b, err := bus.Open(in.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = b.Close() }()
+	for _, c := range []bus.Channel{{Name: f.Identity, Kind: "ordinary"}, {Name: f.Identity + "-memory", Kind: "memory"}} {
+		if err := b.EnsureChannel(c.Name, c.Kind); err != nil {
+			return err
+		}
+		if _, err := f.AddChannel(c.Name); err != nil {
+			return err
+		}
+	}
+	list, _ := f.Channels()
+	return printChannels(in.out, f.Identity, list)
 }
 
 func (in *initer) gitignore(path string) error {

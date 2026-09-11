@@ -52,9 +52,16 @@ func run(cmd string, args []string) int {
 		fs.BoolVar(&o.Global, "global", false, "configure the harnesses on this machine even when inside a git repository")
 		fs.StringVar(&o.Harness, "harness", "", "configure only this harness (claude or codex), even if it is not detected")
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
+		path := fs.String("config", "", "configuration file")
 		if err := fs.Parse(args); err != nil {
 			return 2
 		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		o.Config = cfg
 		if err := cli.Init(o, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1

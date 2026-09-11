@@ -133,3 +133,21 @@ Pushed to `main`:
 - **v0.9.0 released** (02ebc0b, tag v0.9.0):
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.0);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (e183965).
+
+## 2026-09-10 (later still): init project channels, TUI tweaks, v0.9.1 release
+
+Pushed to `main`:
+
+- `agentbus init` creates the repository's own `<identity>` and
+  `<identity>-memory` channels on the bus (`bus.EnsureChannel`) and adds
+  them to `.local/agentbus.json`; `init -config` (46b0d50).
+- TUI: arrow keys replace j/k (up/down within the focused pane, right
+  expands a channel, left collapses); health `o` fixed for an editor path
+  with spaces and overlays now show error toasts; health shows the log
+  path; colors are `theme` + `themes[]` in config, env overrides and the
+  `tui_*_color` keys removed (19b7d1d).
+- `.claude/skills/using-agentbus/SKILL.md`: channel-scope and posting
+  guidance for agents (bd7320d).
+- **v0.9.1 released** (ce683c0, tag v0.9.1):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).

@@ -22,6 +22,9 @@ import (
 const (
 	attachmentExpiryMs  = 30_000
 	receivePollInterval = 250 * time.Millisecond
+	// waitPollInterval is slower: a parked `agentbus wait` process may sit for
+	// hours, and nothing downstream needs sub-second wake-up.
+	waitPollInterval = time.Second
 )
 
 type Bus struct {

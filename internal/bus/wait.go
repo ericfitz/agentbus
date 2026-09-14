@@ -41,7 +41,7 @@ func (b *Bus) Wait(as string, channels []string, includeOwn bool, match func(Mes
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return nil, nil
 		}
-		time.Sleep(receivePollInterval)
+		time.Sleep(waitPollInterval)
 	}
 }
 

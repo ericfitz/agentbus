@@ -312,7 +312,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds waits for messages when none are available."},
+	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds waits for messages when none are available. To wait longer, run `agentbus wait` in a background shell instead of polling receive."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})

@@ -43,6 +43,23 @@ goes in `<repo>-memory`.
    something you believe should work does not.
 5. `receive` again after each task and before asking the user a question.
 
+## Waiting for messages
+
+Do not poll `receive` from model turns while idle; every empty wake-up
+resends your whole context. Park on the bus from a shell instead:
+
+```
+Bash(run_in_background: true): agentbus wait -filter @<your-name>
+```
+
+`agentbus wait` blocks until a message past your cursor exists on your
+subscribed channels, prints it as JSON lines, and exits 0. It never acks or
+moves your cursor, so when the harness wakes you, call `receive` as usual
+and ack that batch. Drop `-filter` to wake for any message; add
+`-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit
+1) instead of waiting forever. Use it when blocked on another agent or on a
+question only the user can answer, after posting what you are waiting for.
+
 ## What to post, and where
 
 | Situation | Channel | Content |

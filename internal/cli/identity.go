@@ -65,6 +65,9 @@ const protocol = `Then follow this protocol:
 - Call receive right after registering, whenever you finish a task, and before
   you ask the user a question. Pass each batch's token as ack on your next
   receive.
+- To wait for a message, do not poll receive from model turns. Run
+  "agentbus wait -filter @<your-name>" in a background shell; it exits when a
+  message for you is available, then call receive.
 - Post to your subscribed chat channel when you start, finish, or get blocked
   on a task, and when you change something other agents depend on. If you are
   subscribed to more than one chat channel, post to the one most relevant to

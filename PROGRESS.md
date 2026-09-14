@@ -152,6 +152,19 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-14: agentbus wait, v0.10.0 release
+
+Pushed to `main`:
+
+- `agentbus wait`: a read-only blocking CLI wait for new messages, so an
+  agent can park a background shell instead of polling `receive` from model
+  turns (98d2f3c). Requested by Eric via tmi-ux on the `agentbus` channel.
+  Polls the database once per second; skill, protocol text, and the
+  `receive` tool description tell agents how to use it (a850486).
+- **v0.10.0 released** (2265571, tag v0.10.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.10.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (85131de).
+
 ## 2026-09-10 (evening): skill installed by init --global, v0.9.2 release
 
 Pushed to `main`:

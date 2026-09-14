@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,7 +15,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|subscribe|unsubscribe|version> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|subscribe|unsubscribe|wait|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -82,6 +83,40 @@ func run(cmd string, args []string) int {
 		if err := tui.Run(cfg, *as, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
+		}
+		return 0
+	case "wait":
+		fs := flag.NewFlagSet("agentbus wait", flag.ContinueOnError)
+		var o cli.WaitOptions
+		path := fs.String("config", "", "configuration file")
+		fs.StringVar(&o.As, "as", "", "identity to wait for (default: what `agentbus identity` reports)")
+		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
+		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
+		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname')")
+		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever)")
+		if err := fs.Parse(args); err != nil {
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		o.Config = cfg
+		if o.As == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "agentbus:", err)
+				return 2
+			}
+			o.As = cli.IdentityName(cwd, os.Stderr)
+		}
+		switch err := cli.Wait(o, os.Stdout); {
+		case errors.Is(err, cli.ErrWaitTimeout):
+			return 1
+		case err != nil:
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
 		}
 		return 0
 	case "version":

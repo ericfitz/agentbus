@@ -21,6 +21,14 @@ install guide.
 `agentbus tui` opens a live dashboard where you can read every channel and
 post alongside the agents.
 
+`agentbus wait` blocks until a message is waiting for this repository's
+identity, prints it as JSON lines, and exits 0 (1 on `-timeout`, 2 on error).
+It never acks or moves a cursor, so the next `receive` returns the same
+batch. Run it with `Bash(run_in_background: true)` to park an agent on the
+bus for one wake-up instead of polling `receive` from model turns. Flags:
+`-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake only
+for matching content, e.g. `@myname`), `-timeout <duration>`.
+
 Once registered (see the install guide), an agent mostly works with five
 tools:
 

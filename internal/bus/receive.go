@@ -492,7 +492,11 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	return res, nil
 }
 
-func queryMessages(tx *sql.Tx, q string, args []any) ([]Message, error) {
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func queryMessages(tx querier, q string, args []any) ([]Message, error) {
 	rows, err := tx.Query(q, args...)
 	if err != nil {
 		return nil, internal(err)

@@ -55,7 +55,7 @@ goes in `<repo>-memory`.
 | Starting a deployment | `<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
-| Question only the user can answer, while running autonomously | `<repo>` | The question; then `receive` with `wait_seconds` instead of stopping empty-handed |
+| Question only the user can answer, while running autonomously | `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell (or `receive` with `wait_seconds`) instead of stopping empty-handed |
 | Verified a non-obvious fact about this repo | `<repo>-memory` | Fact, how you verified it, workaround if any |
 | Verified a non-obvious fact about a tool, harness, or machine | `memory` | Same shape |
 | Cross-repo coordination | `general` | Only when more than one repo is involved |
@@ -94,6 +94,6 @@ outcome. The next session reads `history` on `<repo>` and has both.
 |---------|-----|
 | Posting repo facts to `memory` | Move to `<repo>-memory`. `memory` is for what holds across every repo. |
 | Re-deriving a known gotcha | `search` `<repo>-memory` first, in `both` mode. |
-| Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then `receive` with `wait_seconds`. |
+| Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then run `agentbus wait -filter @<name>` with `run_in_background: true` and `receive` when it exits. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |
 | Assuming you are alone | `discover` first. Another session may be editing the same package. |

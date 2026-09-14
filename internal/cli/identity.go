@@ -22,6 +22,12 @@ func Identity(cwd string, out io.Writer) error {
 }
 
 func identity(cwd string, out, warn io.Writer) error {
+	_, err := fmt.Fprint(out, identityLine(IdentityName(cwd, warn)))
+	return err
+}
+
+// IdentityName is the name identity would print, without the prompt.
+func IdentityName(cwd string, warn io.Writer) string {
 	name := filepath.Base(cwd)
 	f, err := repoconfig.Find(cwd)
 	switch {
@@ -36,8 +42,7 @@ func identity(cwd string, out, warn io.Writer) error {
 	default:
 		name = gitBaseOr(cwd, name)
 	}
-	_, err = fmt.Fprint(out, identityLine(name))
-	return err
+	return name
 }
 
 // gitBaseOr returns the basename of the nearest directory at or above cwd

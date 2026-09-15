@@ -152,6 +152,20 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-15: channel deletion, v0.11.0 release
+
+Pushed to `main`:
+
+- Channel deletion (1ae7528): `bus.DeleteChannel` refuses default channels
+  and channels with a live subscriber (error names the blockers), otherwise
+  drops the channel and all its messages. `agentbus delete-channel [-y]`
+  asks a permanent-loss y/N first; the TUI `d` key does the same with a
+  confirm line. Maintenance reaps empty channels with no live subscriber.
+  Design agreed in chat (no spec file).
+- **v0.11.0 released** (0ad07b0, tag v0.11.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.11.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (a3d24ac).
+
 ## 2026-09-14: agentbus wait, v0.10.0 release
 
 Pushed to `main`:

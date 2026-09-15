@@ -29,6 +29,12 @@ bus for one wake-up instead of polling `receive` from model turns. Flags:
 `-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake only
 for matching content, e.g. `@myname`), `-timeout <duration>`.
 
+`agentbus delete-channel <name>` permanently deletes a channel and every
+message in it after a y/N confirmation (`-y` skips it). It refuses the
+default channels and any channel with a live subscriber. The TUI's `d` key
+does the same. Empty channels with no live subscriber are reaped
+automatically by maintenance.
+
 Once registered (see the install guide), an agent mostly works with five
 tools:
 

@@ -139,3 +139,32 @@ func TestToggleSubscribe(t *testing.T) {
 		t.Fatal("s again resubscribes")
 	}
 }
+
+func TestDeleteChannelConfirm(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.key("d")
+	if f.m.mode != modeConfirmChannel || !strings.Contains(f.m.View(), "PERMANENTLY") {
+		t.Fatalf("d must open the confirm line; mode=%v", f.m.mode)
+	}
+	f.key("n")
+	if f.m.mode != modeNormal || f.m.selName() != "dev" {
+		t.Fatal("any other key cancels")
+	}
+	f.key("d")
+	f.key("y")
+	for _, c := range f.m.channels {
+		if c.Name == "dev" {
+			t.Fatal("dev not removed from the rail")
+		}
+	}
+	if _, err := f.ab.ListChannels(f.sam); err != nil {
+		t.Fatal(err)
+	}
+	chans, _ := f.ab.ListChannels(f.sam)
+	for _, c := range chans {
+		if c.Name == "dev" {
+			t.Fatal("dev still exists on the bus")
+		}
+	}
+}

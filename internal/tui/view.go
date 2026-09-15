@@ -236,6 +236,9 @@ func (m Model) renderReplyBanner() string {
 
 func (m Model) renderCompose() string {
 	th := m.theme
+	if m.mode == modeConfirmChannel {
+		return m.confirmChannelLine()
+	}
 	if m.prompt.active {
 		return th.Style(th.Agent).Render(m.prompt.label+" › ") + m.prompt.input.View()
 	}

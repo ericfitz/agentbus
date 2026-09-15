@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -116,4 +118,41 @@ func (m *Model) toggleSubscribe() tea.Cmd {
 		return m.showToast("subscribe: " + errText(err))
 	}
 	return nil
+}
+
+// updateConfirmChannel answers the delete-channel prompt: y deletes the
+// selected channel (the TUI's own subscription is excepted, since it
+// subscribes to every channel), any other key cancels.
+func (m *Model) updateConfirmChannel(msg tea.Msg) tea.Cmd {
+	k := keyString(msg)
+	if k == "" {
+		return nil
+	}
+	m.mode = modeNormal
+	ch := m.selected()
+	if k != "y" || ch == nil {
+		return nil
+	}
+	c := m.c
+	name := ch.Name
+	if _, err := c.b.DeleteChannel(name, c.as); err != nil {
+		return m.showToast("delete: " + errText(err))
+	}
+	c.forget(name)
+	m.channels = slices.DeleteFunc(m.channels, func(x bus.Channel) bool { return x.Name == name })
+	m.sel = min(m.sel, len(m.channels)-1)
+	return m.showToast("deleted channel " + name)
+}
+
+// confirmChannelLine is the compose-row text while modeConfirmChannel is up.
+func (m Model) confirmChannelLine() string {
+	ch := m.selected()
+	if ch == nil {
+		return ""
+	}
+	noun := "messages"
+	if ch.Kind == "memory" {
+		noun = "memories"
+	}
+	return m.theme.Style(m.theme.Error).Render(fmt.Sprintf("delete channel %s and PERMANENTLY destroy its %d %s? no undo · y yes  any other key no", ch.Name, ch.Messages, noun))
 }

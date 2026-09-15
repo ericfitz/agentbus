@@ -39,6 +39,7 @@ func (m Model) helpLines() []string {
 		{"r", "reply to the cursor message"},
 		{"c", "new channel: <name> [memory]"},
 		{"s", "subscribe / unsubscribe the channel"},
+		{"d", "delete the channel and all its messages (asks first)"},
 		{"/", "search (tab cycles text / semantic / both)"},
 		{"m", "memory browser"},
 		{"h", "health and config"},

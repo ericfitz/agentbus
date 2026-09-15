@@ -25,6 +25,7 @@ const (
 	modeHealth
 	modeHelp
 	modeConfirmDelete
+	modeConfirmChannel // d on the channel list; y deletes, anything else cancels
 )
 
 // pane is the focused main-screen region; tab and shift+tab cycle them and
@@ -281,6 +282,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateSearch(msg))
 	case modeMemories, modeConfirmDelete:
 		cmds = append(cmds, m.updateMemories(msg))
+	case modeConfirmChannel:
+		cmds = append(cmds, m.updateConfirmChannel(msg))
 	case modeHealth:
 		cmds = append(cmds, m.updateHealth(msg))
 	case modeHelp:
@@ -395,6 +398,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		return m.createChannelPrompt()
 	case "s":
 		return m.toggleSubscribe()
+	case "d":
+		if m.selected() != nil {
+			m.mode = modeConfirmChannel
+		}
 	case "/":
 		return m.openSearch()
 	case "m":

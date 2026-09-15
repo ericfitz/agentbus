@@ -77,6 +77,7 @@ func (b *Bus) Tick(ctx context.Context) {
 				return int(n), nil
 			})
 		}},
+		{"empty channels", b.reapEmptyChannels},
 		{"capacity", func() error { return b.evictToBudget(tickCtx, deadline) }},
 		{"vacuum", func() error {
 			_, err := b.db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumPages))

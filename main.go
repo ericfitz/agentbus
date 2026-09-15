@@ -15,7 +15,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|identity|subscribe|unsubscribe|wait|version> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -151,6 +151,25 @@ func run(cmd string, args []string) int {
 			return 1
 		}
 		if err := cli.Reset(cfg, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "delete-channel":
+		fs := flag.NewFlagSet("agentbus delete-channel", flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		yes := fs.Bool("y", false, "skip the confirmation prompt")
+		if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: agentbus delete-channel [-y] <channel>")
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		cwd, _ := os.Getwd()
+		if err := cli.DeleteChannel(cfg, cwd, fs.Arg(0), *yes, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}

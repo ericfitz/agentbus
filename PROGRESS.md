@@ -152,6 +152,25 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (later): TUI layout, threads, v1.0.0 release
+
+Pushed to `main`:
+
+- TUI layout: sessions under channels in one left column at 20% of the
+  screen (16-column floor) with a vertical border; emoji rail icons with
+  U+FE0F (chat, memory, agent, user, idle). Robot face was dropped because
+  Source Code Pro ships its own glyph at U+1F916 (19d7191).
+- Threaded stream: threads sort by newest message, `space` expands the
+  direct replies of the cursor message, live replies peek under a collapsed
+  thread, root summary line carries the thread time. Whole-row selection
+  highlight (`Theme.Highlight`), default selection color blue, TUI starts on
+  the channel list (e970462).
+- **v1.0.0 released** (206985d, tag v1.0.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. The tagged source
+  default of `Version` reads 0.13.0 (the binary reports 1.0.0 via ldflags);
+  corrected on main right after.
+
 ## 2026-09-16: receive polling guard, register others, v0.12.0 release
 
 Pushed to `main`:

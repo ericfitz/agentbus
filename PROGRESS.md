@@ -152,6 +152,21 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (evening): gear icon restored, receive self-heals, v1.0.2 release
+
+Pushed to `main`:
+
+- Robot icon reverted: Source Code Pro draws its own U+1F916 glyph even
+  with U+FE0F. The gear stays, followed by CSI 1C (cursor forward one), so
+  the terminal's one-cell advance and lipgloss's two-cell count agree and
+  the rail border lines up (462b4d7). Verified in Terminal.app.
+- Only the MCP server runs `Tick`, so the v1.0.1 orphan sweep never ran in
+  a TUI-only process. `receiveOnce` now deletes a subscription whose channel
+  no longer exists and continues (cadc354^).
+- **v1.0.2 released** (cadc354, tag v1.0.2):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.2);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2f2ac83).
+
 ## 2026-09-16 (later again): orphaned subscriptions, robot icon, v1.0.1 release
 
 Pushed to `main`:

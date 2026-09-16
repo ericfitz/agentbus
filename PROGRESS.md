@@ -152,6 +152,22 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (night): arrows stay in pane, TUI exempt from polling guard, v1.0.3 release
+
+Pushed to `main`:
+
+- TUI normal mode: arrows never change pane. Up/down move within the
+  focused pane; right shows the cursor message's direct replies; left hides
+  its whole subtree. Enter replies to the cursor message in the stream and
+  opens compose from the channel list. Tab/shift+tab/home move panes
+  (5274c44).
+- The TUI receive loop long-polls forever by design, but the bus counted
+  its empty waits as agent polling and errored after three. A
+  `ReceiveInput.NoPollGuard` flag, hidden from MCP, exempts it (5274c44).
+- **v1.0.3 released** (f9e3b4e, tag v1.0.3):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.3);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (8b82728).
+
 ## 2026-09-16 (evening): gear icon restored, receive self-heals, v1.0.2 release
 
 Pushed to `main`:

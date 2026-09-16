@@ -152,6 +152,22 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (later again): orphaned subscriptions, robot icon, v1.0.1 release
+
+Pushed to `main`:
+
+- `reapEmptyChannels` left stale sessions' subscription rows behind when it
+  dropped an empty channel; a resumed session then failed every receive with
+  "internal: sql: no rows in result set" (the TUI toast). The reaper now
+  deletes subscriptions to missing channels in the same transaction, so old
+  databases heal on the next tick (1ceffcd^).
+- Agent session icon is U+1F916 robot (with U+FE0F) instead of U+2699 gear:
+  the gear is Neutral width, drawn two cells but advanced one, eating the
+  following space and shifting the rail border. Not yet eyeballed in a TTY.
+- **v1.0.1 released** (1ceffcd, tag v1.0.1):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.1);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (1b7cb9f).
+
 ## 2026-09-16 (later): TUI layout, threads, v1.0.0 release
 
 Pushed to `main`:

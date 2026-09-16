@@ -322,7 +322,7 @@ func (m Model) viewMemories() string {
 		title := strings.SplitN(x.Content, "\n", 2)[0]
 		line := fmt.Sprintf("#%d r%d %s %s", id, rev, title, dim.Render(clock(x.CreatedAt)))
 		if i == m.mem.cursor {
-			line = th.Style(th.Agent).Render("› ") + line
+			line = th.Style(th.Agent).Render(markSel+" ") + line
 		} else {
 			line = "  " + line
 		}

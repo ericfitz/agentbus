@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -45,7 +46,7 @@ func TestThreadsOrderCollapseAndExpandOneLevel(t *testing.T) {
 		t.Fatalf("one level expanded %v hidden=%d", got, rs[2].hidden)
 	}
 	v := f.m.renderStream()
-	if !strings.Contains(v, "▸ 1 reply") {
+	if !strings.Contains(ansi.Strip(v), markSel+" ") || !strings.Contains(v, "1 reply") || !strings.Contains(ansi.Strip(v), markOpen+" ") {
 		t.Fatalf("summary line missing:\n%s", v)
 	}
 }
@@ -74,7 +75,7 @@ func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
 	}
 	f.key("esc")
 	f.key("tab") // cursor on the last row, A2
-	f.key("up")    // root A
+	f.key("up")  // root A
 	f.key(" ")
 	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1", ">A2"}) {
 		t.Fatalf("space on the root shows direct children only: %v", got)

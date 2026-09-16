@@ -11,6 +11,7 @@ type row struct {
 	msg    bus.Message
 	depth  int   // 0 for a thread root, +1 per reply level
 	hidden int   // descendants not shown under this row (a summary line follows)
+	open   bool  // at least one direct reply is shown under this row
 	latest int64 // newest created_at in the thread; set on root rows only
 	newest int64 // newest seq in the thread; set on root rows only
 	root   int64 // seq of the thread root
@@ -75,6 +76,7 @@ func (m *Model) rows(ch string) []row {
 		out = append(out, r)
 		for _, c := range children[x.Seq] {
 			if m.expanded[x.Seq] || onPath[c.Seq] {
+				out[at].open = true
 				walk(c, depth+1, onPath)
 			} else {
 				out[at].hidden += size(c.Seq)

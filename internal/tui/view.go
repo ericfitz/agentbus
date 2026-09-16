@@ -127,7 +127,7 @@ func (m Model) renderRails() string {
 			line += dim.Render(" (off)")
 		}
 		if i == m.sel {
-			line = th.Highlight("›"+line, rail)
+			line = th.Highlight(markSel+line, rail)
 		} else {
 			line = " " + line
 		}
@@ -222,11 +222,16 @@ func (m *Model) renderStream() string {
 		if x.Sender == m.c.as {
 			name = th.Style(th.User).Render(x.Sender)
 		}
-		// The reply prefix is applied after wrapping so every wrapped line of
-		// the message sits at the same tree depth as its first line.
+		// The tree prefix (indent plus expand/collapse marker) is applied
+		// after wrapping so every wrapped line sits at the row's depth.
 		prefix := strings.Repeat("  ", r.depth)
-		if r.depth > 0 {
-			prefix += dim.Render("↳ ")
+		switch {
+		case r.hidden > 0:
+			prefix += dim.Render(markSel + " ")
+		case r.open:
+			prefix += dim.Render(markOpen + " ")
+		default:
+			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
 		head := dim.Render(clock(x.CreatedAt)) + " " + name + " "
@@ -237,9 +242,9 @@ func (m *Model) renderStream() string {
 			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
 		}
 		if r.hidden > 0 {
-			summary := "▸ " + strconv.Itoa(r.hidden) + " replies"
+			summary := strconv.Itoa(r.hidden) + " replies"
 			if r.hidden == 1 {
-				summary = "▸ 1 reply"
+				summary = "1 reply"
 			}
 			if r.depth == 0 {
 				summary += " · " + clock(r.latest)
@@ -260,6 +265,13 @@ func (m *Model) renderStream() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// markSel marks the selected list item and a message whose replies can be
+// expanded; markOpen marks a message whose replies are shown.
+const (
+	markSel  = "\u25b6" // ▶
+	markOpen = "\u25bc" // ▼
+)
+
 func (m Model) renderReplyBanner() string {
 	th := m.theme
 	r := m.replyTo
@@ -267,7 +279,7 @@ func (m Model) renderReplyBanner() string {
 	if rs := []rune(quote); len(rs) > 40 {
 		quote = string(rs[:40]) + "…"
 	}
-	return th.Style(th.Dim).Render("↳ replying to ") + th.Style(th.Agent).Render(r.Sender) + th.Style(th.Dim).Render(" #"+itoa(r.Seq)+" “"+quote+"”  esc cancel")
+	return th.Style(th.Dim).Render("replying to ") + th.Style(th.Agent).Render(r.Sender) + th.Style(th.Dim).Render(" #"+itoa(r.Seq)+" “"+quote+"”  esc cancel")
 }
 
 func (m Model) renderCompose() string {
@@ -291,7 +303,7 @@ func (m Model) renderCompose() string {
 	}
 	prompt := label + th.Style(th.Dim).Render(" › ")
 	if m.mode != modeInsert {
-		prompt = label + th.Style(th.Dim).Render(" ▸ ")
+		prompt = label + th.Style(th.Dim).Render(" "+markSel+" ")
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, prompt, m.compose.View(), hint)
 }

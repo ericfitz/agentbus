@@ -156,7 +156,7 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 		t.Fatalf("segments after a reset lost the selection background: %q", first)
 	}
 	rail := strings.SplitN(f.m.renderRails(), "\n", 3)[1]
-	if !strings.Contains(rail, "›") || !strings.Contains(rail, "44m") {
+	if !strings.Contains(rail, markSel) || !strings.Contains(rail, "44m") {
 		t.Fatalf("selected channel row lost the background: %q", rail)
 	}
 	if f.m.theme.Sel == f.m.theme.Dim {

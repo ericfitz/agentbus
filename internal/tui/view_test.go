@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/muesli/termenv"
 )
@@ -160,5 +161,34 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 	}
 	if f.m.theme.Sel == f.m.theme.Dim {
 		t.Fatal("selection background must differ from the dim text color")
+	}
+}
+
+// TestReplyIndentAppliesToWrappedLines: a long reply wraps, and every
+// wrapped line keeps the reply's tree indentation, not just the first.
+func TestReplyIndentAppliesToWrappedLines(t *testing.T) {
+	f := newFixture(t)
+	a := f.agentSend(t, "dev", "A")
+	f.agentReply(t, "dev", a.Seq, strings.Repeat("word ", 30))
+	f.receive(t)
+	f.m.width = 60
+	f.m.layout()
+	f.key("esc")
+	f.key("tab")
+	f.key("up")
+	f.key("right")
+	var reply []string
+	for _, l := range strings.Split(f.m.renderStream(), "\n") {
+		if strings.Contains(l, "word") {
+			reply = append(reply, ansi.Strip(l))
+		}
+	}
+	if len(reply) < 2 {
+		t.Fatalf("reply did not wrap: %q", reply)
+	}
+	for _, l := range reply[1:] {
+		if !strings.HasPrefix(l, "    ") {
+			t.Fatalf("wrapped reply line lost its indent: %q", l)
+		}
 	}
 }

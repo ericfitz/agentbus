@@ -222,11 +222,14 @@ func (m *Model) renderStream() string {
 		if x.Sender == m.c.as {
 			name = th.Style(th.User).Render(x.Sender)
 		}
+		// The reply prefix is applied after wrapping so every wrapped line of
+		// the message sits at the same tree depth as its first line.
 		prefix := strings.Repeat("  ", r.depth)
 		if r.depth > 0 {
 			prefix += dim.Render("↳ ")
 		}
-		head := prefix + dim.Render(clock(x.CreatedAt)) + " " + name + " "
+		pw := lipgloss.Width(prefix)
+		head := dim.Render(clock(x.CreatedAt)) + " " + name + " "
 		indent := strings.Repeat(" ", lipgloss.Width(head))
 		body := strings.ReplaceAll(x.Content, "\n", "\n"+indent)
 		line := head + body
@@ -243,7 +246,8 @@ func (m *Model) renderStream() string {
 			}
 			line += "\n" + indent + dim.Render(summary)
 		}
-		line = lipgloss.NewStyle().Width(w).Render(line)
+		line = lipgloss.NewStyle().Width(w - pw).Render(line)
+		line = prefix + strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", pw))
 		if i == m.cursor && m.mode == modeNormal {
 			line = th.Highlight(line, w)
 		}

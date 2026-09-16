@@ -94,7 +94,7 @@ type Theme struct {
 
 // DefaultTheme is the built-in "default" theme and the per-value fallback.
 func DefaultTheme() Theme {
-	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Health: "green", Warn: "yellow", Error: "red", Selection: "brightblack"}
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
 }
 
 // Colors lists the theme's values as (key, value) pairs in a fixed order,

@@ -40,7 +40,15 @@ func newFixture(t *testing.T) *fixture {
 	f.m = New(c, LoadTheme(cfg, io.Discard))
 	f.m.width, f.m.height = 100, 32
 	f.run(f.m.Init())
+	f.key("i") // the TUI starts on the channel list; most tests type first
 	return f
+}
+
+func TestStartsOnChannelList(t *testing.T) {
+	f := newFixture(t)
+	if m := New(f.c, f.m.theme); m.mode != modeNormal || m.pane() != paneChannels {
+		t.Fatalf("mode=%v pane=%v", m.mode, m.pane())
+	}
 }
 
 // Timers (status tick, toast clear) would sleep for real inside run; tests
@@ -79,6 +87,8 @@ func (f *fixture) key(k string) {
 	switch k {
 	case "enter":
 		f.send(tea.KeyMsg{Type: tea.KeyEnter})
+	case " ":
+		f.send(tea.KeyMsg{Type: tea.KeySpace})
 	case "esc":
 		f.send(tea.KeyMsg{Type: tea.KeyEsc})
 	case "tab":
@@ -160,9 +170,6 @@ func TestInitSelectsFirstChannelAndLoadsHistory(t *testing.T) {
 	}
 	if f.m.unread("dev") != 0 {
 		t.Fatalf("history is not unread, got %d", f.m.unread("dev"))
-	}
-	if f.m.mode != modeInsert {
-		t.Fatalf("start in insert mode, got %v", f.m.mode)
 	}
 }
 

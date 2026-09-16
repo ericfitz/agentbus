@@ -104,7 +104,7 @@ func (m Model) renderHeader() string {
 // the container caps the row count the same way, for more rows than fit.
 func (m Model) renderRails() string {
 	th := m.theme
-	dim, sel := th.Style(th.Dim), lipgloss.NewStyle().Background(th.Sel)
+	dim := th.Style(th.Dim)
 	rail := m.railWidth()
 	trunc := lipgloss.NewStyle().MaxWidth(rail)
 	var l strings.Builder
@@ -122,11 +122,7 @@ func (m Model) renderRails() string {
 			line += dim.Render(" (off)")
 		}
 		if i == m.sel {
-			line = th.Style(th.Agent).Render("›") + line
-			if pad := rail - 1 - lipgloss.Width(line); pad > 0 {
-				line += strings.Repeat(" ", pad)
-			}
-			line = sel.Render(line)
+			line = th.Highlight("›"+line, rail)
 		} else {
 			line = " " + line
 		}
@@ -203,34 +199,48 @@ func (m *Model) renderStream() string {
 	sort.Slice(gaps, func(i, j int) bool { return gaps[i].From < gaps[j].From })
 	var b strings.Builder
 	lineNum := 0
-	gi := 0
-	for i, x := range ms {
-		for gi < len(gaps) && gaps[gi].To < x.Seq {
-			b.WriteString(divider(itoa(gaps[gi].To-gaps[gi].From+1)+" evicted") + "\n")
-			lineNum++
-			gi++
-		}
-		if m.divider >= 0 && x.Seq > m.divider && (i == 0 || ms[i-1].Seq <= m.divider) {
+	// Threads reorder messages, so a seq range no longer maps to one place
+	// in the stream: evicted gaps are listed at the top.
+	for _, g := range gaps {
+		b.WriteString(divider(itoa(g.To-g.From+1)+" evicted") + "\n")
+		lineNum++
+	}
+	newShown := m.divider < 0
+	for i, r := range m.rows(ch) {
+		x := r.msg
+		if !newShown && r.depth == 0 && r.newest > m.divider {
 			b.WriteString(divider("new") + "\n")
 			lineNum++
+			newShown = true
 		}
 		name := th.Style(th.Agent).Render(x.Sender)
 		if x.Sender == m.c.as {
 			name = th.Style(th.User).Render(x.Sender)
 		}
-		head := dim.Render(clock(x.CreatedAt)) + " " + name + " "
+		prefix := strings.Repeat("  ", r.depth)
+		if r.depth > 0 {
+			prefix += dim.Render("↳ ")
+		}
+		head := prefix + dim.Render(clock(x.CreatedAt)) + " " + name + " "
 		indent := strings.Repeat(" ", lipgloss.Width(head))
 		body := strings.ReplaceAll(x.Content, "\n", "\n"+indent)
 		line := head + body
-		if x.ReplyTo != nil {
-			line += "\n" + indent + dim.Render("↳ re #"+itoa(*x.ReplyTo))
-		}
 		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
 			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
 		}
+		if r.hidden > 0 {
+			summary := "▸ " + strconv.Itoa(r.hidden) + " replies"
+			if r.hidden == 1 {
+				summary = "▸ 1 reply"
+			}
+			if r.depth == 0 {
+				summary += " · " + clock(r.latest)
+			}
+			line += "\n" + indent + dim.Render(summary)
+		}
 		line = lipgloss.NewStyle().Width(w).Render(line)
 		if i == m.cursor && m.mode == modeNormal {
-			line = lipgloss.NewStyle().Background(th.Sel).Width(w).Render(line)
+			line = th.Highlight(line, w)
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum
@@ -264,10 +274,10 @@ func (m Model) renderCompose() string {
 	hint := ""
 	if ch != nil {
 		if ch.Kind == "memory" {
-			label = th.Style(th.Mem).Render("◆ " + ch.Name)
+			label = th.Style(th.Mem).Render(iconMem + ch.Name)
 			hint = th.Style(th.Dim).Render("  ⏎ new memory")
 		} else {
-			label = th.Style(th.Agent).Render(ch.Name)
+			label = th.Style(th.Agent).Render(iconChat + ch.Name)
 		}
 	}
 	prompt := label + th.Style(th.Dim).Render(" › ")

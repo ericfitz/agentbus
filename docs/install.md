@@ -264,7 +264,7 @@ before the TUI starts.
 | `health` | live heartbeat dot, ok states | `green` |
 | `warn` | warnings such as the text-only search badge | `yellow` |
 | `error` | errors and the delete confirmation | `red` |
-| `selection` | selected row background | `brightblack` |
+| `selection` | selected row background | `blue` |
 
 The health overlay (`h`) shows the log file path, the theme in use with
 each resolved value, and the loaded config. `o` opens the config file in

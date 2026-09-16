@@ -36,6 +36,7 @@ func (m Model) helpLines() []string {
 		{"→ / ←", "expand the channel into its messages / collapse back"},
 		{"pgup / pgdn", "scroll (pgup at the top loads older history)"},
 		{"g / G", "oldest / newest"},
+		{"space", "show / hide the replies under the cursor message"},
 		{"r", "reply to the cursor message"},
 		{"c", "new channel: <name> [memory]"},
 		{"s", "subscribe / unsubscribe the channel"},

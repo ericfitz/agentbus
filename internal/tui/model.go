@@ -71,8 +71,10 @@ type Model struct {
 	loaded     map[string]bool
 	seen       map[string]int64
 	divider    int64
-	cursor     int
-	cursorLine int // rendered line index of msgs[selName()][cursor]'s first line, from renderStream; -1 with no cursor
+	cursor     int             // index into rows(selName()), the visible display order; -1 for none
+	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
+	expanded   map[int64]bool  // message seq -> its direct replies are shown
+	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
 	stream     viewport.Model
 	follow     bool
 
@@ -109,14 +111,15 @@ func New(c *client, th Theme) Model {
 	// itself on every message forever); fine for the real async runtime, but
 	// it never terminates, so a static cursor is used instead.
 	ta.Cursor.SetMode(cursor.CursorStatic)
-	ta.Focus()
 	return Model{
 		c:            c,
 		theme:        th,
-		mode:         modeInsert,
+		mode:         modeNormal, // channel list focused; i or enter opens compose
 		sel:          -1,
 		cursor:       -1,
 		cursorLine:   -1,
+		expanded:     map[int64]bool{},
+		peek:         map[int64]int64{},
 		divider:      -1,
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
@@ -184,8 +187,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded[msg.channel] = true
 		// A prepend shifts indices; keep the cursor on the same message.
 		var cursorSeq int64
-		if ms := m.msgs[msg.channel]; msg.channel == m.selName() && m.cursor >= 0 && m.cursor < len(ms) {
-			cursorSeq = ms[m.cursor].Seq
+		if rs := m.rows(msg.channel); msg.channel == m.selName() && m.cursor >= 0 && m.cursor < len(rs) {
+			cursorSeq = rs[m.cursor].msg.Seq
 		}
 		// A pgup-at-top prepend grows the content above what's on screen;
 		// remember the line count so the offset can grow by the same
@@ -383,12 +386,14 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "G":
 		m.follow = true
 		m.stream.GotoBottom()
+	case " ":
+		m.toggleExpand()
 	case "r":
-		if ms := m.msgs[m.selName()]; m.cursor >= 0 && m.cursor < len(ms) {
-			target := ms[m.cursor]
+		if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
+			target := rs[m.cursor].msg
 			m.replyTo = &target
-		} else if n := len(ms); n > 0 {
-			target := ms[n-1]
+		} else if n := len(rs); n > 0 {
+			target := rs[n-1].msg
 			m.replyTo = &target
 		}
 		m.layout()
@@ -454,7 +459,7 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	if p == paneStream {
 		m.mode = modeNormal
 		m.compose.Blur()
-		if n := len(m.msgs[m.selName()]); m.cursor < 0 || m.cursor >= n {
+		if n := len(m.rows(m.selName())); m.cursor < 0 || m.cursor >= n {
 			m.cursor = n - 1
 		}
 		return m.moveCursor(0)
@@ -474,7 +479,7 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 // moveCursor moves the normal-mode stream cursor and scrolls to keep it
 // visible (refreshStream renders the cursor row highlighted).
 func (m *Model) moveCursor(d int) tea.Cmd {
-	n := len(m.msgs[m.selName()])
+	n := len(m.rows(m.selName()))
 	if n == 0 {
 		m.cursor = -1
 		return nil
@@ -489,8 +494,8 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
 // it is not loaded) and scrolls just enough to bring it into view.
 func (m *Model) placeCursor(seq int64) {
-	for i, x := range m.msgs[m.selName()] {
-		if x.Seq == seq {
+	for i, r := range m.rows(m.selName()) {
+		if r.msg.Seq == seq {
 			m.cursor = i
 		}
 	}
@@ -628,6 +633,9 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 	}
 	for ch, ms := range byCh {
 		m.addMessages(ch, ms)
+		for _, x := range ms {
+			m.peekReply(ch, x)
+		}
 	}
 	for _, g := range res.Gaps {
 		m.gaps[g.Channel] = append(m.gaps[g.Channel], g)

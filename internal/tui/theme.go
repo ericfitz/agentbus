@@ -96,3 +96,14 @@ func (t *Theme) set(key string, c lipgloss.TerminalColor) {
 func (t Theme) Style(c lipgloss.TerminalColor) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
+
+// Highlight renders line on the selection background. Styled segments
+// inside the line end with a reset that would drop the background for the
+// rest of that line, so the background is re-applied after every reset.
+func (t Theme) Highlight(line string, width int) string {
+	bg := lipgloss.NewStyle().Background(t.Sel)
+	if pre, _, ok := strings.Cut(bg.Render("\x00"), "\x00"); ok && pre != "" {
+		line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+pre)
+	}
+	return bg.Width(width).Render(line)
+}

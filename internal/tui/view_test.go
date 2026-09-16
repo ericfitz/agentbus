@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/muesli/termenv"
 )
 
 func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
@@ -133,5 +135,30 @@ func TestFmtBytes(t *testing.T) {
 	}
 	if got := fmtBytes(2 << 30); got != "2.0 GiB" {
 		t.Fatal(got)
+	}
+}
+
+// A selected row must keep its background across every styled segment: the
+// inner timestamp and sender styles end with a reset, which used to drop the
+// highlight for the rest of the first line.
+func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello from sam")
+	f.receive(t)
+	f.key("esc")
+	f.key("right") // focus the stream: cursor lands on the last message
+	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
+	if !strings.Contains(first, "Sam") || strings.Count(first, "44m") < 3 {
+		t.Fatalf("segments after a reset lost the selection background: %q", first)
+	}
+	rail := strings.SplitN(f.m.renderRails(), "\n", 3)[1]
+	if !strings.Contains(rail, "›") || !strings.Contains(rail, "44m") {
+		t.Fatalf("selected channel row lost the background: %q", rail)
+	}
+	if f.m.theme.Sel == f.m.theme.Dim {
+		t.Fatal("selection background must differ from the dim text color")
 	}
 }

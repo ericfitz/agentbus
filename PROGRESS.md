@@ -152,6 +152,18 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (late night): wrapped reply indentation, v1.0.4 release
+
+Pushed to `main`:
+
+- The reply prefix was part of the text handed to the wrapper, so wrapped
+  lines of a reply started at column 0. The message now wraps in the width
+  left after the prefix, and every line gets the prefix or a matching pad
+  (ad681f2).
+- **v1.0.4 released** (c7e22f3, tag v1.0.4):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.4);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (f8df08e).
+
 ## 2026-09-16 (night): arrows stay in pane, TUI exempt from polling guard, v1.0.3 release
 
 Pushed to `main`:

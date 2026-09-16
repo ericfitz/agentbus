@@ -152,6 +152,20 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16: receive polling guard, register others, v0.12.0 release
+
+Pushed to `main`:
+
+- `receive` rejects `wait_seconds` above `receive_max_wait_seconds` (naming
+  `agentbus wait`) instead of clamping, and three consecutive empty waited
+  receives from one identity return a `polling` error until a message is
+  delivered. `register` returns the other live identities in `others`. Tool
+  descriptions, hook text, embedded skill, and ADR 0003 item 9 revised
+  (ac18210).
+- **v0.12.0 released** (fb99f2e, tag v0.12.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.12.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (7ac6fc8).
+
 ## 2026-09-15: channel deletion, v0.11.0 release
 
 Pushed to `main`:

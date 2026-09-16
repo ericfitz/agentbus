@@ -110,7 +110,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Post to your subscribed chat channel",
 		"- Search all your subscribed memory channels",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
-		"- Call discover before assuming you are the only agent working.",
+		"- Register returns the other live agents in \"others\"; call discover only to",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)

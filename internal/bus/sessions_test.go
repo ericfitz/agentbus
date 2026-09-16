@@ -225,3 +225,16 @@ func TestDiscoverTrimsToWholeRecordPrefix(t *testing.T) {
 		t.Fatalf("serialized discover result (%d bytes) exceeds result_default_kib plus one record's framing", len(j))
 	}
 }
+
+func TestRegisterReportsOtherLiveIdentities(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	r, err := b.Register("Kim", "", "repo", true)
+	if err != nil || len(r.Others) != 1 || r.Others[0].Sender != "Sam" {
+		t.Fatalf("register must list other live identities, not itself: %+v %v", r, err)
+	}
+	b.cfg.DiscoveryEnabled = false
+	if r, err := b.Register("Lee", "", "repo", true); err != nil || r.Others != nil {
+		t.Fatalf("others must be omitted when discovery is disabled: %+v %v", r, err)
+	}
+}

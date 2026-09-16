@@ -79,7 +79,8 @@ const protocol = `Then follow this protocol:
   Z"; "the spec for feature A says B, but I verified with <test> that the
   correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
   P worked."
-- Call discover before assuming you are the only agent working.
+- Register returns the other live agents in "others"; call discover only to
+  refresh that list before assuming you are the only agent working.
 `
 
 // identityLine is what the SessionStart hook prints: the register sentence

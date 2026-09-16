@@ -250,7 +250,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {
@@ -312,7 +312,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds waits for messages when none are available. To wait longer, run `agentbus wait` in a background shell instead of polling receive."},
+	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds (up to receive_max_wait_seconds) waits for messages when none are available; a larger value is rejected, and three consecutive empty waited receives return a polling error. To wait longer, run `agentbus wait` in a background shell instead of calling receive again."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})

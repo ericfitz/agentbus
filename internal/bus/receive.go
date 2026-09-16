@@ -57,6 +57,30 @@ type ReceiveResult struct {
 	Instruction string    `json:"instruction,omitempty"`
 }
 
+// pollingGuardEmptyWaits is how many consecutive empty waited receives an
+// identity may make before receive errors instead of returning an empty
+// result. Every empty wake-up costs the agent its whole context; the error
+// is the only signal strong enough to break a poll loop.
+const pollingGuardEmptyWaits = 3
+
+// notePoll records the outcome of a receive for the polling guard: delivered
+// resets as's count, empty increments it. Returns the new count.
+// ponytail: in-process map, per-process counts; move to the sessions table if
+// agents ever spread one identity across processes.
+func (b *Bus) notePoll(as string, delivered bool) int {
+	b.pollMu.Lock()
+	defer b.pollMu.Unlock()
+	if delivered {
+		delete(b.emptyWaits, as)
+		return 0
+	}
+	if b.emptyWaits == nil {
+		b.emptyWaits = map[string]int{}
+	}
+	b.emptyWaits[as]++
+	return b.emptyWaits[as]
+}
+
 func (b *Bus) Subscribe(as, channel, from string) error {
 	if err := b.auth(b.db, as); err != nil {
 		return err
@@ -154,7 +178,7 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 		return ReceiveResult{}, errf("validation", false, "wait_seconds must not be negative")
 	}
 	if in.WaitSeconds > b.cfg.ReceiveMaxWaitSeconds {
-		in.WaitSeconds = b.cfg.ReceiveMaxWaitSeconds
+		return ReceiveResult{}, errf("validation", false, "wait_seconds must not exceed %d; to wait longer run `agentbus wait -filter @%s` in a background shell instead of calling receive again", b.cfg.ReceiveMaxWaitSeconds, as)
 	}
 	// Wall-clock deadline: b.Now may be a test clock that does not advance.
 	deadline := time.Now().Add(time.Duration(in.WaitSeconds) * time.Second)
@@ -171,9 +195,15 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 			res.AckIgnored = ackIgnored
 		}
 		if err != nil || len(res.Messages) > 0 || len(res.Gaps) > 0 || len(res.Expired) > 0 || in.WaitSeconds == 0 {
+			if err == nil && len(res.Messages) > 0 {
+				b.notePoll(as, true)
+			}
 			return res, err
 		}
 		if time.Now().After(deadline) {
+			if b.notePoll(as, false) >= pollingGuardEmptyWaits {
+				return ReceiveResult{}, errf("polling", false, "%d consecutive waited receives returned nothing: you are polling. Stop calling receive to wait; run `agentbus wait -filter @%s` in a background shell and call receive when it exits", pollingGuardEmptyWaits, as)
+			}
 			return res, nil
 		}
 		in.Ack = "" // applied on the first pass only

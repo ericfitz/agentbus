@@ -156,11 +156,16 @@ would require.
    receipt check; the in-transaction re-check (and ruling 14) closes that.
    Rejected operations are free, which is trivial.
 
-9. **Over-cap `wait_seconds` on `receive` is clamped, not rejected.**
-   What: a `wait_seconds` above `receive_max_wait_seconds` is silently
-   reduced to the cap; a negative value is still a validation error.
-   Why: consistent with how `count` is clamped in `receive` and `history`.
-   Cost if wrong: a silent clamp instead of a loud error; trivial.
+9. **Over-cap `wait_seconds` on `receive` is rejected, and repeated empty
+   waits are an error.** (Revised 2026-09-15; originally clamped.)
+   What: a `wait_seconds` above `receive_max_wait_seconds` is a validation
+   error naming `agentbus wait`; three consecutive empty waited receives from
+   one identity return a `polling` error until a receive delivers a message.
+   Why: transcripts showed agents asking for 600 s, getting a silent 60 s
+   clamp and an empty result, and looping for hours; each wake-up resends the
+   whole context. An empty success never broke the loop; an error does.
+   Cost if wrong: an agent legitimately idling on `receive` must switch to
+   `agentbus wait`, which is the documented pattern anyway.
 
 10. **Redelivery replays the original batch membership and re-stamps pending
     endpoints.**

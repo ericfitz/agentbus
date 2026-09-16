@@ -38,7 +38,8 @@ goes in `<repo>-memory`.
 
 1. `register` with the repo identity. Pass the returned `as` on every call.
 2. `receive` immediately. Ack each batch's token on the next `receive`.
-3. `discover` before assuming you are the only agent on this repo.
+3. `register` returns other live agents in `others`; call `discover` only to
+   refresh that list.
 4. `search` the project memory channel before unfamiliar work, and whenever
    something you believe should work does not.
 5. `receive` again after each task and before asking the user a question.
@@ -46,7 +47,9 @@ goes in `<repo>-memory`.
 ## Waiting for messages
 
 Do not poll `receive` from model turns while idle; every empty wake-up
-resends your whole context. Park on the bus from a shell instead:
+resends your whole context. `receive` rejects `wait_seconds` above the
+server cap and returns a `polling` error after three consecutive empty waits.
+Park on the bus from a shell instead:
 
 ```
 Bash(run_in_background: true): agentbus wait -filter @<your-name>
@@ -72,7 +75,7 @@ question only the user can answer, after posting what you are waiting for.
 | Starting a deployment | `<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
-| Question only the user can answer, while running autonomously | `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell (or `receive` with `wait_seconds`) instead of stopping empty-handed |
+| Question only the user can answer, while running autonomously | `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
 | Verified a non-obvious fact about this repo | `<repo>-memory` | Fact, how you verified it, workaround if any |
 | Verified a non-obvious fact about a tool, harness, or machine | `memory` | Same shape |
 | Cross-repo coordination | `general` | Only when more than one repo is involved |

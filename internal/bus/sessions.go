@@ -18,6 +18,10 @@ type Registration struct {
 	// bus itself never sets them.
 	Subscribed      []string          `json:"subscribed"`
 	SubscribeFailed map[string]string `json:"subscribe_failed,omitempty"`
+	// Others lists the other live identities (what discover returns, minus
+	// this one), so a session need not call discover to learn it is not alone.
+	// Omitted when discovery is disabled.
+	Others []Session `json:"others,omitempty"`
 }
 
 type PendingChannel struct {
@@ -175,6 +179,18 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	}
 	_ = rows.Close()
 	reg.Resumed = reused || len(reg.Pending) > 0
+	if b.cfg.DiscoveryEnabled {
+		live, err := b.liveSessions(tx)
+		if err != nil {
+			return Registration{}, err
+		}
+		reg.Others = []Session{}
+		for _, s := range live {
+			if s.Sender != display {
+				reg.Others = append(reg.Others, s)
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)
 	}

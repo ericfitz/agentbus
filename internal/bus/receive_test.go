@@ -2,6 +2,7 @@ package bus
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -122,13 +123,50 @@ func TestReceiveWaitsThenReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestReceiveWaitSecondsClampedNotRejected(t *testing.T) {
+func TestReceiveWaitSecondsOverCapRejected(t *testing.T) {
 	b, _, kim := setupTwo(t)
 	b.cfg.ReceiveMaxWaitSeconds = 1
 	start := time.Now()
-	r, err := b.Receive(kim, ReceiveInput{WaitSeconds: 999})
-	if err != nil || len(r.Messages) != 0 || time.Since(start) < 900*time.Millisecond || time.Since(start) > 3*time.Second {
-		t.Fatalf("over-cap wait must be clamped, not rejected: %+v %v %v", r, err, time.Since(start))
+	_, err := b.Receive(kim, ReceiveInput{WaitSeconds: 999})
+	var be *Error
+	if !errors.As(err, &be) || be.Code != "validation" || !strings.Contains(be.Message, "agentbus wait") || time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("over-cap wait must be rejected immediately, naming agentbus wait: %v %v", err, time.Since(start))
+	}
+}
+
+// Three consecutive empty waited receives from one identity is polling: the
+// third errors (after waiting, so a loop still costs wall time) and keeps
+// erroring until a receive delivers something.
+func TestReceiveEmptyLongPollsTripPollingGuard(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ReceiveMaxWaitSeconds = 1
+	for i := 0; i < pollingGuardEmptyWaits-1; i++ {
+		if r, err := b.Receive(kim, ReceiveInput{WaitSeconds: 1}); err != nil || len(r.Messages) != 0 {
+			t.Fatalf("call %d: %+v %v", i, r, err)
+		}
+	}
+	// wait_seconds=0 receives never count.
+	if _, err := b.Receive(kim, ReceiveInput{}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err := b.Receive(kim, ReceiveInput{WaitSeconds: 1})
+	var be *Error
+	if !errors.As(err, &be) || be.Code != "polling" || !strings.Contains(be.Message, "agentbus wait") || time.Since(start) < 900*time.Millisecond {
+		t.Fatalf("third empty wait must trip the guard after waiting: %v %v", err, time.Since(start))
+	}
+	if _, err := b.Receive(kim, ReceiveInput{WaitSeconds: 1}); !errors.As(err, &be) || be.Code != "polling" {
+		t.Fatalf("guard must stay tripped: %v", err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Receive(kim, ReceiveInput{WaitSeconds: 1})
+	if err != nil || len(r.Messages) != 1 {
+		t.Fatalf("a delivered message must reset the guard: %+v %v", r, err)
+	}
+	if r, err := b.Receive(kim, ReceiveInput{Ack: r.Batch, WaitSeconds: 1}); err != nil || len(r.Messages) != 0 {
+		t.Fatalf("count restarts after delivery: %+v %v", r, err)
 	}
 }
 

@@ -43,6 +43,11 @@ type Bus struct {
 	// "serial within a process, concurrent across processes"). Held only
 	// across a hook's own Start..Wait, never while a DB transaction is open.
 	hookMu sync.Mutex
+
+	// pollMu guards emptyWaits, the polling guard's per-identity count of
+	// consecutive empty waited receives (see notePoll).
+	pollMu     sync.Mutex
+	emptyWaits map[string]int
 	// keyLocks serializes operations sharing the same (sender, idempotency
 	// key) process-local, keyed by lockKey, so two concurrent calls with an
 	// identical key cannot both miss the receipt check and both run the

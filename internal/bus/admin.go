@@ -19,7 +19,7 @@ type Status struct {
 }
 
 // liveSessions is the shared query behind Discover and StatusReport.
-func (b *Bus) liveSessions(db *sql.DB) ([]Session, error) {
+func (b *Bus) liveSessions(db querier) ([]Session, error) {
 	rows, err := db.Query("SELECT sender, context, registered_at FROM sessions WHERE heartbeat >= ? ORDER BY sender", b.nowMs()-attachmentExpiryMs)
 	if err != nil {
 		return nil, internal(err)

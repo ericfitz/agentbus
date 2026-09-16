@@ -149,7 +149,7 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 	f.agentSend(t, "dev", "hello from sam")
 	f.receive(t)
 	f.key("esc")
-	f.key("right") // focus the stream: cursor lands on the last message
+	f.key("tab") // focus the stream: cursor lands on the last message
 	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
 	if !strings.Contains(first, "Sam") || strings.Count(first, "44m") < 3 {
 		t.Fatalf("segments after a reset lost the selection background: %q", first)

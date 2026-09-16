@@ -217,9 +217,10 @@ separate process has no other way to learn it.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
   `shift+tab` move between the channel list, the message list, and the
   compose line; `home` returns to the channel list. `/` searches, `m` opens
-  the memory browser, `h` opens health and config, `q` quits. Arrow keys act
-  on the focused pane: `↑`/`↓` move within it, `→` expands the selected
-  channel into its messages, `←` collapses back to the channel list. Colors
+  the memory browser, `h` opens health and config, `q` quits. Arrow keys never
+  change pane: `↑`/`↓` move within the focused one, `→` shows the replies
+  under the selected message, `←` hides its whole subtree. `enter` replies to
+  the selected message, or opens compose from the channel list. Colors
   come from the `theme` and `themes` config settings; see below.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is

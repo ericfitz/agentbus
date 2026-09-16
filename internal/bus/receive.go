@@ -38,6 +38,9 @@ type ReceiveInput struct {
 	WaitSeconds int      `json:"wait_seconds,omitempty"`
 	Channels    []string `json:"channels,omitempty"`
 	IncludeOwn  bool     `json:"include_own,omitempty"`
+	// NoPollGuard exempts a caller that legitimately long-polls forever (the
+	// TUI's receive loop) from the polling guard. Not settable over MCP.
+	NoPollGuard bool `json:"-"`
 }
 
 type Gap struct {
@@ -201,7 +204,7 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 			return res, err
 		}
 		if time.Now().After(deadline) {
-			if b.notePoll(as, false) >= pollingGuardEmptyWaits {
+			if !in.NoPollGuard && b.notePoll(as, false) >= pollingGuardEmptyWaits {
 				return ReceiveResult{}, errf("polling", false, "%d consecutive waited receives returned nothing: you are polling. Stop calling receive to wait; run `agentbus wait -filter @%s` in a background shell and call receive when it exits", pollingGuardEmptyWaits, as)
 			}
 			return res, nil

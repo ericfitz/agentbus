@@ -342,9 +342,8 @@ func TestToastClearsOnKey(t *testing.T) {
 	}
 }
 
-// TestArrowsFollowTheFocusedPane: in the channel pane up/down move the
-// selection and right expands the channel into its messages; in the
-// message pane up/down move the cursor and left collapses back.
+// TestArrowsFollowTheFocusedPane: arrows act within the focused pane and
+// never change it; tab/home move between panes.
 func TestArrowsFollowTheFocusedPane(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "one")
@@ -358,20 +357,45 @@ func TestArrowsFollowTheFocusedPane(t *testing.T) {
 	}
 	f.key("right")
 	if f.m.pane() != paneChannels {
-		t.Fatal("right on a channel with no messages stays in the channel pane")
+		t.Fatal("right in the channel pane never changes pane")
 	}
 	f.key("up")
-	f.key("right")
+	f.key("tab")
 	if f.m.pane() != paneStream || f.m.cursor != 1 {
-		t.Fatalf("right expands dev onto its newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+		t.Fatalf("tab enters dev on its newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	}
+	f.key("left")
+	if f.m.pane() != paneStream {
+		t.Fatal("left in the message pane never changes pane")
 	}
 	f.key("up")
 	if f.m.cursor != 0 || f.m.selected().Name != "dev" {
 		t.Fatalf("up in the message pane moves the cursor, not the channel: cursor=%d sel=%v", f.m.cursor, f.m.selected())
 	}
-	f.key("left")
+	f.key("home")
 	if f.m.pane() != paneChannels || f.m.cursor != -1 {
-		t.Fatalf("left collapses back to the channel pane, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+		t.Fatalf("home returns to the channel pane, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	}
+}
+
+// TestEnterRepliesToTheCursorMessage: enter in the message pane replies to
+// the cursor message; in the channel pane it just opens compose.
+func TestEnterRepliesToTheCursorMessage(t *testing.T) {
+	f := newFixture(t)
+	one := f.agentSend(t, "dev", "one")
+	f.agentSend(t, "dev", "two")
+	f.receive(t)
+	f.key("esc")
+	f.key("enter")
+	if f.m.mode != modeInsert || f.m.replyTo != nil {
+		t.Fatalf("enter in the channel pane composes without a reply target, got mode=%v replyTo=%v", f.m.mode, f.m.replyTo)
+	}
+	f.key("esc")
+	f.key("tab")
+	f.key("up")
+	f.key("enter")
+	if f.m.mode != modeInsert || f.m.replyTo == nil || f.m.replyTo.Seq != one.Seq {
+		t.Fatalf("enter on a message replies to it, got mode=%v replyTo=%v", f.m.mode, f.m.replyTo)
 	}
 }
 
@@ -406,7 +430,7 @@ func TestNormalModeCursorScrollsIntoView(t *testing.T) {
 	f.m.height = 20
 	f.m.layout()
 	f.key("esc")
-	f.key("right") // into the message pane
+	f.key("tab") // into the message pane
 	for i := 0; i < 30; i++ {
 		f.key("up")
 	}

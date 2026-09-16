@@ -347,16 +347,25 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	switch keyString(msg) {
 	case "q":
 		return tea.Quit
-	case "i", "enter":
+	case "i":
+		m.mode = modeInsert
+		return m.compose.Focus()
+	// enter performs the pane's action: reply to the cursor message in the
+	// stream, compose to the selected channel otherwise.
+	case "enter":
+		if r, ok := m.cursorRow(); ok {
+			m.replyTo = &r.msg
+			m.layout()
+		}
 		m.mode = modeInsert
 		return m.compose.Focus()
 	case "esc":
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
-	// Arrows act on the focused pane: up/down move within it, right expands
-	// the selected channel into its messages, left collapses back to the
-	// channel list.
+	// Arrows never change pane: up/down move within the focused one, right
+	// shows the cursor message's direct replies, left hides its whole
+	// subtree.
 	case "down":
 		if m.pane() == paneStream {
 			return m.moveCursor(1)
@@ -368,13 +377,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 		return m.selectChannel(m.sel - 1)
 	case "right":
-		if m.pane() == paneChannels && len(m.msgs[m.selName()]) > 0 {
-			return m.focusPane(paneStream)
-		}
+		m.expandCursor()
 	case "left":
-		if m.pane() == paneStream {
-			return m.focusPane(paneChannels)
-		}
+		m.collapseCursor()
 	case "tab", "shift+tab", "home":
 		return m.paneKey(msg)
 	case "pgup", "pgdown":

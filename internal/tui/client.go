@@ -108,6 +108,7 @@ func (c *client) receiveLoop(send func(tea.Msg)) {
 			Count:       c.cfg.ReceiveMaxCount,
 			WaitSeconds: c.cfg.ReceiveMaxWaitSeconds,
 			IncludeOwn:  true,
+			NoPollGuard: true,
 		})
 		if err != nil {
 			if c.ctx.Err() != nil {

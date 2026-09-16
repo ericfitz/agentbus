@@ -126,15 +126,54 @@ func (m *Model) peekReply(ch string, x bus.Message) {
 	}
 }
 
-// toggleExpand shows or hides the direct replies of the cursor message.
-// Toggling drops the thread's peek so the user's choice is what shows.
-func (m *Model) toggleExpand() {
+// cursorRow returns the stream row under the normal-mode cursor.
+func (m *Model) cursorRow() (row, bool) {
 	rs := m.rows(m.selName())
 	if m.cursor < 0 || m.cursor >= len(rs) {
+		return row{}, false
+	}
+	return rs[m.cursor], true
+}
+
+// toggleExpand shows or hides the direct replies of the cursor message.
+func (m *Model) toggleExpand() {
+	if r, ok := m.cursorRow(); ok {
+		m.setExpanded(r, !m.expanded[r.msg.Seq])
+	}
+}
+
+// expandCursor shows the direct replies of the cursor message.
+func (m *Model) expandCursor() {
+	if r, ok := m.cursorRow(); ok {
+		m.setExpanded(r, true)
+	}
+}
+
+// collapseCursor hides everything under the cursor message, so a later
+// expand shows direct replies only.
+func (m *Model) collapseCursor() {
+	r, ok := m.cursorRow()
+	if !ok {
 		return
 	}
-	r := rs[m.cursor]
-	m.expanded[r.msg.Seq] = !m.expanded[r.msg.Seq]
+	under := map[int64]bool{r.msg.Seq: true}
+	for _, x := range m.msgs[m.selName()] { // seq order: a parent precedes its replies
+		if x.ReplyTo != nil && under[*x.ReplyTo] {
+			under[x.Seq] = true
+			delete(m.expanded, x.Seq)
+		}
+	}
+	m.setExpanded(r, false)
+}
+
+// setExpanded shows or hides r's direct replies. A change drops the
+// thread's peek so the user's choice is what shows.
+func (m *Model) setExpanded(r row, v bool) {
+	if v {
+		m.expanded[r.msg.Seq] = true
+	} else {
+		delete(m.expanded, r.msg.Seq)
+	}
 	delete(m.peek, r.root)
 	m.refreshStream()
 	m.scrollCursorIntoView()

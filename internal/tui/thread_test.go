@@ -73,7 +73,7 @@ func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
 		t.Fatalf("newest reply is the only peek: %v", got)
 	}
 	f.key("esc")
-	f.key("right") // cursor on the last row, A2
+	f.key("tab") // cursor on the last row, A2
 	f.key("up")    // root A
 	f.key(" ")
 	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1", ">A2"}) {
@@ -83,5 +83,37 @@ func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
 	f.key("r")
 	if f.m.replyTo == nil || f.m.replyTo.Content != "A1" {
 		t.Fatalf("r replies to the visible cursor row, got %+v", f.m.replyTo)
+	}
+}
+
+// TestLeftCollapsesTheWholeSubtree: right shows direct replies; left on the
+// root hides every level, so the next right shows direct replies only.
+func TestLeftCollapsesTheWholeSubtree(t *testing.T) {
+	f := newFixture(t)
+	a := f.agentSend(t, "dev", "A")
+	a1 := f.agentReply(t, "dev", a.Seq, "A1")
+	f.agentReply(t, "dev", a1.Seq, "A11")
+	f.receive(t)
+	f.key("esc")
+	f.key("tab") // cursor on the last row
+	f.key("up")
+	f.key("up") // root A
+	f.key("right")
+	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1"}) {
+		t.Fatalf("right on the root shows direct children only: %v", got)
+	}
+	f.key("down")
+	f.key("right")
+	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1", ">>A11"}) {
+		t.Fatalf("right on A1 shows A11: %v", got)
+	}
+	f.key("up")
+	f.key("left")
+	if got := contents(f.m.rows("dev")); !eq(got, []string{"A"}) {
+		t.Fatalf("left on the root hides the subtree: %v", got)
+	}
+	f.key("right")
+	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1"}) {
+		t.Fatalf("expand after a full collapse shows direct children only: %v", got)
 	}
 }

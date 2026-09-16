@@ -757,10 +757,7 @@ func errText(err error) string {
 func (m *Model) layout() {
 	w := m.width
 	if m.showLeft() {
-		w -= leftRail + 1
-	}
-	if m.showRight() {
-		w -= rightRail + 1
+		w -= m.railWidth() + 1
 	}
 	m.stream.Width = max(w, 20)
 	// header (1) is already subtracted below; divider and status bar are the
@@ -788,8 +785,3 @@ func (m *Model) fitCompose() {
 }
 
 func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
-
-const (
-	leftRail  = 18
-	rightRail = 22
-)

@@ -339,6 +339,6 @@ func (m Model) viewMemories() string {
 	if end-start < len(m.mem.list) {
 		count = fmt.Sprintf(" · showing %d-%d of %d memories", start+1, end, len(m.mem.list))
 	}
-	title := th.Style(th.Mem).Render("◆ "+m.mem.channel) + dim.Render(count)
+	title := th.Style(th.Mem).Render(iconMem+m.mem.channel) + dim.Render(count)
 	return m.overlay(title, th.Mem, b.String(), m.hints("e", "edit", "d", "delete", "← →", "revision", "↑↓", "move", "esc", "close"))
 }

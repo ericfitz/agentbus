@@ -17,7 +17,7 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	// Insert mode is the fixture's starting mode: the compose line reads
 	// "dev ›" and the status bar shows the insert-mode key hints.
 	v := f.m.View()
-	for _, want := range []string{"channels", "dev", "◆ dev-notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "esc commands", "alt+enter", "dev ›"} {
+	for _, want := range []string{"channels", "dev", iconMem + "dev-notes", "hello from sam", "Sam", "sessions", "eric", "as eric", "esc commands", "alt+enter", "dev ›"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}
@@ -101,9 +101,20 @@ func TestReplyBannerAndMemoryHint(t *testing.T) {
 func TestIdleSessionShowsAge(t *testing.T) {
 	f := newFixture(t)
 	f.m.sessionsSeen["codex"] = time.Now().Add(-14 * time.Minute)
-	_, right := f.m.renderRails()
-	if !strings.Contains(right, "○ codex") || !strings.Contains(right, "14m") {
-		t.Fatalf("rail:\n%s", right)
+	rail := f.m.renderRails()
+	if !strings.Contains(rail, iconIdle+"codex 14m") {
+		t.Fatalf("rail:\n%s", rail)
+	}
+}
+
+func TestRailIsFifthOfScreenWithFloor(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct{ width, rail int }{{60, 16}, {100, 20}, {200, 40}} {
+		f.m.width = tc.width
+		f.m.layout()
+		if f.m.stream.Width != tc.width-tc.rail-1 {
+			t.Errorf("width %d: stream %d, want %d", tc.width, f.m.stream.Width, tc.width-tc.rail-1)
+		}
 	}
 }
 

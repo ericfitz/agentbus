@@ -129,7 +129,7 @@ func (m Model) viewSearch() string {
 		hit := hits[i]
 		mark := "  "
 		if hit.MemoryID != nil {
-			mark = th.Style(th.Mem).Render("◆ ")
+			mark = th.Style(th.Mem).Render(iconMem)
 		}
 		rev := ""
 		if hit.Revision != nil {

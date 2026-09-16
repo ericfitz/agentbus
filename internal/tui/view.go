@@ -31,8 +31,21 @@ func clock(ms int64) string {
 	return t.Format("Jan 2")
 }
 
-func (m Model) showLeft() bool  { return m.width >= 60 }
-func (m Model) showRight() bool { return m.width >= 90 }
+func (m Model) showLeft() bool { return m.width >= 60 }
+
+// railWidth is the left column: a fifth of the screen, floored so channel
+// names stay readable at the 60-column minimum.
+func (m Model) railWidth() int { return max(m.width/5, 16) }
+
+// Rail icons. Each carries U+FE0F so the terminal draws the color emoji
+// even when its monospace font has its own glyph at that codepoint.
+const (
+	iconChat  = "\U0001F4AC\uFE0F " // speech balloon
+	iconMem   = "\U0001F4BE\uFE0F " // floppy disk
+	iconAgent = "\u2699\uFE0F "     // gear
+	iconUser  = "\U0001F9D1\uFE0F " // adult
+	iconIdle  = "\U0001F4A4\uFE0F " // sleeping sign
+)
 
 func (m Model) View() string {
 	if m.width == 0 {
@@ -49,18 +62,13 @@ func (m Model) View() string {
 		return m.viewHelp()
 	}
 	dim := m.theme.Style(m.theme.Dim)
-	left, right := m.renderRails()
 	header := m.renderHeader()
 	center := lipgloss.JoinVertical(lipgloss.Left, header, m.stream.View())
-	cols := []string{}
+	body := center
 	if m.showLeft() {
-		cols = append(cols, left, dim.Render("│"))
+		border := strings.TrimRight(strings.Repeat(dim.Render("│")+"\n", m.stream.Height+1), "\n")
+		body = lipgloss.JoinHorizontal(lipgloss.Top, m.renderRails(), border, center)
 	}
-	cols = append(cols, center)
-	if m.showRight() {
-		cols = append(cols, dim.Render("│"), right)
-	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	parts := []string{body, dim.Render(strings.Repeat("─", m.width))}
 	if m.replyTo != nil {
 		parts = append(parts, m.renderReplyBanner())
@@ -88,22 +96,23 @@ func (m Model) renderHeader() string {
 	return lipgloss.NewStyle().MaxWidth(m.stream.Width).Render(s)
 }
 
-// renderRails draws the channel list (left) and the session list (right).
-// Each row is truncated (never wrapped) to its rail's width via MaxWidth --
+// renderRails draws the left column: the channel list with the session list
+// under it, the two sharing the stream's height. Each row is truncated (never wrapped) to its rail's width via MaxWidth --
 // Style.Width word-wraps overlong content instead of clipping it, which would
 // silently grow the rail past the stream's height and push rows below it (the
 // compose line, the status bar) off the bottom of the screen. MaxHeight on
 // the container caps the row count the same way, for more rows than fit.
-func (m Model) renderRails() (string, string) {
+func (m Model) renderRails() string {
 	th := m.theme
-	dim, memc, sel := th.Style(th.Dim), th.Style(th.Mem), lipgloss.NewStyle().Background(th.Sel)
-	leftTrunc := lipgloss.NewStyle().MaxWidth(leftRail)
+	dim, sel := th.Style(th.Dim), lipgloss.NewStyle().Background(th.Sel)
+	rail := m.railWidth()
+	trunc := lipgloss.NewStyle().MaxWidth(rail)
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
 	for i, c := range m.channels {
-		mark := "  "
+		mark := iconChat
 		if c.Kind == "memory" {
-			mark = memc.Render("◆ ")
+			mark = iconMem
 		}
 		line := mark + c.Name
 		if n := m.unread(c.Name); n > 0 {
@@ -114,18 +123,16 @@ func (m Model) renderRails() (string, string) {
 		}
 		if i == m.sel {
 			line = th.Style(th.Agent).Render("›") + line
-			if pad := leftRail - 1 - lipgloss.Width(line); pad > 0 {
+			if pad := rail - 1 - lipgloss.Width(line); pad > 0 {
 				line += strings.Repeat(" ", pad)
 			}
 			line = sel.Render(line)
 		} else {
 			line = " " + line
 		}
-		l.WriteString(leftTrunc.Render(line) + "\n")
+		l.WriteString(trunc.Render(line) + "\n")
 	}
-	left := lipgloss.NewStyle().Width(leftRail).MaxHeight(m.stream.Height + 1).Render(l.String())
 
-	rightTrunc := lipgloss.NewStyle().MaxWidth(rightRail)
 	var r strings.Builder
 	r.WriteString(dim.Render("sessions") + "\n")
 	live := map[string]bus.Session{}
@@ -144,15 +151,25 @@ func (m Model) renderRails() (string, string) {
 			if n == m.c.as {
 				ctx, name = "you", th.Style(th.User).Render(n)
 			}
-			row = th.Style(th.Health).Render("● ") + name + " " + dim.Render(ctx)
+			icon := iconAgent
+			if n == m.c.as {
+				icon = iconUser
+			}
+			row = icon + name + " " + dim.Render(ctx)
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
-			row = th.Style(th.Warn).Render("○ ") + dim.Render(n+" "+shortDur(age))
+			row = iconIdle + dim.Render(n+" "+shortDur(age))
 		}
-		r.WriteString(rightTrunc.Render(row) + "\n")
+		r.WriteString(trunc.Render(row) + "\n")
 	}
-	right := lipgloss.NewStyle().Width(rightRail).MaxHeight(m.stream.Height + 1).Render(r.String())
-	return left, right
+	// Channels take what they need up to half the column; sessions get the
+	// rest, and a blank row separates the two lists.
+	total := m.stream.Height + 1
+	chanRows := min(len(m.channels)+1, max(total/2, total-len(names)-2))
+	channels := lipgloss.NewStyle().MaxHeight(chanRows).Render(l.String())
+	sessions := lipgloss.NewStyle().MaxHeight(max(total-chanRows-1, 1)).Render(r.String())
+	col := lipgloss.JoinVertical(lipgloss.Left, channels, "", sessions)
+	return lipgloss.NewStyle().Width(rail).MaxHeight(total).Render(col)
 }
 
 func shortDur(d time.Duration) string {

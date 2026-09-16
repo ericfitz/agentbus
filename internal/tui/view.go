@@ -40,11 +40,16 @@ func (m Model) railWidth() int { return max(m.width/5, 16) }
 // Rail icons. Each carries U+FE0F so the terminal draws the color emoji
 // even when its monospace font has its own glyph at that codepoint.
 const (
-	iconChat  = "\U0001F4AC\uFE0F " // speech balloon
-	iconMem   = "\U0001F4BE\uFE0F " // floppy disk
-	iconAgent = "\U0001F916\uFE0F " // robot; U+2699 gear is Neutral width, so terminals draw it two cells wide but advance one, eating the space
-	iconUser  = "\U0001F9D1\uFE0F " // adult
-	iconIdle  = "\U0001F4A4\uFE0F " // sleeping sign
+	iconChat = "\U0001F4AC\uFE0F " // speech balloon
+	iconMem  = "\U0001F4BE\uFE0F " // floppy disk
+	// ponytail: gear is Neutral width: Terminal.app draws it two cells wide but
+	// advances one, while lipgloss counts two. CSI 1C moves the cursor one
+	// cell (uncounted by lipgloss) so both agree; swap to a Wide emoji if a
+	// terminal that advances two ever matters. Robot U+1F916 was rejected:
+	// Source Code Pro ships its own glyph there and U+FE0F does not override it.
+	iconAgent = "\u2699\uFE0F\x1b[1C " // gear
+	iconUser  = "\U0001F9D1\uFE0F "    // adult
+	iconIdle  = "\U0001F4A4\uFE0F "    // sleeping sign
 )
 
 func (m Model) View() string {

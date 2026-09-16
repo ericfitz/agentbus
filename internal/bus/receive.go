@@ -313,6 +313,24 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	// Gaps: cursor below the channel's retention boundary. Resume from the
 	// oldest survivor and drop a now-unreachable pending batch for that channel.
 	gapsDeferred := false
+	// A subscription whose channel no longer exists (dropped by a reaper that
+	// predates the orphan sweep, or by any future path that misses it) is
+	// meaningless: delete it here rather than fail every receive forever.
+	kept := subs[:0]
+	for _, s := range subs {
+		var n int
+		if err := tx.QueryRow("SELECT count(*) FROM channels WHERE name=?", s.channel).Scan(&n); err != nil {
+			return res, internal(err)
+		}
+		if n == 0 {
+			if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel=?", as, s.channel); err != nil {
+				return res, internal(err)
+			}
+			continue
+		}
+		kept = append(kept, s)
+	}
+	subs = kept
 	for i := range subs {
 		var evicted int64
 		if err := tx.QueryRow("SELECT evicted_before_seq FROM channels WHERE name=?", subs[i].channel).Scan(&evicted); err != nil {

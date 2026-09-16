@@ -112,3 +112,23 @@ func TestTickReapsEmptyUnsubscribedChannels(t *testing.T) {
 		t.Fatalf("reaped channel left %d subscription rows", n)
 	}
 }
+
+// A subscription orphaned by a channel row vanishing underneath it (the
+// pre-1.0.1 reaper did this) must not fail receive; receive drops it.
+func TestReceiveDropsOrphanedSubscription(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "gone", "ordinary")
+	if err := b.Subscribe(sam, "gone", "now"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DELETE FROM channels WHERE name='gone'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Receive(sam, ReceiveInput{}); err != nil {
+		t.Fatalf("receive with orphaned subscription: %v", err)
+	}
+	if n := countRows(t, b, "SELECT count(*) FROM subscriptions WHERE sender=? AND channel='gone'", sam); n != 0 {
+		t.Fatalf("orphaned subscription still present (%d rows)", n)
+	}
+}

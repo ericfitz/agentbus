@@ -175,16 +175,30 @@ func (b *Bus) DeleteChannel(name, except string) (Channel, error) {
 }
 
 // reapEmptyChannels is the tick's step: drop non-default channels holding no
-// messages (tombstones included) and no subscription from a live session.
-// Nothing is lost, so no confirmation is involved.
+// messages (tombstones included) and no subscription from a live session,
+// along with every subscription to a channel that no longer exists (the
+// stale sessions' rows on the channels just dropped). A subscription
+// without its channel makes the subscriber's every receive fail on the
+// eviction-boundary lookup once the session resumes. Nothing is lost, so
+// no confirmation is involved.
 func (b *Bus) reapEmptyChannels() error {
 	names := make([]any, 0, len(DefaultChannels)+1)
 	for _, c := range DefaultChannels {
 		names = append(names, c.Name)
 	}
-	_, err := b.db.Exec(`DELETE FROM channels WHERE name NOT IN (`+strings.Repeat("?,", len(names)-1)+`?)
+	tx, err := b.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM channels WHERE name NOT IN (`+strings.Repeat("?,", len(names)-1)+`?)
 	  AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.channel=channels.name)
 	  AND NOT EXISTS (SELECT 1 FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=channels.name AND x.heartbeat>=?)`,
-		append(names, b.nowMs()-attachmentExpiryMs)...)
-	return err
+		append(names, b.nowMs()-attachmentExpiryMs)...); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM subscriptions WHERE channel NOT IN (SELECT name FROM channels)`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

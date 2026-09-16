@@ -106,4 +106,9 @@ func TestTickReapsEmptyUnsubscribedChannels(t *testing.T) {
 	if n := countRows(t, b, "SELECT count(*) FROM channels WHERE name='subscribed'"); n != 0 {
 		t.Fatal("stale-subscribed empty channel not reaped")
 	}
+	// Its subscription rows go with it: a lingering row would make the
+	// subscriber's next receive fail on the channel lookup.
+	if n := countRows(t, b, "SELECT count(*) FROM subscriptions WHERE channel='subscribed'"); n != 0 {
+		t.Fatalf("reaped channel left %d subscription rows", n)
+	}
 }

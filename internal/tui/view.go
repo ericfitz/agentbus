@@ -42,7 +42,7 @@ func (m Model) railWidth() int { return max(m.width/5, 16) }
 const (
 	iconChat  = "\U0001F4AC\uFE0F " // speech balloon
 	iconMem   = "\U0001F4BE\uFE0F " // floppy disk
-	iconAgent = "\u2699\uFE0F "     // gear
+	iconAgent = "\U0001F916\uFE0F " // robot; U+2699 gear is Neutral width, so terminals draw it two cells wide but advance one, eating the space
 	iconUser  = "\U0001F9D1\uFE0F " // adult
 	iconIdle  = "\U0001F4A4\uFE0F " // sleeping sign
 )

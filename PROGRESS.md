@@ -152,6 +152,18 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (later still): triangle markers, v1.0.5 release
+
+Pushed to `main`:
+
+- ▶ (U+25B6) marks the selected channel, memory, and search result and a
+  message with hidden replies; ▼ (U+25BC) marks a message whose replies are
+  shown. The ↳ reply prefix, › caret, and ▸ summary bullet are gone; every
+  stream row has a two-cell marker column so bodies align (9be14fd).
+- **v1.0.5 released** (716799e, tag v1.0.5):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.0.5);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (b024406).
+
 ## 2026-09-16 (late night): wrapped reply indentation, v1.0.4 release
 
 Pushed to `main`:

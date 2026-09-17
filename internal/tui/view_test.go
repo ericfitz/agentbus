@@ -203,3 +203,32 @@ func TestIconAgentWidth(t *testing.T) {
 		t.Fatal(w)
 	}
 }
+
+// The channel name carries its kind's color (agent for chat, memory for
+// memory) in the rail and the stream header, as it does in the compose row.
+func TestChannelNameColoredInRailAndHeader(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	ch := f.m.selected()
+	if ch == nil {
+		t.Fatal("no selected channel")
+	}
+	st := f.m.chanStyle(*ch)
+	if want := st.Render(iconChat + ch.Name); !strings.Contains(f.m.renderCompose(), want) {
+		t.Fatalf("compose lost the channel color: %q", f.m.renderCompose())
+	}
+	// The selected rail row re-applies the background after each reset, so
+	// compare on the color's opening sequence plus the name.
+	open, _, _ := strings.Cut(st.Render("\x00"), "\x00")
+	if open == "" {
+		t.Fatal("channel style renders no color")
+	}
+	if rail := f.m.renderRails(); !strings.Contains(rail, open+iconChat+ch.Name) {
+		t.Fatalf("rail channel name uncolored: %q", rail)
+	}
+	if h := f.m.renderHeader(); !strings.Contains(h, open+ch.Name) {
+		t.Fatalf("header channel name uncolored: %q", h)
+	}
+}

@@ -54,8 +54,8 @@ const (
 	// the user row) the old glyph's half stays on screen. CSI 2X (erase two
 	// cells, cursor stays, also uncounted) blanks both cells first.
 	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
-	iconUser  = "\U0001F9D1\uFE0F "    // adult
-	iconIdle  = "\U0001F4A4\uFE0F "    // sleeping sign
+	iconUser  = "\U0001F9D1\uFE0F "           // adult
+	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
 )
 
 func (m Model) View() string {
@@ -93,12 +93,21 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().Background(m.theme.BG).Foreground(m.theme.Text).Width(m.width).MaxHeight(m.height).Render(out)
 }
 
+// chanStyle is the color a channel's name is drawn in everywhere: memory
+// channels in the memory color, chat channels in the agent color.
+func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
+	if c.Kind == "memory" {
+		return m.theme.Style(m.theme.Mem)
+	}
+	return m.theme.Style(m.theme.Agent)
+}
+
 func (m Model) renderHeader() string {
 	ch := m.selected()
 	if ch == nil {
 		return m.theme.Style(m.theme.Dim).Render("no channels yet · c to create one")
 	}
-	s := fmt.Sprintf("%s · %d unread · %d messages", ch.Name, m.unread(ch.Name), ch.Messages)
+	s := fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
 	if m.status.Notice != "" {
 		s += "   " + m.theme.Style(m.theme.Warn).Render("! capacity: "+m.status.Notice)
 	}
@@ -125,7 +134,7 @@ func (m Model) renderRails() string {
 		if c.Kind == "memory" {
 			mark = iconMem
 		}
-		line := mark + c.Name
+		line := m.chanStyle(c).Render(mark + c.Name)
 		if n := m.unread(c.Name); n > 0 {
 			line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
 		}
@@ -300,12 +309,12 @@ func (m Model) renderCompose() string {
 	label := ""
 	hint := ""
 	if ch != nil {
+		mark := iconChat
 		if ch.Kind == "memory" {
-			label = th.Style(th.Mem).Render(iconMem + ch.Name)
+			mark = iconMem
 			hint = th.Style(th.Dim).Render("  ⏎ new memory")
-		} else {
-			label = th.Style(th.Agent).Render(iconChat + ch.Name)
 		}
+		label = m.chanStyle(*ch).Render(mark + ch.Name)
 	}
 	prompt := label + th.Style(th.Dim).Render(" › ")
 	if m.mode != modeInsert {

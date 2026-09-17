@@ -193,7 +193,7 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	// reaches this line, so replays are free. Charged with the same size
 	// used for the gate above (R4).
 	if !b.limits.allow(as, size, b.Now()) {
-		return EditResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
+		return EditResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
 	}
 
 	if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), curSeq); err != nil {
@@ -286,7 +286,7 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 	// so replays are free. Delete inserts nothing, so it charges one
 	// operation and zero bytes.
 	if !b.limits.allow(as, 0, b.Now()) {
-		return errf("rate_limited", true, "send rate limit exceeded for %s", as)
+		return errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
 	}
 
 	r, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=? AND tombstone=0", b.nowMs(), seq)

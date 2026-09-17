@@ -347,7 +347,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	// used for the gate above (R4), not a partial one that omits
 	// channel/sender/context/type.
 	if !b.limits.allow(as, size, b.Now()) {
-		return SendResult{}, errf("rate_limited", true, "send rate limit exceeded for %s", as)
+		return SendResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
 	}
 
 	seq, err := b.insertMessage(tx, as, context, in, kind)

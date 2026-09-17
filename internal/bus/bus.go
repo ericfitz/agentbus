@@ -141,7 +141,11 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	// auto_vacuum only takes effect via VACUUM; WAL mode above already wrote
 	// page 1, so a plain PRAGMA on a fresh file is silently ignored. Convert
 	// once (VACUUM is a no-op cost-wise on an empty/small database) and skip
-	// on later opens once the mode has stuck.
+	// on later opens once the mode has stuck. The PRAGMA and VACUUM below rely
+	// on database/sql handing back the same pooled connection across these
+	// sequential calls (true today: Open runs before any other goroutine
+	// touches db); pin an explicit *sql.Conn here if Open is ever made to run
+	// concurrently with other queries on this db.
 	var av int
 	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&av); err != nil {
 		_ = db.Close()

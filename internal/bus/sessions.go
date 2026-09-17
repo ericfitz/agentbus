@@ -120,6 +120,10 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	// this process already holds. Reusing our own row makes register
 	// idempotent: Claude Code keeps the MCP server across /clear, so a
 	// re-register from the same process must not mint a fresh suffix.
+	//
+	// ponytail: one SELECT per candidate suffix; fine while collisions are
+	// rare (a handful of concurrent sessions sharing a base name), would need
+	// a single batched lookup if register ever sees deep suffix chains.
 	display, reused := base, false
 	for n := 2; ; n++ {
 		var owner string
@@ -293,6 +297,11 @@ func (b *Bus) Discover(as string) ([]Session, error) {
 		return nil, err
 	}
 	if !b.cfg.DiscoveryEnabled {
+		// Code "validation" (not e.g. a dedicated "disabled" code): this is a
+		// caller-visible input-shape problem exactly like any other bad
+		// argument — discover simply isn't a callable operation while
+		// discovery_enabled=false — so it shares validation's retryable=false
+		// semantics rather than warranting a new error code.
 		return nil, errf("validation", false, "discovery is disabled by configuration")
 	}
 	sessions, err := b.liveSessions(b.db)

@@ -8,6 +8,11 @@ import (
 )
 
 // limiter holds per-sender token buckets for count and bytes, one-second burst.
+//
+// ponytail: buckets entries are never evicted, so it grows with the number
+// of distinct senders a process ever sees. Add eviction of stale (long-idle)
+// buckets if a long-running process sees enough distinct senders for this to
+// matter; each bucket is a few machine words.
 type limiter struct {
 	mu       sync.Mutex
 	perSec   float64

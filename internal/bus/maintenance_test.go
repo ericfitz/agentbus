@@ -300,8 +300,11 @@ func TestTickDeadlinePropagatesToEmbedding(t *testing.T) {
 	// this test should depend on. The client side still enforces ctx's
 	// deadline on its own, independent of the server, which is what this
 	// test actually verifies via the elapsed-time assertion below.
+	reached := make(chan struct{})
+	var reachedOnce sync.Once
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reachedOnce.Do(func() { close(reached) })
 		<-release
 	}))
 	defer srv.Close()
@@ -326,6 +329,11 @@ func TestTickDeadlinePropagatesToEmbedding(t *testing.T) {
 	b.Tick(context.Background())
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("Tick did not honor its deadline via context: elapsed=%v", elapsed)
+	}
+	select {
+	case <-reached:
+	default:
+		t.Fatal("Tick returned without the embeddings step ever calling the endpoint")
 	}
 }
 

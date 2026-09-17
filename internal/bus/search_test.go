@@ -1,6 +1,10 @@
 package bus
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestTextSearchFiltersAndPaging(t *testing.T) {
 	b := newTestBus(t)
@@ -52,5 +56,52 @@ func TestTextSearchFiltersAndPaging(t *testing.T) {
 	r, _ = b.Search(sam, SearchInput{Query: "secret"})
 	if len(r.Hits) != 0 {
 		t.Fatal("tombstoned memory returned")
+	}
+}
+
+func TestSearchRejectsInvalidModeAndCursor(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.Search(sam, SearchInput{Query: "x", Mode: "bogus"}); err == nil || !strings.Contains(err.Error(), "mode must be") {
+		t.Fatalf("invalid mode must be rejected: %v", err)
+	}
+	if _, err := b.Search(sam, SearchInput{Query: "x", Cursor: "not-a-number"}); err == nil || !strings.Contains(err.Error(), "invalid cursor") {
+		t.Fatalf("non-numeric cursor must be rejected: %v", err)
+	}
+	if _, err := b.Search(sam, SearchInput{Query: "x", Cursor: "-1"}); err == nil || !strings.Contains(err.Error(), "invalid cursor") {
+		t.Fatalf("negative cursor must be rejected: %v", err)
+	}
+}
+
+func TestSearchFiltersBySinceAndUntilAndOrdersByScore(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	b.Now = func() time.Time { return time.UnixMilli(1000) }
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "widget one"})
+	b.Now = func() time.Time { return time.UnixMilli(2000) }
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "widget widget two"})
+	b.Now = func() time.Time { return time.UnixMilli(3000) }
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "widget three"})
+
+	since := int64(1500)
+	if r, err := b.Search(sam, SearchInput{Query: "widget", Since: &since}); err != nil || len(r.Hits) != 2 {
+		t.Fatalf("since filter: %+v %v", r, err)
+	}
+	until := int64(2500)
+	if r, err := b.Search(sam, SearchInput{Query: "widget", Until: &until}); err != nil || len(r.Hits) != 2 {
+		t.Fatalf("until filter: %+v %v", r, err)
+	}
+	if r, err := b.Search(sam, SearchInput{Query: "widget", Since: &since, Until: &until}); err != nil || len(r.Hits) != 1 || r.Hits[0].Content != "widget widget two" {
+		t.Fatalf("since+until filter: %+v %v", r, err)
+	}
+	r, err := b.Search(sam, SearchInput{Query: "widget"})
+	if err != nil || len(r.Hits) != 3 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	for i := 1; i < len(r.Hits); i++ {
+		if r.Hits[i-1].Score < r.Hits[i].Score {
+			t.Fatalf("hits must be ordered best score first: %+v", r.Hits)
+		}
 	}
 }

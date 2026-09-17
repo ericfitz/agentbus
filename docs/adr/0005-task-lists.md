@@ -1,6 +1,6 @@
 # ADR 0005: Task lists
 
-Status: Accepted 2026-09-17. The human decisions below were made by the user
+Status: Accepted 2026-09-17; implemented in v1.3.0. The human decisions below were made by the user
 in session on 2026-09-17; the controller decisions were made while designing
 and are open to veto. Where this ADR conflicts with the v2 spec or earlier
 ADRs, this ADR supersedes; the v2 spec is not edited. Design:

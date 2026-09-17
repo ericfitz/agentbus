@@ -152,6 +152,44 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-17 (night): task lists, TUI rail fix, deferred-minors sweep, v1.3.0 release
+
+Pushed to `main`:
+
+- **Task lists** (ericfitz/agentbus#2) per
+  `docs/superpowers/specs/2026-09-17-task-lists-design.md`, plan
+  `docs/superpowers/plans/2026-09-17-task-lists.md`, decisions in **ADR 0005**
+  (`docs/adr/0005-task-lists.md`). A task list is a memory channel named
+  `tasks/<name>`; a task is a memory whose content is JSON; no schema change.
+  MCP tools `task_create`, `task_claim`, `task_release`, `task_update`,
+  `task_get`, `task_list`. All rules live in `Bus.TaskUpdate`: atomic claim,
+  owner guard with a recorded `force`, `blocked_by` dependencies with derived
+  "blocked", parent hierarchy (no delete with subtasks), rank-key ordering
+  with `before`/`after`, `leased_until` leases. Abandoned tasks (owner's
+  session gone or lease expired) return to `pending` from update, get, list,
+  and the maintenance tick. `send`, `edit_memory`, and `delete_memory` are
+  refused on task lists; the embedder skips them.
+- **TUI**: `tasks/` channels show a read-only task tree (indented subtasks,
+  `○ ◐ ● ⊘` marks, owner, open blockers, lease time left). Urgent fix:
+  channels and sessions are one rail (`↓` past the last channel enters the
+  sessions, `↑` from the first session returns) and `tab` goes from the
+  highlighted channel or session to its messages, then compose.
+- **Guidance**: protocol text, the `using-agentbus` skill, README, and
+  install docs cover task lists; `agentbus subscribe tasks/<name>` and
+  persistent MCP subscribe accept task lists through one shared
+  `bus.ChannelNameRule`.
+- **Deferred-minors sweep**: every entry in
+  `docs/superpowers/plans/2026-09-08-agentbus-v2-deferred-minors.md` and the
+  v1.2.0 minors re-checked; fixes and the six items left for a human decision
+  are recorded at the end of that file. `receive` now acks per readable
+  subscription row (a batch token spans channels).
+- Left open from the task-list reviews (minor): the tick takes the write lock
+  once per task channel even when nothing is abandoned; one `sessions` query
+  per in-progress task in `task_list`; the TUI reloads unselected task lists
+  on every batch and does not scroll a growing tree while following;
+  `before=x` with equal neighbor ranks (corrupt writes only) lands after `x`.
+- Not yet done: a TTY walkthrough of the rail/tab fix and the task tree.
+
 ## 2026-09-17 (later): direct messages, v1.2.0 release
 
 Pushed to `main` (fast-forward of `direct-messages`, 14 commits) and released:

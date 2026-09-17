@@ -402,8 +402,8 @@ func TestResetWhileLive(t *testing.T) {
 	if e != "" {
 		t.Fatal(e)
 	}
-	if r["as"] != "Sam" {
-		t.Fatalf("after reset the name is free: %v", r)
+	if r["as"] != "Sam" || r["resumed"] == true {
+		t.Fatalf("after reset the name is free and fresh: %v", r)
 	}
 	// Fresh apart from the inbox every register creates: no leftover
 	// non-DM subscription may survive the reset.

@@ -158,6 +158,13 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 			return Registration{}, internal(err)
 		}
 	}
+	// Count subscriptions before ensureInbox mints this call's own inbox
+	// subscription, so a brand-new identity's first register still reports
+	// resumed=false even though Pending will go on to list dm/<name>.
+	var priorSubs int
+	if err := tx.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", display).Scan(&priorSubs); err != nil {
+		return Registration{}, internal(err)
+	}
 	if err := b.ensureInbox(tx, display, now); err != nil {
 		return Registration{}, err
 	}
@@ -181,7 +188,7 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		return Registration{}, internal(err)
 	}
 	_ = rows.Close()
-	reg.Resumed = reused || len(reg.Pending) > 0
+	reg.Resumed = reused || priorSubs > 0
 	if b.cfg.DiscoveryEnabled {
 		live, err := b.liveSessions(tx)
 		if err != nil {

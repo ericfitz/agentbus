@@ -151,7 +151,7 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 	defer func() { _ = b2.Close() }()
 	b2.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
 	r2, _ := b2.Register("Sam", "", "", false)
-	if len(filterDMPending(r2.Pending)) != 0 {
+	if r2.Resumed || len(filterDMPending(r2.Pending)) != 0 {
 		t.Fatalf("%+v", r2)
 	}
 }

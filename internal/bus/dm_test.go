@@ -56,10 +56,15 @@ func TestDMOwner(t *testing.T) {
 
 func TestRegisterCreatesInboxIdempotently(t *testing.T) {
 	b := newTestBus(t)
-	for range 2 {
+	for i, wantResumed := range []bool{false, true} {
 		r, err := b.Register("Sam", "", "repo", true)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// The inbox created by this very call must not itself count as a
+		// resume: only a genuinely prior registration should.
+		if r.Resumed != wantResumed {
+			t.Fatalf("register %d: resumed=%v want %v: %+v", i, r.Resumed, wantResumed, r)
 		}
 		found := false
 		for _, p := range r.Pending {

@@ -30,7 +30,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 		t.Fatal("live process must lose registration after reset")
 	}
 	r, _ := b.Register("Sam", "", "", true)
-	if r.Sender != "Sam" || len(filterDMPending(r.Pending)) != 0 {
+	if r.Sender != "Sam" || r.Resumed || len(filterDMPending(r.Pending)) != 0 {
 		t.Fatalf("%+v", r)
 	}
 	_, _ = b.CreateChannel("Sam", "dev", "ordinary")

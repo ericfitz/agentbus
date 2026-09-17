@@ -103,6 +103,70 @@ func TestRotatingWriterCoordinatesAcrossProcesses(t *testing.T) {
 	}
 }
 
+// TestRotatingWriterCoordinatesAcrossProcessesEnforcesRetentionCap extends
+// the test above past the point where nothing gets rotated away: with many
+// more lines than 4 * maxBytes can hold, retention must cap at exactly
+// keep=4 files and the oldest lines must actually be gone, not just "at most
+// 4" by coincidence of never rotating.
+func TestRotatingWriterCoordinatesAcrossProcessesEnforcesRetentionCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agentbus.log")
+	w1 := &rotatingWriter{path: path, maxBytes: 200, keep: 4}
+	w2 := &rotatingWriter{path: path, maxBytes: 200, keep: 4}
+
+	const total = 400 // far more than keep=4 * ~200B files can retain
+	lines := make([]string, total)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%04d\n", i)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	write := func(w *rotatingWriter, start int) {
+		defer wg.Done()
+		for i := start; i < total; i += 2 {
+			if _, err := w.Write([]byte(lines[i])); err != nil {
+				t.Errorf("write %d: %v", i, err)
+			}
+		}
+	}
+	go write(w1, 0)
+	go write(w2, 1)
+	wg.Wait()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logFiles []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "agentbus.log") && !strings.HasSuffix(e.Name(), ".lock") {
+			logFiles = append(logFiles, e.Name())
+		}
+	}
+	if len(logFiles) != 4 {
+		t.Fatalf("expected exactly 4 retained files (the keep cap), got %d: %v", len(logFiles), logFiles)
+	}
+	seen := map[string]bool{}
+	for _, name := range logFiles {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			if line != "" {
+				seen[line] = true
+			}
+		}
+	}
+	if seen[strings.TrimRight(lines[0], "\n")] {
+		t.Fatal("the oldest line survived past the retention cap")
+	}
+	if !seen[strings.TrimRight(lines[total-1], "\n")] {
+		t.Fatal("the newest line did not survive")
+	}
+}
+
 // TestRotatingWriterRecoversAfterFailedRotate covers fix round 1 finding 3:
 // after w.f.Close() succeeds but a rename during rotation fails, the next
 // Write must reopen path rather than write through the closed handle.

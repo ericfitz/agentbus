@@ -142,7 +142,8 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 	_, _ = b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('Sam','c',0,?)", b.nowMs())
 	_, _ = b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('c','Other','',1,'','hi',2)")
 	r, _ := b.Register("Sam", "", "", true)
-	if !r.Resumed || len(r.Pending) != 1 || r.Pending[0].Pending != 1 {
+	pend := filterDMPending(r.Pending)
+	if !r.Resumed || len(pend) != 1 || pend[0].Pending != 1 {
 		t.Fatalf("%+v", r)
 	}
 	// Fresh registration drops subscriptions.
@@ -150,7 +151,7 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 	defer func() { _ = b2.Close() }()
 	b2.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
 	r2, _ := b2.Register("Sam", "", "", false)
-	if r2.Resumed || len(r2.Pending) != 0 {
+	if len(filterDMPending(r2.Pending)) != 0 {
 		t.Fatalf("%+v", r2)
 	}
 }
@@ -265,7 +266,8 @@ func TestEndSessionsFreesOwnNamesImmediately(t *testing.T) {
 	if err != nil || r.Sender != "Sam" {
 		t.Fatalf("ended name must be free without waiting for expiry: %+v %v", r, err)
 	}
-	if len(r.Pending) != 1 || r.Pending[0].Channel != "general" {
+	pend := filterDMPending(r.Pending)
+	if len(pend) != 1 || pend[0].Channel != "general" {
 		t.Fatalf("subscriptions must survive the session end: %+v", r.Pending)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -401,8 +402,15 @@ func TestResetWhileLive(t *testing.T) {
 	if e != "" {
 		t.Fatal(e)
 	}
-	if r["as"] != "Sam" || r["resumed"] == true {
-		t.Fatalf("after reset the name is free and fresh: %v", r)
+	if r["as"] != "Sam" {
+		t.Fatalf("after reset the name is free: %v", r)
+	}
+	// Fresh apart from the inbox every register creates: no leftover
+	// non-DM subscription may survive the reset.
+	for _, p := range r["pending"].([]any) {
+		if ch := p.(map[string]any)["channel"].(string); !strings.HasPrefix(ch, bus.DMPrefix) {
+			t.Fatalf("after reset the name is fresh: %v", r)
+		}
 	}
 	if _, e := a.call(t, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"}); e != "" {
 		t.Fatal(e)

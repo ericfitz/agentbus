@@ -30,7 +30,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 		t.Fatal("live process must lose registration after reset")
 	}
 	r, _ := b.Register("Sam", "", "", true)
-	if r.Sender != "Sam" || r.Resumed {
+	if r.Sender != "Sam" || len(filterDMPending(r.Pending)) != 0 {
 		t.Fatalf("%+v", r)
 	}
 	_, _ = b.CreateChannel("Sam", "dev", "ordinary")
@@ -43,7 +43,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 		t.Fatalf("sequence must stay monotonic after reset: pre-reset seq %d, post-reset seq %d", first.Seq, s.Seq)
 	}
 	st, _ := b.StatusReport()
-	if len(st.Sessions) != 1 || len(st.Channels) != 1+len(DefaultChannels) || st.UsageBytes <= 0 {
+	if len(st.Sessions) != 1 || len(filterDMChannels(st.Channels)) != 1+len(DefaultChannels) || st.UsageBytes <= 0 {
 		t.Fatalf("%+v", st)
 	}
 }

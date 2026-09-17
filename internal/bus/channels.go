@@ -38,6 +38,9 @@ func (b *Bus) EnsureChannel(name, kind string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
+	if name == "dm" {
+		return errf("validation", false, "channel name %q is reserved for direct messages", name)
+	}
 	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", name, kind); err != nil {
 		return internal(err)
 	}
@@ -50,6 +53,9 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	}
 	if err := validateName(name); err != nil {
 		return Channel{}, err
+	}
+	if name == "dm" {
+		return Channel{}, errf("validation", false, "channel name %q is reserved for direct messages", name)
 	}
 	if kind != "ordinary" && kind != "memory" {
 		return Channel{}, errf("validation", false, "kind must be ordinary or memory")

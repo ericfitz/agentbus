@@ -83,6 +83,7 @@ func TestSendAndHistory(t *testing.T) {
 		t.Fatalf("before filter: %+v", h)
 	}
 	ch, _ := b.ListChannels(sam)
+	ch = filterDMChannels(ch)
 	if len(ch) != 1+len(DefaultChannels) || ch[0].Name != "dev" || ch[0].Messages != 2 || ch[0].LatestSeq != 2 {
 		t.Fatalf("%+v", ch)
 	}

@@ -86,7 +86,7 @@ func TestReceiveGapAndExpiry(t *testing.T) {
 	}
 	b.Now = func() time.Time { return time.Now().Add(73 * time.Hour) }
 	r, _ = b.Receive(kim, ReceiveInput{Ack: r.Batch})
-	if len(r.Expired) != 1 || r.Expired[0] != "dev" {
+	if exp := filterDM(r.Expired); len(exp) != 1 || exp[0] != "dev" {
 		t.Fatalf("idle subscription must expire: %+v", r)
 	}
 	var n int
@@ -520,7 +520,7 @@ func TestReceiveBoundsExpiredNoticesPerCall(t *testing.T) {
 	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", kim).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if want := extra + 1; remaining != want { // +1 for the still-live "dev" subscription from setupTwo
+	if want := extra + 2; remaining != want { // +1 for the still-live "dev" subscription from setupTwo, +1 for kim's DM inbox
 		t.Fatalf("unreported expired subscriptions must remain as rows: got %d want %d", remaining, want)
 	}
 

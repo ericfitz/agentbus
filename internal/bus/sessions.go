@@ -158,6 +158,9 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 			return Registration{}, internal(err)
 		}
 	}
+	if err := b.ensureInbox(tx, display, now); err != nil {
+		return Registration{}, err
+	}
 	rows, err := tx.Query(`SELECT s.channel,
 	  (SELECT count(*) FROM messages m WHERE m.channel=s.channel AND m.seq>s.cursor_seq AND m.tombstone=0 AND m.sender<>s.sender)
 	  FROM subscriptions s WHERE s.sender=? ORDER BY s.channel`, display)

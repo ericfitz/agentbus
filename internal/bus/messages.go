@@ -115,6 +115,9 @@ func validateSendShape(in SendInput) error {
 func (b *Bus) validateSendRefs(in SendInput) (kind string, err error) {
 	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
 	case errors.Is(err, sql.ErrNoRows):
+		if owner, ok := dmOwner(in.Channel); ok {
+			return "", errf("not_found", false, "%q has never registered; direct messages reach only known identities (see discover)", owner)
+		}
 		return "", errf("not_found", false, "channel %q does not exist; create it first", in.Channel)
 	case err != nil:
 		return "", internal(err)

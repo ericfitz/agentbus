@@ -19,6 +19,22 @@ func hookScript(t *testing.T, body string) string {
 	return p
 }
 
+// waitForFile polls for path to exist, used as a start signal from a hook
+// script instead of a fixed sleep sized to "probably enough time".
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s to appear", path)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestInspectionDecisions(t *testing.T) {
 	cases := []struct {
 		name, body, wantCode string
@@ -124,15 +140,21 @@ echo '{"allow":true}'
 
 // TestInspectionSerializesSameIdempotencyKey is I3: two concurrent calls
 // with the same (sender, idempotency_key) must not both run the hook. The
-// hook blocks until a release file appears; the first send is given time to
-// enter the hook and block there before the second, identical, send starts.
+// hook signals "started" (via a marker file) immediately, before blocking
+// until a release file appears, so the test waits for that signal — rather
+// than sleeping a fixed guess — before starting the second, identical, send.
+// Send acquires the per-key lock before ever invoking the hook, so by the
+// time A's marker appears, B's later Send is guaranteed to block on that
+// lock rather than race A into the hook.
 func TestInspectionSerializesSameIdempotencyKey(t *testing.T) {
 	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
 	release := filepath.Join(dir, "release")
-	body := fmt.Sprintf(`cat >/dev/null
+	body := fmt.Sprintf(`touch %q
+cat >/dev/null
 while [ ! -f %q ]; do sleep 0.02; done
 echo '{"allow": true}'
-`, release)
+`, started, release)
 
 	b := newTestBus(t)
 	b.cfg.InspectionCommand = []string{hookScript(t, body)}
@@ -154,12 +176,11 @@ echo '{"allow": true}'
 		r, err := b.Send(sam, in)
 		resA <- sendResult{r, err}
 	}()
-	time.Sleep(150 * time.Millisecond) // let A block inside the hook
+	waitForFile(t, started, 5*time.Second) // A is now past the key lock, inside the hook
 	go func() {
 		r, err := b.Send(sam, in)
 		resB <- sendResult{r, err}
 	}()
-	time.Sleep(150 * time.Millisecond) // let B block on the key lock
 	if err := os.WriteFile(release, []byte("go"), 0o600); err != nil {
 		t.Fatal(err)
 	}

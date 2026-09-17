@@ -42,14 +42,18 @@ func (b *Bus) dmReadable(as, channel string) bool {
 }
 
 // ensureInbox creates display's inbox and its subscription to it, both
-// idempotently, inside Register's transaction. A new subscription starts at
-// 0 so DMs sent before a resume=false re-register are still delivered.
-func (b *Bus) ensureInbox(tx *sql.Tx, display string, now int64) error {
+// idempotently, inside Register's transaction, starting the subscription at
+// cursor if this call creates it (an existing row is left alone by INSERT OR
+// IGNORE). Register passes 0 for resume=true, so DMs sent before an
+// identity's first inbox-aware register are still delivered, and the
+// current head for resume=false, matching resume=false's "no backlog"
+// meaning (mirrors Subscribe's "now" cursor).
+func (b *Bus) ensureInbox(tx *sql.Tx, display string, now, cursor int64) error {
 	ch := DMChannel(display)
 	if _, err := tx.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,'ordinary',(SELECT coalesce(max(seq),0) FROM messages),0)", ch); err != nil {
 		return internal(err)
 	}
-	if _, err := tx.Exec("INSERT OR IGNORE INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,0,?)", display, ch, now); err != nil {
+	if _, err := tx.Exec("INSERT OR IGNORE INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,?,?)", display, ch, cursor, now); err != nil {
 		return internal(err)
 	}
 	return nil

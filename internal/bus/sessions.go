@@ -145,10 +145,11 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		return Registration{}, internal(err)
 	}
 	if !resume {
-		// Keep the inbox row, cursor included: a queued direct message must
-		// still arrive, and one already acked must not be replayed. Every
-		// other subscription is dropped as before.
-		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel<>?", display, DMChannel(display)); err != nil {
+		// resume=false means no backlog at all, inbox included (human
+		// decision, ADR 0004): drop every subscription, including the inbox
+		// row, so ensureInbox below recreates it at the current head rather
+		// than leaving an old cursor in place.
+		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=?", display); err != nil {
 			return Registration{}, internal(err)
 		}
 	} else {
@@ -163,23 +164,23 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	}
 	// Count subscriptions before ensureInbox mints this call's own inbox
 	// subscription, so a brand-new identity's first register still reports
-	// resumed=false even though Pending will go on to list dm/<name>. With
-	// resume=false the inbox row itself now survives (kept above for
-	// delivery integrity, not dropped and recreated), so it must be excluded
-	// here too, or a fresh resume=false register would wrongly report
-	// resumed=true on its own leftover inbox. resume=true is unaffected: an
-	// inbox row from a genuinely prior register still counts, per ADR 0004
-	// controller decision 5 (only the inbox created by THIS call is ignored).
-	priorQuery, priorArgs := "SELECT count(*) FROM subscriptions WHERE sender=?", []any{display}
-	if !resume {
-		priorQuery += " AND channel<>?"
-		priorArgs = append(priorArgs, DMChannel(display))
-	}
+	// resumed=false even though Pending will go on to list dm/<name>.
 	var priorSubs int
-	if err := tx.QueryRow(priorQuery, priorArgs...).Scan(&priorSubs); err != nil {
+	if err := tx.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", display).Scan(&priorSubs); err != nil {
 		return Registration{}, internal(err)
 	}
-	if err := b.ensureInbox(tx, display, now); err != nil {
+	// resume=true starts a newly created inbox at 0 (any DM queued before
+	// this identity's first inbox-aware register is still delivered);
+	// resume=false starts it at the current head, per resume=false's
+	// "no backlog" meaning. An existing row is left alone either way
+	// (ensureInbox's INSERT OR IGNORE).
+	inboxCursor := int64(0)
+	if !resume {
+		if err := tx.QueryRow("SELECT coalesce(max(seq),0) FROM messages").Scan(&inboxCursor); err != nil {
+			return Registration{}, internal(err)
+		}
+	}
+	if err := b.ensureInbox(tx, display, now, inboxCursor); err != nil {
 		return Registration{}, err
 	}
 	rows, err := tx.Query(`SELECT s.channel,

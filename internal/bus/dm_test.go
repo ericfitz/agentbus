@@ -81,22 +81,23 @@ func TestRegisterCreatesInboxIdempotently(t *testing.T) {
 	if chans != 1 || subs != 1 {
 		t.Fatalf("channels=%d subs=%d", chans, subs)
 	}
-	// resume=false drops every other subscription but keeps the inbox row.
+	// resume=false drops and recreates the inbox row at the current head.
 	if _, err := b.Register("Sam", "", "repo", false); err != nil {
 		t.Fatal(err)
 	}
 	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel='dm/Sam'").Scan(&subs)
 	if subs != 1 {
-		t.Fatalf("resume=false must keep the inbox subscription, got %d", subs)
+		t.Fatalf("resume=false must still leave the identity with an inbox subscription, got %d", subs)
 	}
 }
 
-// TestResumeFalseDoesNotReplayInbox reproduces F3: resume=false used to
-// delete and recreate the inbox subscription at cursor 0, replaying the
-// whole retained inbox including messages already received and acked.
-func TestResumeFalseDoesNotReplayInbox(t *testing.T) {
+// TestResumeFalseSkipsWholeBacklogIncludingInbox reproduces the human
+// decision of 2026-09-17 (ADR 0004): resume=false means no backlog of any
+// kind, inbox included — not from the cursor, not from the beginning, only
+// messages that arrive after the register.
+func TestResumeFalseSkipsWholeBacklogIncludingInbox(t *testing.T) {
 	b := newTestBus(t)
-	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+	if _, err := b.Register("Pat", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
 	other, err := Open(b.cfg, b.log)
@@ -104,28 +105,44 @@ func TestResumeFalseDoesNotReplayInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Close() })
-	if _, err := other.Register("Pat", "", "repo", true); err != nil {
+	if _, err := other.Register("Sam", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.Send("Pat", SendInput{Channel: "dm/Sam", Content: "first"}); err != nil {
+	if _, err := other.Send("Sam", SendInput{Channel: "dm/Pat", Content: "DM1"}); err != nil {
 		t.Fatal(err)
 	}
-	r1, err := b.Receive("Sam", ReceiveInput{})
-	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "first" {
-		t.Fatalf("%+v %v", r1, err)
-	}
-	if _, err := b.Receive("Sam", ReceiveInput{Ack: r1.Batch}); err != nil {
+	if err := b.EndSessions(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.Send("Pat", SendInput{Channel: "dm/Sam", Content: "second"}); err != nil {
+	if _, err := other.Send("Sam", SendInput{Channel: "dm/Pat", Content: "DM2"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "repo", false); err != nil {
+	r, err := b.Register("Pat", "", "repo", false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	r2, err := b.Receive("Sam", ReceiveInput{})
-	if err != nil || len(r2.Messages) != 1 || r2.Messages[0].Content != "second" {
-		t.Fatalf("resume=false must not replay the acked message: %+v %v", r2, err)
+	found := false
+	for _, p := range r.Pending {
+		if p.Channel == "dm/Pat" {
+			found = true
+			if p.Pending != 0 {
+				t.Fatalf("resume=false must report no backlog for the inbox: %+v", r.Pending)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("register must still report the inbox in pending: %+v", r.Pending)
+	}
+	res, err := b.Receive("Pat", ReceiveInput{})
+	if err != nil || len(res.Messages) != 0 {
+		t.Fatalf("resume=false must not deliver anything queued before the register: %+v %v", res, err)
+	}
+	if _, err := other.Send("Sam", SendInput{Channel: "dm/Pat", Content: "DM3"}); err != nil {
+		t.Fatal(err)
+	}
+	res2, err := b.Receive("Pat", ReceiveInput{})
+	if err != nil || len(res2.Messages) != 1 || res2.Messages[0].Content != "DM3" {
+		t.Fatalf("only a message sent after the register must be delivered: %+v %v", res2, err)
 	}
 }
 

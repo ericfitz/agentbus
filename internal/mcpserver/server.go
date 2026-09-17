@@ -29,7 +29,7 @@ type registerIn struct {
 	Name    string `json:"name" jsonschema:"persistent identity name, for example Sam"`
 	Parent  string `json:"parent,omitempty" jsonschema:"display name of the parent identity when registering a subagent"`
 	Context string `json:"context,omitempty" jsonschema:"repository hint; defaults to the working directory basename"`
-	Resume  *bool  `json:"resume,omitempty" jsonschema:"default true; false drops this name's existing subscriptions"`
+	Resume  *bool  `json:"resume,omitempty" jsonschema:"default true; false drops this name's existing subscriptions, inbox included, so only messages sent after this register are delivered"`
 }
 
 // asIn field is deliberately omitempty even though every non-register tool

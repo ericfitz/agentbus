@@ -33,6 +33,12 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
     (`Bus.EndSessions`). The agent does nothing and waits on nothing. The
     30-second attachment expiry remains the fallback for a killed process.
     Subscriptions and cursors survive, so the identity resumes.
+11. `resume=false` means no backlog of any kind, inbox included: not from
+    the cursor and not from the beginning; only messages that arrive after
+    the register. (Decided 2026-09-17, after the final review found two
+    earlier designs — recreate the inbox at cursor 0, and keep its old
+    cursor — both misread the flag as being about subscriptions rather than
+    about backlog.)
 
 ## Controller decisions
 
@@ -46,22 +52,17 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
    does not also inherit its view of other identities' inboxes.
 3. Reading or searching another identity's inbox returns `not_found`, the
    same as a name that never registered, so existence does not leak.
-4. With `resume=false`, the inbox subscription row is kept, cursor included,
-   rather than dropped and recreated at cursor 0. This replaced the
-   cursor-at-0 design above after the final review (2026-09-17) found it
-   replayed the identity's whole retained inbox, including messages already
-   received and acknowledged.
-5. `Registration.Resumed` ignores the inbox subscription created by the same
+4. `Registration.Resumed` ignores the inbox subscription created by the same
    register call, so a brand-new identity still reports `resumed: false`.
-6. The owner's inbox subscription never idle-expires, and the empty-channel
+5. The owner's inbox subscription never idle-expires, and the empty-channel
    reaper skips inboxes.
-7. `agentbus wait` wakes on a message in the waiter's own inbox even when
+6. `agentbus wait` wakes on a message in the waiter's own inbox even when
    its text does not match `-filter`; `-channel` still narrows.
-8. In the TUI, reply works only in the human's own inbox, where it sends a
+7. In the TUI, reply works only in the human's own inbox, where it sends a
    direct message to the row's sender with `reply_to` set. In another
    identity's inbox it is refused, because the reply would land in the inbox
    being viewed.
-9. The `using-agentbus` skill routes "a question only the user can answer"
+8. The `using-agentbus` skill routes "a question only the user can answer"
    to the human's TUI inbox when that identity is live, and tells agents to
    send a dependent agent both the start and the completion notice directly.
    Tested 2026-09-17 with paper scenarios, five runs per arm: completion

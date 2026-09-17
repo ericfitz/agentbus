@@ -172,7 +172,10 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 		}
 		switch ns {
 		case "pending":
-			if p.Owner == nil || *p.Owner == "" {
+			// Only a real transition into pending (release) clears an
+			// unspecified owner; pending -> pending is not in the Status
+			// table and must not disturb an existing assignment.
+			if cur.Status != "pending" && (p.Owner == nil || *p.Owner == "") {
 				patched.Owner = ""
 			}
 			patched.LeasedUntil = 0
@@ -312,7 +315,10 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 // written. Between the in-tx receipt check and the live-state read,
 // reclaimAbandoned fixes up the target if it is abandoned (design:
 // "Abandonment and fix-up"), so a claim on an abandoned task is a reclaim
-// followed by the claim, two revisions in one transaction.
+// followed by the claim, two revisions in one transaction. A patch the rest
+// of this function then refuses rolls back that reclaim too, since both
+// share the transaction; the task is abandoned again, and the next read,
+// update, or tick reclaims it.
 func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return TaskUpdateResult{}, err

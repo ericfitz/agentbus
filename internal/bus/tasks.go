@@ -135,16 +135,16 @@ func dedupeIDs(ids []int64) []int64 {
 	return out
 }
 
-// ponytail: fix-up, list, and cycle checks parse every live task in the
-// channel; add an additive task_index table keyed by memory_id if lists
-// grow past a few thousand tasks.
-//
 // loadTasks returns every live task in channel: rows whose content is not a
 // JSON object with a non-empty subject and a valid status are skipped (an
 // old binary may have written a plain memory there). Derived fields
 // (Blocked, OpenBlockers) are filled in, and the result is ordered
 // depth-first by the tree (see taskTree). ORDER BY seq makes the scan
 // deterministic, which matters for taskTree's cycle fallback.
+//
+// ponytail: fix-up, list, and cycle checks parse every live task in the
+// channel; add an additive task_index table keyed by memory_id if lists
+// grow past a few thousand tasks.
 func loadTasks(q querier, channel string) ([]Task, error) {
 	rows, err := q.Query("SELECT seq, memory_id, revision, sender, created_at, content FROM messages WHERE channel=? AND memory_id IS NOT NULL AND tombstone=0 ORDER BY seq", channel)
 	if err != nil {
@@ -327,10 +327,21 @@ func validateTaskLinks(ts []Task, t Task) error {
 	return nil
 }
 
-// rankStep wraps rankBetween, falling back to unbounded-above when lo and hi
-// are equal (only possible from a corrupt write): rankBetween's precondition
-// is a < b.
+// rankStep positions a rank relative to one or two neighbors. A genuinely
+// unbounded side (append past the last sibling, or prepend before the
+// first) steps by rankAfter/rankBefore instead of rankBetween, which would
+// take a midpoint against the alphabet's edge and grow the key by a byte
+// every few inserts (see rank.go). Inserting between two known siblings
+// keeps the midpoint algorithm. Falls back to unbounded-above when lo and
+// hi are equal (only possible from a corrupt write): rankBetween's
+// precondition is lo < hi.
 func rankStep(lo, hi string) string {
+	switch {
+	case lo != "" && hi == "":
+		return rankAfter(lo)
+	case lo == "" && hi != "":
+		return rankBefore(hi)
+	}
 	if hi != "" && lo >= hi {
 		hi = ""
 	}
@@ -429,9 +440,10 @@ func receiptTaskResult(raw json.RawMessage) (Task, error) {
 // ruling on the brief, which had the channel-existence check too early),
 // then the mutable channel-existence check (mirrors Send's validateSendRefs
 // placement), then preflight checks on b.db, then a write transaction that
-// re-verifies ownership and idempotency before computing the rank and
-// inserting. Never charges embedSoon: task rows are excluded from the
-// embedder (embed.go).
+// re-verifies ownership, idempotency, and (again) the channel, so a create
+// racing DeleteChannel can't leave a row in a deleted channel, before
+// computing the rank and inserting. Never charges embedSoon: task rows are
+// excluded from the embedder (embed.go).
 func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Task{}, err
@@ -491,6 +503,9 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	} else if hit {
 		return receiptTaskResult(prev)
 	}
+	if err := b.taskChannelExists(tx, in.Channel); err != nil {
+		return Task{}, err
+	}
 
 	ts, err := loadTasks(tx, in.Channel)
 	if err != nil {
@@ -535,6 +550,25 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	return *created, nil
 }
 
+// tryFixUpAbandoned calls fixUpAbandoned and reports whether the caller
+// should reload: true on a clean fix-up, false when there was nothing to
+// fix up or the fix-up itself failed. A read (TaskGet, TaskList) must never
+// fail just because the fix-up couldn't take the write lock: the snapshot
+// already loaded is still valid, and the next read, update, or tick
+// reclaims. Only not_registered (a genuine problem with as, not with the
+// fix-up) is propagated to the caller.
+func (b *Bus) tryFixUpAbandoned(as, channel string, ids []int64) (reload bool, err error) {
+	if fuErr := b.fixUpAbandoned(as, channel, ids); fuErr != nil {
+		var be *Error
+		if errors.As(fuErr, &be) && be.Code == "not_registered" {
+			return false, fuErr
+		}
+		b.log.Warn("task fix-up failed; serving the snapshot already loaded", "channel", channel, "err", fuErr)
+		return false, nil
+	}
+	return true, nil
+}
+
 // TaskGet returns id's live task, including derived Blocked/OpenBlockers.
 // Reclaims id first if it is abandoned (design: "Abandonment and fix-up"),
 // staying read-only when it isn't.
@@ -560,14 +594,17 @@ func (b *Bus) TaskGet(as string, id int64) (Task, error) {
 	if ab, err := b.abandoned(b.db, *t, b.nowMs()); err != nil {
 		return Task{}, err
 	} else if ab {
-		if err := b.fixUpAbandoned(as, channel, []int64{id}); err != nil {
+		reload, err := b.tryFixUpAbandoned(as, channel, []int64{id})
+		if err != nil {
 			return Task{}, err
 		}
-		if ts, err = loadTasks(b.db, channel); err != nil {
-			return Task{}, err
-		}
-		if t = taskByID(ts, id); t == nil {
-			return Task{}, errf("not_found", false, "memory %d is not a task", id)
+		if reload {
+			if ts, err = loadTasks(b.db, channel); err != nil {
+				return Task{}, err
+			}
+			if t = taskByID(ts, id); t == nil {
+				return Task{}, errf("not_found", false, "memory %d is not a task", id)
+			}
 		}
 	}
 	return *t, nil
@@ -613,11 +650,14 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 		}
 	}
 	if fixUp {
-		if err := b.fixUpAbandoned(as, in.Channel, nil); err != nil {
+		reload, err := b.tryFixUpAbandoned(as, in.Channel, nil)
+		if err != nil {
 			return nil, err
 		}
-		if ts, err = loadTasks(b.db, in.Channel); err != nil {
-			return nil, err
+		if reload {
+			if ts, err = loadTasks(b.db, in.Channel); err != nil {
+				return nil, err
+			}
 		}
 	}
 	_, depth := taskTree(ts)

@@ -1,9 +1,18 @@
 package bus
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 func TestClaimOfTaskWithDeadOwnerSucceeds(t *testing.T) {
@@ -41,6 +50,12 @@ func TestClaimOfTaskWithDeadOwnerSucceeds(t *testing.T) {
 		if types[i] != w {
 			t.Fatalf("types=%v want=%v", types, want)
 		}
+	}
+	// T4-1 (final review): Replaced must be the seq of the revision the
+	// claim actually replaced, the reclaim's, not the dead owner's earlier
+	// claim two revisions back.
+	if res.Replaced != revs[2].Seq {
+		t.Fatalf("replaced=%d, want the reclaim's seq %d", res.Replaced, revs[2].Seq)
 	}
 }
 
@@ -265,5 +280,120 @@ func TestLiveOwnerWithoutLeaseIsNeverAbandoned(t *testing.T) {
 	}
 	if got.Revision != 2 {
 		t.Fatalf("unexpected reclaim wrote a revision: %+v", got)
+	}
+}
+
+// TestKeyedClaimOverDeadOwnerIsIdempotent covers T4-2 of the final review:
+// a keyed claim over a dead owner reclaims once, then a retry with the same
+// key must replay the stored result rather than reclaiming (and charging)
+// again.
+func TestKeyedClaimOverDeadOwnerIsIdempotent(t *testing.T) {
+	b, other := twoAgents(t)
+	taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
+	if _, err := other.TaskClaim("Pat", tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DELETE FROM sessions WHERE sender='Pat'"); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := b.TaskClaim("Sam", tk.ID, 0, "claim-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revs, err := b.MemoryRevisions("Sam", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(revs)
+
+	second, err := b.TaskClaim("Sam", tk.ID, 0, "claim-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare the JSON shape, not the Go struct: Task.seq is an unexported
+	// bookkeeping field (the live revision's seq) that a stored receipt
+	// replay does not reconstruct, and callers never see it either.
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := json.Marshal(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("replay = %s, want identical to first %s", secondJSON, firstJSON)
+	}
+	revs, err = b.MemoryRevisions("Sam", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revs) != n {
+		t.Fatalf("replay wrote a revision: %d -> %d", n, len(revs))
+	}
+}
+
+// TestGetAndListReturnSnapshotWhenFixUpFails covers Important 1 of the
+// final review: a fix-up error other than not_registered must not fail the
+// read. fixUpBegin is overridden so the failure is injected deterministically
+// instead of waiting on the real 5s busy_timeout. TaskGet and TaskList must
+// both succeed, still show the task in_progress under its abandoned owner
+// (the snapshot loaded before the failed fix-up), and log the failure.
+func TestGetAndListReturnSnapshotWhenFixUpFails(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	var buf bytes.Buffer
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(&buf, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	other, err := Open(b.cfg, b.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+
+	reg(t, b, "Sam")
+	if _, err := other.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
+	if _, err := other.TaskClaim("Pat", tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DELETE FROM sessions WHERE sender='Pat'"); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := fixUpBegin
+	fixUpBegin = func(*sql.DB) (*sql.Tx, error) { return nil, errors.New("write lock unavailable") }
+	t.Cleanup(func() { fixUpBegin = orig })
+
+	got, err := b.TaskGet("Sam", tk.ID)
+	if err != nil {
+		t.Fatalf("TaskGet must succeed despite the fix-up failure: %v", err)
+	}
+	if got.Status != "in_progress" || got.Owner != "Pat" {
+		t.Fatalf("TaskGet must return the pre-fix-up snapshot: %+v", got)
+	}
+	if !strings.Contains(buf.String(), "task fix-up failed") {
+		t.Fatalf("fix-up failure not logged: %s", buf.String())
+	}
+	buf.Reset()
+
+	list, err := b.TaskList("Sam", TaskListInput{Channel: "tasks/work"})
+	if err != nil {
+		t.Fatalf("TaskList must succeed despite the fix-up failure: %v", err)
+	}
+	if len(list) != 1 || list[0].Status != "in_progress" || list[0].Owner != "Pat" {
+		t.Fatalf("TaskList must return the pre-fix-up snapshot: %+v", list)
+	}
+	if !strings.Contains(buf.String(), "task fix-up failed") {
+		t.Fatalf("fix-up failure not logged: %s", buf.String())
 	}
 }

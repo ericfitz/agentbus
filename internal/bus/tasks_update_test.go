@@ -253,6 +253,39 @@ func TestReleaseClearsOwnerAndLease(t *testing.T) {
 	}
 }
 
+// TestPendingNoopDoesNotClearAssignment covers Minor 6 of the final review:
+// {status: "pending"} on a task that is already pending is not a
+// transition (the Status table has no pending -> pending row) and must not
+// clear an owner assigned earlier. It also writes no new revision, per rule
+// 11 (no-op).
+func TestPendingNoopDoesNotClearAssignment(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	if _, err := b.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
+	pat := "Pat"
+	if _, err := b.TaskUpdate("Sam", TaskPatch{ID: tk.ID, Owner: &pat}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := b.TaskGet("Sam", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pending := "pending"
+	res, err := b.TaskUpdate("Sam", TaskPatch{ID: tk.ID, Status: &pending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Task.Owner != "Pat" || res.Task.Status != "pending" {
+		t.Fatalf("owner cleared by a pending->pending no-op: %+v", res.Task)
+	}
+	wantUnchanged(t, b, tk.ID, before.Revision)
+}
+
 // TestOwnerClearedAloneOnInProgressIsRejected covers Important 1: {owner:
 // ""} alone (no status change) must not be able to leave an in_progress
 // task without an owner — a state the Status table forbids. Force

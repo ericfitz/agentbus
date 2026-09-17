@@ -2,9 +2,11 @@ package bus
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func taskList(t *testing.T, b *Bus) string {
@@ -92,6 +94,52 @@ func TestTaskCreateValidation(t *testing.T) {
 	a := mustCreate(t, b, TaskCreateInput{Subject: "a"})
 	child := mustCreate(t, b, TaskCreateInput{Subject: "child", Parent: a.ID})
 	wantCode(t, create(TaskCreateInput{Subject: "x", After: child.ID}), "validation")
+}
+
+// TestTaskCreateRechecksChannelInsideTransaction covers Minor 5 of the
+// final review: a create racing DeleteChannel must not leave a row in a
+// deleted channel. The preflight check (taskChannelExists on b.db, no lock
+// held) sees the channel; a second connection then deletes it and holds the
+// write lock until TaskCreate's own transaction is blocked on Begin, so by
+// the time TaskCreate's in-tx check runs, the channel is really gone.
+func TestTaskCreateRechecksChannelInsideTransaction(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+
+	dsn, err := SQLiteDSN(b.cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	tx2, err := db.Begin() // _txlock=immediate takes the write lock now
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx2.Exec("DELETE FROM channels WHERE name='tasks/work'"); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.TaskCreate("Sam", TaskCreateInput{Channel: "tasks/work", Subject: "x"})
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond) // let TaskCreate pass preflight and block on its own Begin
+	if err := tx2.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-done:
+		wantCode(t, err, "not_found")
+	case <-time.After(2 * time.Second):
+		t.Fatal("TaskCreate did not return after the competing lock was released")
+	}
 }
 
 func TestTaskListTreeOrderSurvivesInsertsAndDeletes(t *testing.T) {

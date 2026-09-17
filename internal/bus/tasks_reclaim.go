@@ -32,7 +32,10 @@ func (b *Bus) abandoned(q queryRower, t Task, now int64) (bool, error) {
 // channel when ids is nil) to pending, owner and lease cleared, as a
 // revision of type "reclaimed" sent by as (empty for the tick). It is not
 // rate-charged: it bypasses sendEnvelope, inspect, and limits.allow, and
-// writeTaskRevision stores no receipt. Returns how many it reclaimed.
+// writeTaskRevision stores no receipt. It also bypasses checkCapacity by
+// design: a read (TaskGet, TaskList) must never fail just because the
+// database is over budget, and the net growth is one small row (the old
+// revision is tombstoned, not deleted). Returns how many it reclaimed.
 func (b *Bus) reclaimAbandoned(tx *sql.Tx, as, context, channel string, ids []int64) (int, error) {
 	ts, err := loadTasks(tx, channel)
 	if err != nil {
@@ -66,12 +69,17 @@ func (b *Bus) reclaimAbandoned(tx *sql.Tx, as, context, channel string, ids []in
 	return n, nil
 }
 
+// fixUpBegin opens fixUpAbandoned's write transaction; a package-level test
+// hook so a fix-up failure (the write lock unavailable, say) can be
+// injected without waiting on the real 5s busy_timeout.
+var fixUpBegin = (*sql.DB).Begin
+
 // fixUpAbandoned opens a write transaction to reclaim abandoned tasks (ids
 // nil for every task in channel) on behalf of a read that found one. Errors
 // here are only internal or not_registered: reclaimAbandoned itself never
 // returns anything else.
 func (b *Bus) fixUpAbandoned(as, channel string, ids []int64) error {
-	tx, err := b.db.Begin()
+	tx, err := fixUpBegin(b.db)
 	if err != nil {
 		return internal(err)
 	}

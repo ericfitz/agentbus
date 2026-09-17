@@ -25,11 +25,20 @@ func dmOwner(channel string) (string, bool) {
 // server never does, so no agent can obtain it through a tool.
 func (b *Bus) SetObserver(as string) { b.observer = as }
 
+// isObserver reports whether as is this process's observer. An empty as is
+// never an observer even if b.observer is also empty (bus.Wait has no auth
+// and passes as through unchecked, so this must not accidentally match "").
+func (b *Bus) isObserver(as string) bool {
+	return as != "" && b.observer == as
+}
+
 // dmReadable reports whether as may read channel: always for ordinary
-// channels, and for a DM inbox only its owner or the observer.
+// channels, and for a DM inbox only its owner or the observer. Enforced at
+// subscribe, history, search, and delivery (receive, wait, register's
+// pending list).
 func (b *Bus) dmReadable(as, channel string) bool {
 	owner, ok := dmOwner(channel)
-	return !ok || owner == as || (b.observer != "" && b.observer == as)
+	return !ok || owner == as || b.isObserver(as)
 }
 
 // ensureInbox creates display's inbox and its subscription to it, both

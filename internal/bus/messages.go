@@ -375,7 +375,11 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 		return nil, err
 	}
 	if !b.dmReadable(as, channel) {
-		return nil, errf("not_found", false, "channel %q does not exist", channel)
+		// No %q here (unlike the "does not exist" errors elsewhere in this
+		// file): naming the channel back would tell the caller a DM inbox it
+		// cannot read exists, distinguishing it from one that never
+		// registered. The message must be identical for both.
+		return nil, errf("not_found", false, "channel does not exist")
 	}
 	if count <= 0 {
 		count = b.cfg.ReceiveDefaultCount

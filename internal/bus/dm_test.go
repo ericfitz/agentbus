@@ -3,6 +3,7 @@ package bus
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // filterDM, filterDMPending, and filterDMChannels drop DM inbox entries from
@@ -80,13 +81,51 @@ func TestRegisterCreatesInboxIdempotently(t *testing.T) {
 	if chans != 1 || subs != 1 {
 		t.Fatalf("channels=%d subs=%d", chans, subs)
 	}
-	// resume=false drops subscriptions but the inbox subscription comes back.
+	// resume=false drops every other subscription but keeps the inbox row.
 	if _, err := b.Register("Sam", "", "repo", false); err != nil {
 		t.Fatal(err)
 	}
 	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel='dm/Sam'").Scan(&subs)
 	if subs != 1 {
-		t.Fatalf("resume=false must recreate the inbox subscription, got %d", subs)
+		t.Fatalf("resume=false must keep the inbox subscription, got %d", subs)
+	}
+}
+
+// TestResumeFalseDoesNotReplayInbox reproduces F3: resume=false used to
+// delete and recreate the inbox subscription at cursor 0, replaying the
+// whole retained inbox including messages already received and acked.
+func TestResumeFalseDoesNotReplayInbox(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(b.cfg, b.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	if _, err := other.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Send("Pat", SendInput{Channel: "dm/Sam", Content: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	r1, err := b.Receive("Sam", ReceiveInput{})
+	if err != nil || len(r1.Messages) != 1 || r1.Messages[0].Content != "first" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	if _, err := b.Receive("Sam", ReceiveInput{Ack: r1.Batch}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Send("Pat", SendInput{Channel: "dm/Sam", Content: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("Sam", "", "repo", false); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := b.Receive("Sam", ReceiveInput{})
+	if err != nil || len(r2.Messages) != 1 || r2.Messages[0].Content != "second" {
+		t.Fatalf("resume=false must not replay the acked message: %+v %v", r2, err)
 	}
 }
 
@@ -179,8 +218,13 @@ func TestDMGuards(t *testing.T) {
 	wantErr("unsubscribe own", "validation", other.Unsubscribe("Pat", "dm/Pat"))
 	_, err := b.DeleteChannel("dm/Pat", "")
 	wantErr("delete", "validation", err)
-	_, err = b.History("Sam", "dm/Pat", nil, nil, 10)
-	wantErr("history by sender", "not_found", err)
+	_, errExisting := b.History("Sam", "dm/Pat", nil, nil, 10)
+	wantErr("history by sender", "not_found", errExisting)
+	_, errUnknown := b.History("Sam", "dm/Nobody", nil, nil, 10)
+	wantErr("history of unknown inbox", "not_found", errUnknown)
+	if errExisting.Error() != errUnknown.Error() {
+		t.Fatalf("history must return identical errors for an existing and a never-registered inbox, so existence does not leak: %v vs %v", errExisting, errUnknown)
+	}
 	_, err = b.Search("Sam", SearchInput{Query: "zebra", Channel: "dm/Pat", Mode: "text"})
 	wantErr("scoped search by sender", "not_found", err)
 	res, err := b.Search("Sam", SearchInput{Query: "zebra", Mode: "text"})
@@ -267,5 +311,69 @@ func TestInboxSurvivesReaperAndIdleExpiry(t *testing.T) {
 	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel='dm/Sam'").Scan(&n)
 	if n != 1 {
 		t.Fatal("register purge dropped the inbox subscription")
+	}
+}
+
+// TestDeliveryHonorsDMReadableAfterObserverEndsSession reproduces F1: once
+// the TUI's session ends, its subscription to another identity's inbox
+// (minted while it was the observer) persists in the subscriptions table,
+// but a later, non-observer process registering the same name must not be
+// able to read through it via receive, wait, or register's pending list.
+func TestDeliveryHonorsDMReadableAfterObserverEndsSession(t *testing.T) {
+	a := newTestBus(t)
+	if _, err := a.Register("human", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	a.SetObserver("human")
+	pat, err := Open(a.cfg, a.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pat.Close() })
+	if _, err := pat.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Subscribe("human", "dm/Pat", "oldest"); err != nil {
+		t.Fatalf("observer subscribe: %v", err)
+	}
+	if _, err := pat.Send("Pat", SendInput{Channel: "dm/Pat", Content: "secret for Pat"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A third, non-observer process resumes the "human" identity.
+	c, err := Open(a.cfg, a.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	reg, err := c.Register("human", "", "repo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reg.Pending {
+		if p.Channel == "dm/Pat" {
+			t.Fatalf("register pending must not list another identity's inbox once the observer session has ended: %+v", reg.Pending)
+		}
+	}
+	res, err := c.Receive("human", ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.Messages {
+		if m.Channel == "dm/Pat" {
+			t.Fatalf("receive must not deliver another identity's inbox: %+v", res.Messages)
+		}
+	}
+	msgs, err := c.Wait("human", nil, false, nil, 300*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range msgs {
+		if m.Channel == "dm/Pat" {
+			t.Fatalf("wait must not return another identity's inbox: %+v", msgs)
+		}
 	}
 }

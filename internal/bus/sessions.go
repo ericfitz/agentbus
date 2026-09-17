@@ -145,7 +145,10 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		return Registration{}, internal(err)
 	}
 	if !resume {
-		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=?", display); err != nil {
+		// Keep the inbox row, cursor included: a queued direct message must
+		// still arrive, and one already acked must not be replayed. Every
+		// other subscription is dropped as before.
+		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel<>?", display, DMChannel(display)); err != nil {
 			return Registration{}, internal(err)
 		}
 	} else {
@@ -160,9 +163,20 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 	}
 	// Count subscriptions before ensureInbox mints this call's own inbox
 	// subscription, so a brand-new identity's first register still reports
-	// resumed=false even though Pending will go on to list dm/<name>.
+	// resumed=false even though Pending will go on to list dm/<name>. With
+	// resume=false the inbox row itself now survives (kept above for
+	// delivery integrity, not dropped and recreated), so it must be excluded
+	// here too, or a fresh resume=false register would wrongly report
+	// resumed=true on its own leftover inbox. resume=true is unaffected: an
+	// inbox row from a genuinely prior register still counts, per ADR 0004
+	// controller decision 5 (only the inbox created by THIS call is ignored).
+	priorQuery, priorArgs := "SELECT count(*) FROM subscriptions WHERE sender=?", []any{display}
+	if !resume {
+		priorQuery += " AND channel<>?"
+		priorArgs = append(priorArgs, DMChannel(display))
+	}
 	var priorSubs int
-	if err := tx.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", display).Scan(&priorSubs); err != nil {
+	if err := tx.QueryRow(priorQuery, priorArgs...).Scan(&priorSubs); err != nil {
 		return Registration{}, internal(err)
 	}
 	if err := b.ensureInbox(tx, display, now); err != nil {
@@ -180,6 +194,11 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		if err := rows.Scan(&p.Channel, &p.Pending); err != nil {
 			_ = rows.Close()
 			return Registration{}, internal(err)
+		}
+		// A subscription row this identity cannot currently read (e.g. left
+		// over from a past observer session) must not surface as pending.
+		if !b.dmReadable(display, p.Channel) {
+			continue
 		}
 		reg.Pending = append(reg.Pending, p)
 	}

@@ -94,7 +94,7 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	if from != "now" && from != "oldest" {
 		return errf("validation", false, "from must be now or oldest")
 	}
-	if _, ok := dmOwner(channel); ok && b.observer != as {
+	if _, ok := dmOwner(channel); ok && !b.isObserver(as) {
 		return errf("validation", false, "direct-message channels cannot be subscribed to; register manages your inbox")
 	}
 	tx, err := b.db.Begin()
@@ -129,7 +129,7 @@ func (b *Bus) Unsubscribe(as, channel string) error {
 	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
-	if _, ok := dmOwner(channel); ok && b.observer != as {
+	if _, ok := dmOwner(channel); ok && !b.isObserver(as) {
 		return errf("validation", false, "direct-message channels cannot be unsubscribed from")
 	}
 	tx, err := b.db.Begin()
@@ -264,6 +264,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		if err := rows.Scan(&s.channel, &s.cursor, &last, &s.pendingToken, &s.pendingEnd); err != nil {
 			_ = rows.Close()
 			return res, internal(err)
+		}
+		// A row left over from when this identity was the TUI observer (or
+		// from before it lost that role) is not something as can read now:
+		// treat it as not subscribed rather than as expired, and leave it
+		// untouched so a later observer session still finds it.
+		if !b.dmReadable(as, s.channel) {
+			continue
 		}
 		// Outside the filter with nothing pending: not involved in this call,
 		// leave it untouched (no activity touch, no expiry check).

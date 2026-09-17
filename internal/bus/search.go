@@ -66,7 +66,7 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 	if in.Channel != "" {
 		sb.WriteString(" AND m.channel=?")
 		args = append(args, in.Channel)
-	} else if b.observer != as {
+	} else if !b.isObserver(as) {
 		sb.WriteString(" AND (m.channel NOT LIKE 'dm/%' OR m.channel=?)")
 		args = append(args, DMChannel(as))
 	}
@@ -135,7 +135,8 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 		return SearchResult{}, errf("validation", false, "query is required")
 	}
 	if in.Channel != "" && !b.dmReadable(as, in.Channel) {
-		return SearchResult{}, errf("not_found", false, "channel %q does not exist", in.Channel)
+		// No %q: see the matching comment in History.
+		return SearchResult{}, errf("not_found", false, "channel does not exist")
 	}
 	if in.Count <= 0 {
 		in.Count = searchPageDefault

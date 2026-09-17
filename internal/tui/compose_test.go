@@ -140,6 +140,33 @@ func TestToggleSubscribe(t *testing.T) {
 	}
 }
 
+// s and d act on the selected channel only; with a session selected instead
+// (nothing to subscribe or delete there) both must no-op.
+func TestSubscribeAndDeleteNoopInSessionsPane(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // learn Sam's session
+	f.key("esc")
+	f.key("tab") // channels -> sessions
+	if f.m.pane() != paneSessions {
+		t.Fatalf("pane=%v", f.m.pane())
+	}
+	f.key("s")
+	if !f.c.subscribed["dev"] {
+		t.Fatal("s in the sessions pane must not touch the channel list's subscription")
+	}
+	f.key("d")
+	if f.m.mode != modeNormal {
+		t.Fatalf("d in the sessions pane must not open the delete confirmation, got mode=%v", f.m.mode)
+	}
+	found := false
+	for _, c := range f.m.channels {
+		found = found || c.Name == "dev"
+	}
+	if !found {
+		t.Fatal("d in the sessions pane must not delete the channel list's selected channel")
+	}
+}
+
 func TestDeleteChannelConfirm(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")

@@ -273,6 +273,9 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := validateSendShape(in); err != nil {
 		return SendResult{}, err
 	}
+	if IsTaskChannel(in.Channel) {
+		return SendResult{}, errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", in.Channel)
+	}
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
 

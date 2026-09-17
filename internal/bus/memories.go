@@ -132,6 +132,9 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if err != nil {
 		return EditResult{}, err
 	}
+	if IsTaskChannel(channel) {
+		return EditResult{}, errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
+	}
 	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs}
 
 	// Preflight envelope-size gate (C1): must run before inspect and
@@ -276,9 +279,12 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 
 	// Re-read the live revision against committed state: it may have moved
 	// (or already been deleted) between the read-only check above and here.
-	seq, _, _, err := liveRevision(tx, id)
+	seq, _, channel, err := liveRevision(tx, id)
 	if err != nil {
 		return err
+	}
+	if IsTaskChannel(channel) {
+		return errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
 	}
 
 	// Charge the rate limit only for a delete that has cleared the hook check

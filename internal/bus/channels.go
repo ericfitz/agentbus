@@ -52,14 +52,26 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Channel{}, err
 	}
-	if err := validateName(name); err != nil {
-		return Channel{}, err
-	}
-	if name == "dm" {
-		return Channel{}, errf("validation", false, "channel name %q is reserved for direct messages", name)
-	}
-	if kind != "ordinary" && kind != "memory" {
-		return Channel{}, errf("validation", false, "kind must be ordinary or memory")
+	if IsTaskChannel(name) {
+		if err := validateName(strings.TrimPrefix(name, TaskPrefix)); err != nil {
+			return Channel{}, err
+		}
+		if kind != "memory" {
+			return Channel{}, errf("validation", false, "task lists (tasks/...) must have kind memory")
+		}
+	} else {
+		if err := validateName(name); err != nil {
+			return Channel{}, err
+		}
+		switch name {
+		case "dm":
+			return Channel{}, errf("validation", false, "channel name %q is reserved for direct messages", name)
+		case "tasks":
+			return Channel{}, errf("validation", false, "channel name %q is reserved for task lists", name)
+		}
+		if kind != "ordinary" && kind != "memory" {
+			return Channel{}, errf("validation", false, "kind must be ordinary or memory")
+		}
 	}
 	tx, err := b.db.Begin()
 	if err != nil {

@@ -134,6 +134,9 @@ func TestFmtBytes(t *testing.T) {
 	if got := fmtBytes(412 << 20); got != "412 MiB" {
 		t.Fatal(got)
 	}
+	if got := fmtBytes(264 << 10); got != "264 KiB" {
+		t.Fatal(got)
+	}
 	if got := fmtBytes(2 << 30); got != "2.0 GiB" {
 		t.Fatal(got)
 	}
@@ -190,5 +193,13 @@ func TestReplyIndentAppliesToWrappedLines(t *testing.T) {
 		if !strings.HasPrefix(l, "    ") {
 			t.Fatalf("wrapped reply line lost its indent: %q", l)
 		}
+	}
+}
+
+// The gear's erase and cursor-forward escapes must stay invisible to lipgloss,
+// or the rail border drifts.
+func TestIconAgentWidth(t *testing.T) {
+	if w := lipgloss.Width(iconAgent); w != lipgloss.Width("⚙️ ") {
+		t.Fatal(w)
 	}
 }

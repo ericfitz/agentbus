@@ -17,8 +17,10 @@ func fmtBytes(n int64) string {
 	switch {
 	case n >= 1<<30:
 		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
-	default:
+	case n >= 1<<20:
 		return fmt.Sprintf("%d MiB", n>>20)
+	default:
+		return fmt.Sprintf("%d KiB", n>>10)
 	}
 }
 
@@ -47,7 +49,11 @@ const (
 	// cell (uncounted by lipgloss) so both agree; swap to a Wide emoji if a
 	// terminal that advances two ever matters. Robot U+1F916 was rejected:
 	// Source Code Pro ships its own glyph there and U+FE0F does not override it.
-	iconAgent = "\u2699\uFE0F\x1b[1C " // gear
+	// CSI 1C skips its cell without writing it, so when a redraw moves the
+	// gear onto a line that held a wide emoji (a new session sorting above
+	// the user row) the old glyph's half stays on screen. CSI 2X (erase two
+	// cells, cursor stays, also uncounted) blanks both cells first.
+	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
 	iconUser  = "\U0001F9D1\uFE0F "    // adult
 	iconIdle  = "\U0001F4A4\uFE0F "    // sleeping sign
 )

@@ -22,7 +22,7 @@ func Status(cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "config: %s\ndata: %s\nusage: %d MiB of %d MiB budget\n", st.ConfigPath, st.DataDirectory, st.UsageBytes>>20, st.BudgetBytes>>20); err != nil {
+	if _, err := fmt.Fprintf(out, "config: %s\ndata: %s\nusage: %.1f MiB of %d MiB budget\n", st.ConfigPath, st.DataDirectory, float64(st.UsageBytes)/(1<<20), st.BudgetBytes>>20); err != nil {
 		return err
 	}
 	if st.Notice != "" {

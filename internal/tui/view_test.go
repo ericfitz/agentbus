@@ -230,3 +230,65 @@ func TestChannelNameColoredInRailAndHeader(t *testing.T) {
 		t.Fatalf("header channel name uncolored: %q", h)
 	}
 }
+
+// A memory channel's name carries the memory color, not the chat color, and
+// chanStyle assigns the same color to the same channel every time it's asked
+// (no per-render randomness or drift).
+func TestMemoryChannelColorIsStable(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	var notes bus.Channel
+	for _, c := range f.m.channels {
+		if c.Name == "dev-notes" {
+			notes = c
+		}
+	}
+	if notes.Name == "" {
+		t.Fatal("dev-notes not in the channel list")
+	}
+	st := f.m.chanStyle(notes)
+	open, _, _ := strings.Cut(st.Render("\x00"), "\x00")
+	if open == "" {
+		t.Fatal("memory channel style renders no color")
+	}
+	if open == f.m.chanStyle(*f.m.selected()).Render("\x00") {
+		t.Fatal("memory and chat channels must not share a color")
+	}
+	if got, _, _ := strings.Cut(f.m.chanStyle(notes).Render("\x00"), "\x00"); got != open {
+		t.Fatalf("chanStyle must assign the same channel the same color every call: %q vs %q", got, open)
+	}
+	if rail := f.m.renderRails(); !strings.Contains(rail, open+iconMem+"dev-notes") {
+		t.Fatalf("memory channel uncolored in rail: %q", rail)
+	}
+}
+
+// A live session's identity name is colored the same way a DM inbox's label
+// would be: the TUI's own row in the user color, everyone else's in the
+// agent color.
+func TestSessionRowColorsMatchIdentity(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // learn Sam's and eric's (the TUI's own) live sessions
+	agentOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Agent).Render("\x00"), "\x00")
+	userOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.User).Render("\x00"), "\x00")
+	rail := f.m.renderRails()
+	var samRow, ericRow string
+	for _, l := range strings.Split(rail, "\n") {
+		switch {
+		case strings.Contains(l, "Sam"):
+			samRow = l
+		case strings.Contains(l, "eric"):
+			ericRow = l
+		}
+	}
+	if !strings.Contains(samRow, agentOpen+"Sam") {
+		t.Fatalf("another identity's session row must use the agent color: %q", samRow)
+	}
+	if !strings.Contains(ericRow, userOpen+"eric") {
+		t.Fatalf("the TUI's own session row must use the user color: %q", ericRow)
+	}
+}

@@ -77,14 +77,15 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 		return Task{}, errf("validation", false, "delete cannot be combined with other changes")
 	}
 
-	// Rules 2-3: the owner guard, bypassed by Force.
-	if !p.Force {
+	// Rules 2-3: the owner guard, bypassed by Force. Gated by
+	// ownerGuardBlocked so enforcement here and the "forced" label
+	// TaskUpdate computes from the same helper can never drift apart; the
+	// two conditions are re-checked only to pick the right message.
+	if !p.Force && ownerGuardBlocked(cur, p, as) {
 		if cur.Status == "in_progress" && cur.Owner != as {
 			return Task{}, errf("conflict", false, "task %d is in progress, owned by %s", cur.ID, cur.Owner)
 		}
-		if p.Owner != nil && *p.Owner != "" && *p.Owner != cur.Owner && cur.Owner != "" {
-			return Task{}, errf("conflict", false, "task %d is owned by %s", cur.ID, cur.Owner)
-		}
+		return Task{}, errf("conflict", false, "task %d is owned by %s", cur.ID, cur.Owner)
 	}
 
 	// Rule 4: delete, once the guard clears. Not bypassed by Force.
@@ -181,14 +182,27 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 			}
 			patched.LeasedUntil = 0
 		case "in_progress":
-			if patched.Owner == "" {
-				return Task{}, errf("validation", false, "an in_progress task needs an owner")
-			}
-			if open := openBlockers(ts, patched.BlockedBy); len(open) > 0 {
-				return Task{}, errf("conflict", false, "task %d is blocked by %v", cur.ID, open)
+			// Only a transition INTO in_progress needs to be unblocked;
+			// renewing an already in_progress task (a lease refresh via
+			// TaskClaim, say) must not be disturbed by a blocker reopened
+			// since (design: reopening "does not disturb dependents
+			// already in progress").
+			if cur.Status != "in_progress" {
+				if open := openBlockers(ts, patched.BlockedBy); len(open) > 0 {
+					return Task{}, errf("conflict", false, "task %d is blocked by %v", cur.ID, open)
+				}
 			}
 		}
 		patched.Status = ns
+	}
+
+	// An in_progress task always needs a non-empty owner. Checked as an
+	// invariant here, not only inside the in_progress case above, so a
+	// patch that clears owner without touching status (or does so with
+	// Force, on someone else's task) can't leave an already in_progress
+	// task ownerless — a state the Status table forbids.
+	if patched.Status == "in_progress" && patched.Owner == "" {
+		return Task{}, errf("validation", false, "an in_progress task needs an owner")
 	}
 
 	// Rule 8: lease. Validated first, then force-cleared unless the
@@ -240,8 +254,10 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 		return Task{}, err
 	}
 
-	// Rule 10: order, recomputed only when parent or before/after are named.
-	if p.Parent != nil || p.Before != 0 || p.After != 0 {
+	// Rule 10: order, recomputed only when this patch actually moves the
+	// task: a parent different from the one already stored, or before/after
+	// (setting parent to its current value is not a move).
+	if (p.Parent != nil && *p.Parent != cur.Parent) || p.Before != 0 || p.After != 0 {
 		rank, err := placeRank(ts, cur.ID, patched.Parent, p.Before, p.After)
 		if err != nil {
 			return Task{}, err
@@ -249,7 +265,9 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 		patched.Rank = rank
 	}
 
-	// Rule 11: no-op.
+	// Rule 11: no-op. A patch whose only effect is rule 9's pruning of a
+	// dead blocked_by id still counts as a real change here, and is
+	// written and rate-charged like any other update.
 	if reflect.DeepEqual(patched, cur) {
 		return cur, nil
 	}
@@ -321,6 +339,27 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 		return TaskUpdateResult{}, errf("not_found", false, "memory %d is not a task", p.ID)
 	}
 
+	// Preflight envelope-size gate (mirrors EditMemory's C1 and
+	// TaskCreate): must run before inspect and checkCapacity so an
+	// oversized subject/description/metadata can never trigger either.
+	// The final document depends on the live task, not loaded until the
+	// write tx below, so this checks only the patch's own text — a lower
+	// bound, but enough to stop the abusive case early.
+	var subj, desc string
+	if p.Subject != nil {
+		subj = *p.Subject
+	}
+	if p.Description != nil {
+		desc = *p.Description
+	}
+	preflight, err := json.Marshal(taskDoc{Subject: subj, Description: desc, Status: "pending", Rank: "V", Metadata: p.Metadata})
+	if err != nil {
+		return TaskUpdateResult{}, internal(err)
+	}
+	if _, _, err := b.sendEnvelope(b.db, as, SendInput{Channel: channel, Content: string(preflight)}, true); err != nil {
+		return TaskUpdateResult{}, err
+	}
+
 	if err := b.inspect("task_update", as, p); err != nil {
 		return TaskUpdateResult{}, err
 	}
@@ -375,11 +414,39 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	}
 
 	if p.Delete {
-		if !b.limits.allow(as, 0, b.Now()) {
-			return TaskUpdateResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
-		}
-		if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), cur.seq); err != nil {
-			return TaskUpdateResult{}, internal(err)
+		if p.Force && ownerGuardBlocked(*cur, p, as) {
+			// The override must be recorded (spec: "force: true lets any
+			// identity override the owner guard, and the override is
+			// recorded"). Write one "forced" revision with the task's
+			// unchanged content, then tombstone that revision too, so
+			// MemoryRevisions ends with a forced row naming the deleter.
+			// An ordinary delete (no guard to bypass) still inserts
+			// nothing.
+			doc, err := taskContent(*cur)
+			if err != nil {
+				return TaskUpdateResult{}, internal(err)
+			}
+			fctx, fsize, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: "forced", Content: doc}, true)
+			if err != nil {
+				return TaskUpdateResult{}, err
+			}
+			if !b.limits.allow(as, fsize, b.Now()) {
+				return TaskUpdateResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
+			}
+			marker, err := b.writeTaskRevision(tx, as, fctx, *cur, "forced")
+			if err != nil {
+				return TaskUpdateResult{}, err
+			}
+			if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), marker.seq); err != nil {
+				return TaskUpdateResult{}, internal(err)
+			}
+		} else {
+			if !b.limits.allow(as, 0, b.Now()) {
+				return TaskUpdateResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
+			}
+			if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), cur.seq); err != nil {
+				return TaskUpdateResult{}, internal(err)
+			}
 		}
 		res := TaskUpdateResult{Task: *cur, Replaced: cur.seq, Deleted: true}
 		if err := b.storeReceipt(tx, as, key, p, res); err != nil {

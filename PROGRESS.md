@@ -152,6 +152,22 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-16 (night): size display, embedding key env var, gear redraw, v1.1.0 release
+
+Pushed to `main`:
+
+- Database sizes under 1 MiB displayed as "0 MiB": `fmtBytes` gains a KiB
+  tier and `agentbus status` prints one decimal. The usage query was correct.
+  The gear agent icon now starts with CSI 2X so a gear redrawn onto a line
+  that held a wide emoji does not keep the old glyph in the cell CSI 1C
+  skips (73fe231).
+- New config field `embedding_api_key_env` (human decision 2026-09-16): the
+  named environment variable wins when set and non-empty;
+  `embedding_api_key_file` is the fallback (a19d325).
+- **v1.1.0 released** (2203ef4, tag v1.1.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.1.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (cccde0d).
+
 ## 2026-09-16 (later still): triangle markers, v1.0.5 release
 
 Pushed to `main`:

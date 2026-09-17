@@ -45,9 +45,9 @@ no `user_version` bump: DM-ness is derived from the name by one helper,
 **Creation.** `Register` creates `dm/<display>` and the owner's subscription
 to it (`from` = oldest) in its existing transaction, with `INSERT OR IGNORE`
 for both. It runs on every register, so identities that existed before this
-release get an inbox at their next register. With `resume=false` the
-subscription is recreated after the delete with its cursor at 0: a DM that
-was already queued is addressed to this identity and must not be dropped.
+release get an inbox at their next register. With `resume=false` the inbox
+subscription row is kept, cursor included: queued direct messages still
+arrive and acknowledged ones are not replayed.
 
 **Guards.** One helper, `dmReadable(as, channel)`, is true when the channel
 is not a DM channel, when `as` owns it, or when `as` is an observer (below).

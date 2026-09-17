@@ -229,7 +229,9 @@ separate process has no other way to learn it.
   change pane: `↑`/`↓` move within the focused one, `→` shows the replies
   under the selected message, `←` hides its whole subtree. `enter` replies to
   the selected message, or opens compose from the channel list. Colors
-  come from the `theme` and `themes` config settings; see below.
+  come from the `theme` and `themes` config settings; see below. The first
+  TUI launch after upgrading subscribes to every existing inbox from its
+  oldest retained message, so retained direct messages show as unread once.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose

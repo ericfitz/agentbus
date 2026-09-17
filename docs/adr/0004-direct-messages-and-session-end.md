@@ -40,12 +40,17 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
    whether a channel is an inbox is derived from its name.
 2. The TUI reads every inbox through `Bus.SetObserver`, which only an
    in-process caller can reach. The MCP server never calls it, so no agent
-   can obtain it through a tool.
+   can obtain it through a tool. The delivery paths (`receive`, `wait`,
+   `register`'s pending list) re-check `dmReadable` too, not just subscribe,
+   history, and search, so inheriting the TUI's name after its session ends
+   does not also inherit its view of other identities' inboxes.
 3. Reading or searching another identity's inbox returns `not_found`, the
    same as a name that never registered, so existence does not leak.
-4. With `resume=false`, the inbox subscription is recreated with its cursor
-   at 0 rather than at the head: a queued direct message is addressed to
-   this identity and must not be dropped.
+4. With `resume=false`, the inbox subscription row is kept, cursor included,
+   rather than dropped and recreated at cursor 0. This replaced the
+   cursor-at-0 design above after the final review (2026-09-17) found it
+   replayed the identity's whole retained inbox, including messages already
+   received and acknowledged.
 5. `Registration.Resumed` ignores the inbox subscription created by the same
    register call, so a brand-new identity still reports `resumed: false`.
 6. The owner's inbox subscription never idle-expires, and the empty-channel
@@ -72,3 +77,10 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
   One view of both directions is out of scope.
 - Harness sessions keep running the old MCP binary until restarted, and the
   installed skill is refreshed only by `agentbus init --global`.
+- The inbox read guard bounds the MCP tool surface; it is not a security
+  boundary against a process with shell access as the same OS user. The
+  SQLite file, `agentbus status`, and `agentbus wait -as <name>` are all
+  reachable there (`wait` withholds a direct message's content but still
+  reveals its sender and timing). Names are not credentials: an agent that
+  registers a name whose session has already ended becomes that identity,
+  inbox included.

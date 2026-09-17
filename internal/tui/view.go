@@ -155,11 +155,7 @@ func (m Model) renderRails() string {
 	for _, s := range m.status.Sessions {
 		live[s.Sender] = s
 	}
-	names := make([]string, 0, len(m.sessionsSeen))
-	for n := range m.sessionsSeen {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := m.sessionNames()
 	for _, n := range names {
 		var row string
 		if s, ok := live[n]; ok {
@@ -175,6 +171,9 @@ func (m Model) renderRails() string {
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
 			row = iconIdle + dim.Render(n+" "+shortDur(age))
+		}
+		if c := m.unread(bus.DMChannel(n)); c > 0 {
+			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
 		}
 		r.WriteString(trunc.Render(row) + "\n")
 	}

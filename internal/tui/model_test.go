@@ -322,13 +322,10 @@ func TestStatusMsgTracksSessionsAndNewChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())
-	nonDM := 0
-	for _, c := range f.m.channels {
-		if !strings.HasPrefix(c.Name, bus.DMPrefix) {
-			nonDM++
-		}
-	}
-	if nonDM != 5 || !f.c.subscribed["late"] {
+	// m.channels never holds DM inboxes (setChannels routes them to m.dms), so
+	// the count is exactly the ordinary/memory channels: dev, dev-notes,
+	// general, memory, late.
+	if len(f.m.channels) != 5 || !f.c.subscribed["late"] {
 		t.Fatalf("new channel not picked up: %v %v", f.m.channels, f.c.subscribed)
 	}
 	if _, ok := f.m.sessionsSeen["Sam"]; !ok {

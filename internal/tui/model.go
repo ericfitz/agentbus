@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -65,6 +66,7 @@ type Model struct {
 	mode   mode
 
 	channels   []bus.Channel
+	dms        []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
 	sel        int
 	msgs       map[string][]bus.Message
 	gaps       map[string][]bus.Gap
@@ -572,6 +574,17 @@ func (m *Model) unread(ch string) int {
 	return n
 }
 
+// sessionNames returns m.sessionsSeen's names sorted: the order the rail
+// draws sessions and the order the sessions pane navigates them.
+func (m *Model) sessionNames() []string {
+	names := make([]string, 0, len(m.sessionsSeen))
+	for n := range m.sessionsSeen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // markSeen records the newest loaded seq of ch as seen.
 func (m *Model) markSeen(ch string) {
 	if ms := m.msgs[ch]; len(ms) > 0 {
@@ -692,14 +705,28 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 }
 
 // setChannels replaces the channel list (sorted by name), keeps the current
-// selection by name, and subscribes to any channel not yet subscribed.
+// selection by name, and subscribes to any channel not yet subscribed. DM
+// inboxes (dm/*) are split out into m.dms: they show in the sessions rail,
+// never the channel list, and are never selectable.
 func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	cur := m.selName()
 	chans = slices.Clone(chans) // don't sort the caller's slice (bus.Status.Channels) in place
 	sort.Slice(chans, func(i, j int) bool { return chans[i].Name < chans[j].Name })
-	m.channels = chans
+	// chans (all of them, DM and ordinary) is still needed below to subscribe
+	// to everything, so the split below builds two new slices rather than
+	// filtering chans in place.
+	var dms, channels []bus.Channel
+	for _, c := range chans {
+		if strings.HasPrefix(c.Name, bus.DMPrefix) {
+			dms = append(dms, c)
+		} else {
+			channels = append(channels, c)
+		}
+	}
+	m.dms = dms
+	m.channels = channels
 	m.sel = -1
-	for i, c := range chans {
+	for i, c := range m.channels {
 		if c.Name == cur {
 			m.sel = i
 		}
@@ -710,7 +737,7 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 			cmds = append(cmds, m.subscribeCmd(c, from))
 		}
 	}
-	if m.sel < 0 && len(chans) > 0 {
+	if m.sel < 0 && len(m.channels) > 0 {
 		cmds = append(cmds, m.selectChannel(0))
 	}
 	return tea.Batch(cmds...)

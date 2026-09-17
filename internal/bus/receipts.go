@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 )
 
 // queryRower is satisfied by both *sql.DB and *sql.Tx, so checkReceipt can run
@@ -30,7 +31,7 @@ func (b *Bus) checkReceipt(q queryRower, as, key string, payload any) (json.RawM
 	}
 	var fp, result string
 	err := q.QueryRow("SELECT fingerprint, result FROM receipts WHERE sender=? AND key=? AND expires_at > ?", as, key, b.nowMs()).Scan(&fp, &result)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {

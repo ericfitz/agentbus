@@ -41,8 +41,14 @@ func TestTaskChannelNameRules(t *testing.T) {
 	if _, err := b.CreateChannel("Sam", "tasks/work", "memory"); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, func() error { _, err := b.CreateChannel("Sam", "tasks/other", "ordinary"); return err }(), "validation")
-	wantCode(t, func() error { _, err := b.CreateChannel("Sam", "tasks", "memory"); return err }(), "validation")
+	_, err := b.CreateChannel("Sam", "tasks/other", "ordinary")
+	if err == nil || !strings.Contains(err.Error(), "kind memory") {
+		t.Fatalf("tasks/other with kind ordinary: %v", err)
+	}
+	_, err = b.CreateChannel("Sam", "tasks", "memory")
+	if err == nil || !strings.Contains(err.Error(), "reserved for task lists") {
+		t.Fatalf("bare tasks: %v", err)
+	}
 	wantCode(t, func() error { _, err := b.CreateChannel("Sam", "tasks/", "memory"); return err }(), "validation")
 	wantCode(t, func() error { _, err := b.CreateChannel("Sam", "tasks/a/b", "memory"); return err }(), "validation")
 	wantCode(t, func() error { _, err := b.CreateChannel("Sam", "x/y", "memory"); return err }(), "validation")
@@ -58,7 +64,8 @@ func TestTaskCreateGetRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Subject != "Port the limiter tests" || got.Status != "pending" || got.Owner != "" ||
-		got.Rank == "" || got.Revision != 1 || got.UpdatedBy != "Sam" || got.Blocked {
+		got.Rank == "" || got.Revision != 1 || got.UpdatedBy != "Sam" || got.Blocked ||
+		got.Description != "desc" || len(got.Metadata) != 1 || got.Metadata["k"] != "v" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -147,14 +154,20 @@ func TestPlainWritesRefusedOnTaskChannels(t *testing.T) {
 	reg(t, b, "Sam")
 	taskList(t, b)
 	task := mustCreate(t, b, TaskCreateInput{Subject: "x"})
-	if _, err := b.Send("Sam", SendInput{Channel: "tasks/work", Content: "hi"}); err == nil || !strings.Contains(err.Error(), "task_update") {
-		t.Fatalf("Send: %v", err)
+	_, sendErr := b.Send("Sam", SendInput{Channel: "tasks/work", Content: "hi"})
+	wantCode(t, sendErr, "validation")
+	if sendErr == nil || !strings.Contains(sendErr.Error(), "task_update") {
+		t.Fatalf("Send: %v", sendErr)
 	}
-	if _, err := b.EditMemory("Sam", EditInput{ID: task.ID, Content: "hi"}); err == nil || !strings.Contains(err.Error(), "task_update") {
-		t.Fatalf("EditMemory: %v", err)
+	_, editErr := b.EditMemory("Sam", EditInput{ID: task.ID, Content: "hi"})
+	wantCode(t, editErr, "validation")
+	if editErr == nil || !strings.Contains(editErr.Error(), "task_update") {
+		t.Fatalf("EditMemory: %v", editErr)
 	}
-	if err := b.DeleteMemory("Sam", task.ID, ""); err == nil || !strings.Contains(err.Error(), "task_update") {
-		t.Fatalf("DeleteMemory: %v", err)
+	deleteErr := b.DeleteMemory("Sam", task.ID, "")
+	wantCode(t, deleteErr, "validation")
+	if deleteErr == nil || !strings.Contains(deleteErr.Error(), "task_update") {
+		t.Fatalf("DeleteMemory: %v", deleteErr)
 	}
 	got, err := b.GetMemory("Sam", task.ID)
 	if err != nil {
@@ -204,6 +217,72 @@ func TestTaskCreateIdempotentReplay(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Fatalf("want one task, got %d", len(list))
+	}
+}
+
+// TestPlaceRankUsesEffectiveParentForOrphans covers Important 1 from the
+// task-2 review: a task whose stored parent no longer exists is a root for
+// tree-order purposes (design's Hierarchy section), so placeRank must place
+// new siblings against it using the same effective-parent rule, not the raw
+// stored parent.
+func TestPlaceRankUsesEffectiveParentForOrphans(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+	root := mustCreate(t, b, TaskCreateInput{Subject: "root"})
+	// Insert an orphan directly: a task whose parent id does not exist. No
+	// TaskCreate path can produce this (validateTaskLinks refuses an unknown
+	// parent), so it's simulated with a raw insert, as the design's
+	// "after retention" scenario would.
+	const orphanID = int64(500)
+	orphanDoc := `{"subject":"orphan","status":"pending","rank":"W","parent":999999}`
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,bytes,memory_id,revision) VALUES('tasks/work','Sam','',0,?,8,?,1)", orphanDoc, orphanID); err != nil {
+		t.Fatal(err)
+	}
+	// After: orphan must succeed (orphan is a sibling under the effective
+	// root) and place the new task right after it, not fail "not a sibling
+	// under parent 0".
+	mustCreate(t, b, TaskCreateInput{Subject: "after-orphan", After: orphanID})
+	// A plain append (no before/after) must rank after the orphan too.
+	mustCreate(t, b, TaskCreateInput{Subject: "appended"})
+
+	list, err := b.TaskList("Sam", TaskListInput{Channel: "tasks/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, x := range list {
+		order = append(order, x.Subject)
+	}
+	want := "root,orphan,after-orphan,appended"
+	if got := strings.Join(order, ","); got != want {
+		t.Fatalf("order=%q want=%q", got, want)
+	}
+	_ = root
+}
+
+// TestTaskCreateReplaySurvivesChannelDeletion covers Important 2 from the
+// task-2 review: the receipt check must run before the channel-existence
+// lookup (R2), so a keyed retry replays its stored task even after the
+// channel (and its messages) are gone, rather than failing not_found.
+func TestTaskCreateReplaySurvivesChannelDeletion(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+	in := TaskCreateInput{Channel: "tasks/work", Subject: "durable", IdempotencyKey: "k2"}
+	first, err := b.TaskCreate("Sam", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.DeleteChannel("tasks/work", ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := b.TaskCreate("Sam", in)
+	if err != nil {
+		t.Fatalf("replay after channel deletion must not fail: %v", err)
+	}
+	if second.ID != first.ID || second.Subject != first.Subject {
+		t.Fatalf("replay=%+v want=%+v", second, first)
 	}
 }
 

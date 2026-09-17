@@ -254,6 +254,19 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 		return nil
 	}
 
+	// Mutable-state lookup, now safely after the receipt check (R2): learn
+	// the channel from the memory's current live revision, so a task-list
+	// delete_memory is refused before the hook runs for a request that will
+	// always be refused. Repeated inside the transaction below against
+	// committed state.
+	_, _, channel, err := liveRevision(b.db, id)
+	if err != nil {
+		return err
+	}
+	if IsTaskChannel(channel) {
+		return errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
+	}
+
 	if err := b.inspect("delete_memory", as, payload); err != nil {
 		return err
 	}

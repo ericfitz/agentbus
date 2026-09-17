@@ -139,9 +139,10 @@ func dedupeIDs(ids []int64) []int64 {
 // JSON object with a non-empty subject and a valid status are skipped (an
 // old binary may have written a plain memory there). Derived fields
 // (Blocked, OpenBlockers) are filled in, and the result is ordered
-// depth-first by the tree (see sortTaskTree).
+// depth-first by the tree (see taskTree). ORDER BY seq makes the scan
+// deterministic, which matters for taskTree's cycle fallback.
 func loadTasks(q querier, channel string) ([]Task, error) {
-	rows, err := q.Query("SELECT seq, memory_id, revision, sender, created_at, content FROM messages WHERE channel=? AND memory_id IS NOT NULL AND tombstone=0", channel)
+	rows, err := q.Query("SELECT seq, memory_id, revision, sender, created_at, content FROM messages WHERE channel=? AND memory_id IS NOT NULL AND tombstone=0 ORDER BY seq", channel)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -169,7 +170,8 @@ func loadTasks(q querier, channel string) ([]Task, error) {
 		return nil, internal(err)
 	}
 	fillDerived(ts)
-	return sortTaskTree(ts), nil
+	order, _ := taskTree(ts)
+	return order, nil
 }
 
 // fillDerived computes Blocked and OpenBlockers for every task in ts, in
@@ -191,22 +193,36 @@ func fillDerived(ts []Task) {
 	}
 }
 
-// sortTaskTree orders ts depth-first: each task followed by its children,
-// siblings by rank then id. A task whose parent is missing from ts is
-// treated as a root. A cycle among tasks with no live root (only possible
-// from a corrupt write) can't be reached by the walk below, so it is
-// emitted last, as extra roots in scan order.
-func sortTaskTree(ts []Task) []Task {
-	live := make(map[int64]bool, len(ts))
-	for _, t := range ts {
-		live[t.ID] = true
+// taskByID returns the task in ts with the given id, or nil.
+func taskByID(ts []Task, id int64) *Task {
+	for i := range ts {
+		if ts[i].ID == id {
+			return &ts[i]
+		}
 	}
+	return nil
+}
+
+// effectiveParent returns parent's effective value for tree purposes: 0
+// (root) when parent is not a live task in ts. The design's Hierarchy
+// section makes this reachable ("a task whose parent is missing ... is
+// treated as a root task"), for example after retention drops the parent.
+func effectiveParent(ts []Task, parent int64) int64 {
+	if parent != 0 && taskByID(ts, parent) == nil {
+		return 0
+	}
+	return parent
+}
+
+// taskTree groups ts by effective parent and walks it depth-first from the
+// root, returning both the resulting order (each task followed by its
+// children, siblings by rank then id) and each task's depth. A cycle with
+// no path from a live root can't be reached by the walk (only possible from
+// a corrupt write); its members are emitted last, as extra roots at depth 0.
+func taskTree(ts []Task) ([]Task, map[int64]int) {
 	children := map[int64][]Task{}
 	for _, t := range ts {
-		p := t.Parent
-		if p != 0 && !live[p] {
-			p = 0
-		}
+		p := effectiveParent(ts, t.Parent)
 		children[p] = append(children[p], t)
 	}
 	for p, sib := range children {
@@ -219,57 +235,28 @@ func sortTaskTree(ts []Task) []Task {
 		children[p] = sib
 	}
 	order := make([]Task, 0, len(ts))
+	depth := make(map[int64]int, len(ts))
 	visited := make(map[int64]bool, len(ts))
-	var walk func(parent int64)
-	walk = func(parent int64) {
+	var walk func(parent int64, d int)
+	walk = func(parent int64, d int) {
 		for _, t := range children[parent] {
 			if visited[t.ID] {
 				continue
 			}
 			visited[t.ID] = true
+			depth[t.ID] = d
 			order = append(order, t)
-			walk(t.ID)
+			walk(t.ID, d+1)
 		}
 	}
-	walk(0)
+	walk(0, 0)
 	for _, t := range ts {
 		if !visited[t.ID] {
 			order = append(order, t)
+			depth[t.ID] = 0
 		}
 	}
-	return order
-}
-
-// taskByID returns the task in ts with the given id, or nil.
-func taskByID(ts []Task, id int64) *Task {
-	for i := range ts {
-		if ts[i].ID == id {
-			return &ts[i]
-		}
-	}
-	return nil
-}
-
-// taskDepth returns t's depth in the tree formed by ts: the number of live
-// ancestors found by following Parent. A missing parent or a parent-chain
-// cycle (only possible from a corrupt write) stops the walk, treating t as
-// a root from that point, matching sortTaskTree's rule.
-func taskDepth(ts []Task, t Task) int {
-	seen := map[int64]bool{t.ID: true}
-	depth := 0
-	for t.Parent != 0 {
-		if seen[t.Parent] {
-			break
-		}
-		p := taskByID(ts, t.Parent)
-		if p == nil {
-			break
-		}
-		seen[p.ID] = true
-		t = *p
-		depth++
-	}
-	return depth
+	return order, depth
 }
 
 // followsToSelf reports whether walking from start via next (parent chain
@@ -318,15 +305,11 @@ func validateTaskLinks(ts []Task, t Task) error {
 			return errf("validation", false, "parent %d would create a cycle", t.Parent)
 		}
 	}
-	if len(t.BlockedBy) > 64 {
+	blockers := dedupeIDs(t.BlockedBy)
+	if len(blockers) > 64 {
 		return errf("validation", false, "blocked_by accepts at most 64 tasks")
 	}
-	seen := map[int64]bool{}
-	for _, bid := range t.BlockedBy {
-		if seen[bid] {
-			continue
-		}
-		seen[bid] = true
+	for _, bid := range blockers {
 		if bid == t.ID {
 			return errf("validation", false, "task %d cannot block itself", t.ID)
 		}
@@ -351,16 +334,19 @@ func rankStep(lo, hi string) string {
 }
 
 // placeRank computes the rank for self among the tasks in ts that share
-// parent (self excluded from that sibling set), positioned by before/after
-// (sibling task ids, mutually exclusive) or appended after the last sibling
-// when neither is set.
+// parent's effective value (self excluded from that sibling set), positioned
+// by before/after (sibling task ids, mutually exclusive) or appended after
+// the last sibling when neither is set. Comparing by effective parent (see
+// effectiveParent) matches an orphaned sibling — one whose stored parent no
+// longer exists — which the tree treats as a root.
 func placeRank(ts []Task, self, parent, before, after int64) (string, error) {
 	if before != 0 && after != 0 {
 		return "", errf("validation", false, "before and after are mutually exclusive")
 	}
+	parent = effectiveParent(ts, parent)
 	var sib []Task
 	for _, t := range ts {
-		if t.ID != self && t.Parent == parent {
+		if t.ID != self && effectiveParent(ts, t.Parent) == parent {
 			sib = append(sib, t)
 		}
 	}
@@ -408,6 +394,20 @@ func placeRank(ts []Task, self, parent, before, after int64) (string, error) {
 	}
 }
 
+// taskChannelExists returns not_found when channel does not exist. q may be
+// b.db (a preflight check) or a *sql.Tx.
+func (b *Bus) taskChannelExists(q queryRower, channel string) error {
+	var exists int
+	err := q.QueryRow("SELECT 1 FROM channels WHERE name=?", channel).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errf("not_found", false, "channel %q does not exist; create it first", channel)
+	}
+	if err != nil {
+		return internal(err)
+	}
+	return nil
+}
+
 // receiptTaskResult unmarshals a stored receipt result back into a Task.
 func receiptTaskResult(raw json.RawMessage) (Task, error) {
 	var t Task
@@ -419,8 +419,13 @@ func receiptTaskResult(raw json.RawMessage) (Task, error) {
 
 // TaskCreate adds a task to a task-list channel, positioning it among its
 // siblings and validating its parent/blocked_by links. Pipeline mirrors
-// Send (messages.go): preflight checks on b.db, then a write transaction
-// that re-verifies ownership and idempotency before computing the rank and
+// Send (messages.go): shape checks, then the read-only receipt check (R2:
+// a keyed retry must replay its stored result even if the channel it named
+// has since been deleted, rather than failing not_found — the controller's
+// ruling on the brief, which had the channel-existence check too early),
+// then the mutable channel-existence check (mirrors Send's validateSendRefs
+// placement), then preflight checks on b.db, then a write transaction that
+// re-verifies ownership and idempotency before computing the rank and
 // inserting. Never charges embedSoon: task rows are excluded from the
 // embedder (embed.go).
 func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
@@ -429,13 +434,6 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	}
 	if !IsTaskChannel(in.Channel) {
 		return Task{}, errf("validation", false, "%q is not a task list", in.Channel)
-	}
-	var kind string
-	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
-	case errors.Is(err, sql.ErrNoRows):
-		return Task{}, errf("not_found", false, "channel %q does not exist; create it first", in.Channel)
-	case err != nil:
-		return Task{}, internal(err)
 	}
 	if err := validateTaskSubject(in.Subject); err != nil {
 		return Task{}, err
@@ -450,6 +448,10 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 		return Task{}, err
 	} else if hit {
 		return receiptTaskResult(prev)
+	}
+
+	if err := b.taskChannelExists(b.db, in.Channel); err != nil {
+		return Task{}, err
 	}
 
 	blockedBy := dedupeIDs(in.BlockedBy)
@@ -567,12 +569,8 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 	if !IsTaskChannel(in.Channel) {
 		return nil, errf("validation", false, "%q is not a task list", in.Channel)
 	}
-	var kind string
-	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
-	case errors.Is(err, sql.ErrNoRows):
-		return nil, errf("not_found", false, "channel %q does not exist", in.Channel)
-	case err != nil:
-		return nil, internal(err)
+	if err := b.taskChannelExists(b.db, in.Channel); err != nil {
+		return nil, err
 	}
 	if in.Status != "" && !isTaskStatus(in.Status) {
 		return nil, errf("validation", false, "status must be pending, in_progress, or completed")
@@ -581,6 +579,7 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, depth := taskTree(ts)
 	sums := make([]TaskSummary, 0, len(ts))
 	for _, t := range ts {
 		if in.Status != "" && t.Status != in.Status {
@@ -591,7 +590,7 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 		}
 		sums = append(sums, TaskSummary{
 			ID: t.ID, Subject: t.Subject, Status: t.Status, Owner: t.Owner,
-			Parent: t.Parent, Depth: taskDepth(ts, t), OpenBlockers: t.OpenBlockers,
+			Parent: t.Parent, Depth: depth[t.ID], OpenBlockers: t.OpenBlockers,
 			LeasedUntil: t.LeasedUntil,
 		})
 	}

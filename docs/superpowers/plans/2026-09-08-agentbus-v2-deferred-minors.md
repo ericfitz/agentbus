@@ -59,3 +59,48 @@ numbers are as of the review commit named in each entry and may have moved.
 - Already fixed before this pass, no change needed: identity.go surfaces
   malformed/unreadable identity files and validates the name; status prints
   a zero embedding backlog when no embedder is configured.
+
+# Resolved 2026-09-17 (deferred-minors sweep)
+
+Every "Minor (deferred)" entry above was re-checked against the code, along
+with the v1.2.0 minors from PROGRESS.md. Most were already fixed or obsolete;
+the rest were fixed on `chore/minors-bus`, `chore/minors-edge`, and
+`chore/minors-tui` (merged to main). Notable changes:
+
+- bus: `receive` acks only the rows that pass the inbox readability filter,
+  per row (a batch token spans channels); stale-model embedding purge runs
+  only when a stale row exists; rate-limit error text for edit/delete names
+  the limit; search hit size includes `score`; dead `fq==""` guard removed;
+  `errors.Is` for `sql.ErrNoRows`; `ponytail:` notes on the suffix search,
+  limiter bucket map, per-subscription gap lookup, and 1000-row search pages.
+- bus tests: byte bucket, replay/conflict not charged, search
+  mode/cursor/since/until/score order, post-reset `not_registered`,
+  tick-deadline handler entry, inspection serialization without sleeps.
+- config: clearer error for an empty config file; coverage for wrong-type,
+  `log_level` enum, count ordering, `inspection_command` bounds, `--config`
+  precedence.
+- mcpserver: `os.SameFile` for log identity; retention-cap test over more
+  than four rotations; `Register.Pending` trim test; in-flight heartbeat
+  wait test; hook provenance by pid; spawned child built with `-race` under
+  `-race`; spawn cleanup guarded by `ProcessState`.
+- tui: tests for rail highlight following the selection, memory and session
+  row colors, and `d`/`s` no-ops with a session selected.
+
+Left open, each needing a human decision (behavior, schema, or contract):
+
+1. `AGENTBUS_DATA_DIR` is used verbatim (no `~/` expansion; relative paths
+   resolve against the working directory).
+2. `go.mod` pins `go 1.27.1` rather than `1.27`.
+3. Owner token is 12 random bytes where the brief said 16; `randomToken` is
+   shared with batch tokens and `maxBatchTokenLen` encodes its length.
+4. `messages.bytes` undercounts the envelope and nothing reads the column:
+   fix the count or drop the column (schema change).
+5. Send validates channel and `reply_to` outside the write transaction;
+   moving it inside changes the error a caller sees when a channel is
+   deleted mid-send.
+6. `result()` would label a non-bus handler error as `validation`; no such
+   path exists today.
+
+Not done by choice: bus tests that drop setup errors (`_, _ = b.CreateChannel`)
+are a suite-wide convention, left as is; pragma/index smoke tests for
+`Open` were skipped as low value.

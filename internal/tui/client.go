@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -134,5 +135,7 @@ func (c *client) receiveLoop(send func(tea.Msg)) {
 func (c *client) close() error {
 	c.cancel()
 	c.wg.Wait()
-	return c.b.Close()
+	// Quitting frees the TUI's name at once rather than after the expiry.
+	endErr := c.b.EndSessions()
+	return errors.Join(endErr, c.b.Close())
 }

@@ -238,3 +238,34 @@ func TestRegisterReportsOtherLiveIdentities(t *testing.T) {
 		t.Fatalf("others must be omitted when discovery is disabled: %+v %v", r, err)
 	}
 }
+
+// EndSessions frees this process's names at once, leaves other processes'
+// sessions alone, and keeps subscriptions so the identity can resume.
+func TestEndSessionsFreesOwnNamesImmediately(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe("Sam", "general", "now"); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := Open(b.cfg, b.log)
+	defer func() { _ = other.Close() }()
+	if _, err := other.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+	live, err := other.Discover("Pat")
+	if err != nil || len(live) != 1 || live[0].Sender != "Pat" {
+		t.Fatalf("only Pat should remain live: %+v %v", live, err)
+	}
+	r, err := other.Register("Sam", "", "repo", true)
+	if err != nil || r.Sender != "Sam" {
+		t.Fatalf("ended name must be free without waiting for expiry: %+v %v", r, err)
+	}
+	if len(r.Pending) != 1 || r.Pending[0].Channel != "general" {
+		t.Fatalf("subscriptions must survive the session end: %+v", r.Pending)
+	}
+}

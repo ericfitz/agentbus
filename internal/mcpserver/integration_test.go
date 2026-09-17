@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -506,5 +507,37 @@ func TestStdoutCarriesOnlyProtocol(t *testing.T) {
 	}
 	if !strings.Contains(string(logBody), "agentbus mcp started") {
 		t.Fatalf("log file missing startup line: %s", logBody)
+	}
+}
+
+// A server that shuts down cleanly (client disconnect or SIGTERM) ends its
+// sessions itself, so the name is free at once instead of after the 30s
+// attachment expiry that TestDeadProcessHoldsNameUntilExpiry covers.
+func TestCleanShutdownFreesNameImmediately(t *testing.T) {
+	for _, how := range []string{"disconnect", "sigterm"} {
+		t.Run(how, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, `{}`)
+			a := spawn(t, dir)
+			if _, e := a.call(t, "register", map[string]any{"name": "Sam"}); e != "" {
+				t.Fatal(e)
+			}
+			if how == "disconnect" {
+				a.close(t)
+			} else {
+				if err := a.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+					t.Fatal(err)
+				}
+				_, _ = a.cmd.Process.Wait()
+			}
+			b := spawn(t, dir)
+			rb, e := b.call(t, "register", map[string]any{"name": "Sam"})
+			if e != "" {
+				t.Fatal(e)
+			}
+			if rb["as"] != "Sam" {
+				t.Fatalf("clean shutdown must free the name: got %v", rb["as"])
+			}
+		})
 	}
 }

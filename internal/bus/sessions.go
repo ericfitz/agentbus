@@ -248,6 +248,16 @@ func (b *Bus) Heartbeat() error {
 	return nil
 }
 
+// EndSessions deletes every session this process owns, so a process that
+// shuts down cleanly frees its names at once instead of holding them until
+// the attachment expiry. Subscriptions stay: the identity resumes later.
+func (b *Bus) EndSessions() error {
+	if _, err := b.db.Exec("DELETE FROM sessions WHERE owner=?", b.owner); err != nil {
+		return internal(err)
+	}
+	return nil
+}
+
 func (b *Bus) Discover(as string) ([]Session, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err

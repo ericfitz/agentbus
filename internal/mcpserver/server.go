@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -361,7 +363,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 			log.Warn("bus close failed", "err", cerr)
 		}
 	}()
-	ctx, cancel := context.WithCancel(ctx)
+	// SIGTERM/SIGINT/SIGHUP cancel ctx so the server returns and the session
+	// cleanup below runs; a harness that only closes stdin gets there too.
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	// wg.Wait must run after cancel() but before b.Close(): otherwise a
 	// Heartbeat or Tick in flight when the client disconnects can execute
 	// against a closed bus. Defers run LIFO, so registering wg.Wait before
@@ -372,7 +376,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	defer cancel()
 	log.Info("agentbus mcp started", "version", Version, "config", cfg.Path, "data", cfg.DataDirectory)
 	err = newServer(b, cfg, log).Run(ctx, &mcp.StdioTransport{})
-	if err != nil {
+	if eerr := b.EndSessions(); eerr != nil {
+		log.Warn("end sessions failed", "err", eerr)
+	}
+	if err != nil && ctx.Err() == nil {
 		log.Error("server run failed", "err", err)
 	}
 	return err

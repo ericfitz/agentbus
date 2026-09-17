@@ -374,6 +374,9 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
+	if !b.dmReadable(as, channel) {
+		return nil, errf("not_found", false, "channel %q does not exist", channel)
+	}
 	if count <= 0 {
 		count = b.cfg.ReceiveDefaultCount
 	}

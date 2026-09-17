@@ -20,6 +20,18 @@ func dmOwner(channel string) (string, bool) {
 	return owner, ok && owner != ""
 }
 
+// SetObserver lets identity as, registered in this process, read and
+// subscribe to every DM inbox. Only the in-process TUI calls it; the MCP
+// server never does, so no agent can obtain it through a tool.
+func (b *Bus) SetObserver(as string) { b.observer = as }
+
+// dmReadable reports whether as may read channel: always for ordinary
+// channels, and for a DM inbox only its owner or the observer.
+func (b *Bus) dmReadable(as, channel string) bool {
+	owner, ok := dmOwner(channel)
+	return !ok || owner == as || (b.observer != "" && b.observer == as)
+}
+
 // ensureInbox creates display's inbox and its subscription to it, both
 // idempotently, inside Register's transaction. A new subscription starts at
 // 0 so DMs sent before a resume=false re-register are still delivered.

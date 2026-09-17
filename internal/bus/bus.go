@@ -32,6 +32,9 @@ type Bus struct {
 	cfg   config.Config
 	log   *slog.Logger
 	owner string
+	// observer is the identity SetObserver granted DM-inbox read/subscribe
+	// access to everywhere, set once before use so no lock guards it.
+	observer string
 	// Now is the clock; tests override it.
 	Now func() time.Time
 

@@ -89,8 +89,10 @@ func TestReceiveGapAndExpiry(t *testing.T) {
 	if exp := filterDM(r.Expired); len(exp) != 1 || exp[0] != "dev" {
 		t.Fatalf("idle subscription must expire: %+v", r)
 	}
+	// The DM inbox subscription never idle-expires (its own test covers
+	// that); exclude it here so this assertion still checks only "dev".
 	var n int
-	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", kim).Scan(&n)
+	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=? AND channel<>?", kim, DMChannel(kim)).Scan(&n)
 	if n != 0 {
 		t.Fatal("expired subscription not deleted")
 	}

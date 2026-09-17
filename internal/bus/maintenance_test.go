@@ -360,8 +360,10 @@ func TestTickDoesNotReapSubscriptionsBeforeReceiveReportsExpiry(t *testing.T) {
 	if !found {
 		t.Fatalf("expected dev in Expired after Tick + Receive, got %+v", res.Expired)
 	}
+	// The DM inbox subscription never idle-expires (its own test covers
+	// that); exclude it here so this assertion still checks only "dev".
 	var n int
-	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=?", sam).Scan(&n); err != nil {
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=? AND channel<>?", sam, DMChannel(sam)).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {

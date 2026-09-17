@@ -55,12 +55,20 @@ func ftsQuery(q string) string {
 	return strings.Join(terms, " ")
 }
 
-func searchFilters(in SearchInput) (string, []any) {
+// searchFilters builds the shared WHERE clauses for the text and semantic
+// search queries. Scoped to a channel, that channel's own equality clause is
+// enough (Search has already checked as may read it); unscoped, a DM inbox
+// that isn't as's own is excluded so a global search never leaks another
+// identity's messages.
+func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 	var sb strings.Builder
 	var args []any
 	if in.Channel != "" {
 		sb.WriteString(" AND m.channel=?")
 		args = append(args, in.Channel)
+	} else if b.observer != as {
+		sb.WriteString(" AND (m.channel NOT LIKE 'dm/%' OR m.channel=?)")
+		args = append(args, DMChannel(as))
 	}
 	if in.Sender != "" {
 		sb.WriteString(" AND m.sender=?")
@@ -83,12 +91,12 @@ func searchFilters(in SearchInput) (string, []any) {
 
 // textSearch runs the FTS5 query joined back to messages (excluding
 // tombstones) and returns hits ranked by bm25, best match first.
-func (b *Bus) textSearch(in SearchInput, limit int) ([]SearchHit, error) {
+func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, error) {
 	fq := ftsQuery(in.Query)
 	if fq == "" {
 		return []SearchHit{}, nil
 	}
-	filters, fargs := searchFilters(in)
+	filters, fargs := b.searchFilters(as, in)
 	q := "SELECT " + qualifiedColumns("m") + ", bm25(messages_fts) FROM messages_fts JOIN messages m ON m.seq=messages_fts.rowid WHERE messages_fts MATCH ? AND m.tombstone=0" + filters + " ORDER BY bm25(messages_fts) LIMIT ?"
 	args := append([]any{fq}, fargs...)
 	args = append(args, limit)
@@ -126,6 +134,9 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	if strings.TrimSpace(in.Query) == "" {
 		return SearchResult{}, errf("validation", false, "query is required")
 	}
+	if in.Channel != "" && !b.dmReadable(as, in.Channel) {
+		return SearchResult{}, errf("not_found", false, "channel %q does not exist", in.Channel)
+	}
 	if in.Count <= 0 {
 		in.Count = searchPageDefault
 	}
@@ -151,9 +162,9 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	var err error
 	switch in.Mode {
 	case "text":
-		ranked, err = b.textSearch(in, searchPageMax)
+		ranked, err = b.textSearch(as, in, searchPageMax)
 	case "semantic", "both":
-		ranked, res.SemanticUnavailable, err = b.rankedSearch(in)
+		ranked, res.SemanticUnavailable, err = b.rankedSearch(as, in)
 	default:
 		return SearchResult{}, errf("validation", false, "mode must be text, semantic, or both")
 	}
@@ -192,23 +203,23 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 // rankedSearch serves the semantic and both modes. If the embedder is unset or
 // the endpoint is unreachable, it falls back to text search and reports
 // unavailable=true.
-func (b *Bus) rankedSearch(in SearchInput) ([]SearchHit, bool, error) {
+func (b *Bus) rankedSearch(as string, in SearchInput) ([]SearchHit, bool, error) {
 	if b.embedder == nil {
-		hits, err := b.textSearch(in, searchPageMax)
+		hits, err := b.textSearch(as, in, searchPageMax)
 		return hits, true, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), b.embedder.queryTimeout)
 	defer cancel()
-	sem, err := b.semanticSearch(ctx, in)
+	sem, err := b.semanticSearch(ctx, as, in)
 	if err != nil {
 		b.log.Warn("semantic search unavailable", "err", err)
-		hits, terr := b.textSearch(in, searchPageMax)
+		hits, terr := b.textSearch(as, in, searchPageMax)
 		return hits, true, terr
 	}
 	if in.Mode == "semantic" {
 		return sem, false, nil
 	}
-	text, err := b.textSearch(in, searchPageMax)
+	text, err := b.textSearch(as, in, searchPageMax)
 	if err != nil {
 		return nil, false, err
 	}
@@ -217,12 +228,12 @@ func (b *Bus) rankedSearch(in SearchInput) ([]SearchHit, bool, error) {
 
 // semanticSearch ranks live memory revisions by dot product against the query
 // embedding, brute-force in Go over candidates selected by the SQL filters.
-func (b *Bus) semanticSearch(ctx context.Context, in SearchInput) ([]SearchHit, error) {
+func (b *Bus) semanticSearch(ctx context.Context, as string, in SearchInput) ([]SearchHit, error) {
 	qv, err := b.embedder.embed(ctx, []string{in.Query})
 	if err != nil {
 		return nil, err
 	}
-	filters, fargs := searchFilters(in)
+	filters, fargs := b.searchFilters(as, in)
 	candidateWhere := " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0 AND m.memory_id IS NOT NULL" + filters
 
 	vecRows, err := b.db.Query("SELECT e.seq, e.vector"+candidateWhere, append([]any{b.embedder.model}, fargs...)...)

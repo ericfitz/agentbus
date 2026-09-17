@@ -144,3 +144,128 @@ func TestChannelNameDMIsReserved(t *testing.T) {
 		t.Fatal("EnsureChannel dm must fail")
 	}
 }
+
+// twoAgents registers Sam on b and Pat on a second process.
+func twoAgents(t *testing.T) (b, other *Bus) {
+	t.Helper()
+	b = newTestBus(t)
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(b.cfg, b.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	if _, err := other.Register("Pat", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	return b, other
+}
+
+func TestDMGuards(t *testing.T) {
+	b, other := twoAgents(t)
+	if _, err := b.Send("Sam", SendInput{Channel: "dm/Pat", Content: "secret zebra"}); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := func(name, kind string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), kind) {
+			t.Fatalf("%s: want %s, got %v", name, kind, err)
+		}
+	}
+	wantErr("subscribe other", "validation", b.Subscribe("Sam", "dm/Pat", "now"))
+	wantErr("subscribe own", "validation", other.Subscribe("Pat", "dm/Pat", "now"))
+	wantErr("unsubscribe own", "validation", other.Unsubscribe("Pat", "dm/Pat"))
+	_, err := b.DeleteChannel("dm/Pat", "")
+	wantErr("delete", "validation", err)
+	_, err = b.History("Sam", "dm/Pat", nil, nil, 10)
+	wantErr("history by sender", "not_found", err)
+	_, err = b.Search("Sam", SearchInput{Query: "zebra", Channel: "dm/Pat", Mode: "text"})
+	wantErr("scoped search by sender", "not_found", err)
+	res, err := b.Search("Sam", SearchInput{Query: "zebra", Mode: "text"})
+	if err != nil || len(res.Hits) != 0 {
+		t.Fatalf("unscoped search must not leak another inbox: %+v %v", res, err)
+	}
+	// The owner can read its own inbox both ways.
+	if ms, err := other.History("Pat", "dm/Pat", nil, nil, 10); err != nil || len(ms) != 1 {
+		t.Fatalf("%+v %v", ms, err)
+	}
+	if res, err := other.Search("Pat", SearchInput{Query: "zebra", Mode: "text"}); err != nil || len(res.Hits) != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	chans, _ := b.ListChannels("Sam")
+	for _, c := range chans {
+		if _, ok := dmOwner(c.Name); ok {
+			t.Fatalf("list_channels must omit DM channels: %s", c.Name)
+		}
+	}
+}
+
+func TestObserverReadsEveryInbox(t *testing.T) {
+	b, _ := twoAgents(t)
+	if _, err := b.Send("Sam", SendInput{Channel: "dm/Pat", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	b.SetObserver("Sam")
+	if err := b.Subscribe("Sam", "dm/Pat", "oldest"); err != nil {
+		t.Fatalf("observer subscribe: %v", err)
+	}
+	if ms, err := b.History("Sam", "dm/Pat", nil, nil, 10); err != nil || len(ms) != 1 {
+		t.Fatalf("observer history: %+v %v", ms, err)
+	}
+	st, err := b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range st.Channels {
+		found = found || c.Name == "dm/Pat"
+	}
+	if !found {
+		t.Fatal("StatusReport must list DM channels for the TUI")
+	}
+}
+
+func TestInboxSurvivesReaperAndIdleExpiry(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	idle := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
+	if _, err := b.db.Exec("UPDATE subscriptions SET last_activity=? WHERE sender='Sam'", b.nowMs()-idle); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.Receive("Sam", ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range res.Expired {
+		if ch == "dm/Sam" {
+			t.Fatal("the inbox subscription must never idle-expire")
+		}
+	}
+	// Session gone, inbox empty: the reaper must still keep it.
+	if err := b.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.reapEmptyChannels(); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = b.db.QueryRow("SELECT count(*) FROM channels WHERE name='dm/Sam'").Scan(&n)
+	if n != 1 {
+		t.Fatal("reaper dropped an inbox")
+	}
+	// Resume after idling: register's purge must keep the inbox subscription.
+	if _, err := b.db.Exec("UPDATE subscriptions SET last_activity=0 WHERE sender='Sam'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel='dm/Sam'").Scan(&n)
+	if n != 1 {
+		t.Fatal("register purge dropped the inbox subscription")
+	}
+}

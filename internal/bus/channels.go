@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -107,6 +108,11 @@ func (b *Bus) ListChannels(as string) ([]Channel, error) {
 	if err != nil {
 		return nil, err
 	}
+	// DM inboxes are not ordinary channels: they never appear here (or in
+	// discover/create_channel), only in StatusReport for the TUI. listChannels
+	// is also StatusReport's source, so the filter happens here, not inside
+	// the shared query.
+	chans = slices.DeleteFunc(chans, func(c Channel) bool { _, dm := dmOwner(c.Name); return dm })
 	// listChannels is also StatusReport's source (the local, human-facing
 	// status command, not an MCP tool result), so trimming happens here,
 	// not inside the shared query.
@@ -131,6 +137,9 @@ func isDefaultChannel(name string) bool {
 // subscriptions are dropped with the channel. Confirmation is the caller's
 // job; the returned Channel reports what was destroyed.
 func (b *Bus) DeleteChannel(name, except string) (Channel, error) {
+	if _, ok := dmOwner(name); ok {
+		return Channel{}, errf("validation", false, "can't delete direct-message channel %q", name)
+	}
 	if isDefaultChannel(name) {
 		return Channel{}, errf("validation", false, "can't delete default channel %q", name)
 	}
@@ -198,6 +207,7 @@ func (b *Bus) reapEmptyChannels() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`DELETE FROM channels WHERE name NOT IN (`+strings.Repeat("?,", len(names)-1)+`?)
+	  AND name NOT LIKE 'dm/%'
 	  AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.channel=channels.name)
 	  AND NOT EXISTS (SELECT 1 FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=channels.name AND x.heartbeat>=?)`,
 		append(names, b.nowMs()-attachmentExpiryMs)...); err != nil {

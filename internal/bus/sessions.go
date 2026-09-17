@@ -154,7 +154,7 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		// registration must drop its own idle-expired ones before listing
 		// pending channels, or an expired subscription would show up as pending.
 		idle := int64(b.cfg.CursorIdleHours) * 3_600_000
-		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND last_activity < ?", display, now-idle); err != nil {
+		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND last_activity < ? AND channel<>?", display, now-idle, DMChannel(display)); err != nil {
 			return Registration{}, internal(err)
 		}
 	}

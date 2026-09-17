@@ -39,6 +39,10 @@ func newClient(cfg config.Config, name string, log *slog.Logger) (*client, error
 		_ = b.Close()
 		return nil, err
 	}
+	// The TUI is the one observer: it must read and subscribe to every DM
+	// inbox to show the direct-message rail. No MCP tool grants this, so no
+	// agent can obtain it.
+	b.SetObserver(reg.Sender)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{b: b, cfg: cfg, as: reg.Sender, ctx: ctx, cancel: cancel, subscribed: map[string]bool{}}
 	c.wg = mcpserver.StartBackgroundLoops(ctx, b, cfg, log, 10*time.Second)

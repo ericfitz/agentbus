@@ -94,6 +94,9 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	if from != "now" && from != "oldest" {
 		return errf("validation", false, "from must be now or oldest")
 	}
+	if _, ok := dmOwner(channel); ok && b.observer != as {
+		return errf("validation", false, "direct-message channels cannot be subscribed to; register manages your inbox")
+	}
 	tx, err := b.db.Begin()
 	if err != nil {
 		return internal(err)
@@ -125,6 +128,9 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 func (b *Bus) Unsubscribe(as, channel string) error {
 	if err := b.auth(b.db, as); err != nil {
 		return err
+	}
+	if _, ok := dmOwner(channel); ok && b.observer != as {
+		return errf("validation", false, "direct-message channels cannot be unsubscribed from")
 	}
 	tx, err := b.db.Begin()
 	if err != nil {
@@ -264,7 +270,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		if !inFilter(s.channel) && s.pendingToken == "" {
 			continue
 		}
-		if last < now-idle {
+		if last < now-idle && s.channel != DMChannel(as) {
 			// C2: cap how many get reported (and thus reaped, below); past
 			// the cap, leave the subscription alone so it can still not be
 			// delivered to (it's genuinely idle) without inflating this

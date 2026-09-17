@@ -391,11 +391,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskListIn) (*mcp.CallToolResult, any, error) {
-			tasks, err := b.TaskList(in.As, in.TaskListInput)
-			if err != nil {
-				return nil, nil, err
-			}
-			return result(map[string]any{"tasks": tasks}, nil)
+			return result(b.TaskList(in.As, in.TaskListInput))
 		})
 	return s
 }

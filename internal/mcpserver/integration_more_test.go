@@ -85,6 +85,34 @@ func callOK(t *testing.T, p *proc, name string, args map[string]any) string {
 	return ""
 }
 
+// callArray invokes a tool that returns a bare JSON array (list_channels,
+// discover, task_list) and decodes its content, failing the test on any
+// protocol- or tool-level error. Reuses p's existing client session.
+func callArray(t *testing.T, p *proc, name string, args map[string]any) []any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	res, err := p.cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatalf("%s: protocol error: %v", name, err)
+	}
+	if len(res.Content) == 0 {
+		t.Fatalf("%s: result has no content", name)
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("%s: content[0] is not text: %#v", name, res.Content[0])
+	}
+	if res.IsError {
+		t.Fatalf("%s: %s", name, tc.Text)
+	}
+	var out []any
+	if err := json.Unmarshal([]byte(tc.Text), &out); err != nil {
+		t.Fatalf("%s: unmarshal result %q: %v", name, tc.Text, err)
+	}
+	return out
+}
+
 // openDirectDB opens the same on-disk database file a spawned `agentbus mcp`
 // process uses, with the same connection parameters bus.Open uses (see
 // internal/bus/bus.go, including foreign_keys(1) - the embeddings table has
@@ -1190,6 +1218,26 @@ func TestTaskClaimContentionAcrossProcesses(t *testing.T) {
 		t.Fatalf("task_create result missing id: %v", created)
 	}
 
+	// Check this now, before the claim race: a claim tombstones the create
+	// revision and inserts a new one (exactly like edit_memory), and receive
+	// excludes the caller's own messages - so once Pat has raced to claim
+	// the task, nothing authored by Sam's create is ever deliverable to Pat
+	// again. The create revision (authored by Sam) is live right now.
+	got, e := b.call(t, "receive", map[string]any{"as": "Pat"})
+	if e != "" {
+		t.Fatal(e)
+	}
+	sawCreate := false
+	for _, m := range messagesOf(t, got) {
+		if mm, ok := m.(map[string]any); ok && mm["channel"] == "tasks/work" {
+			sawCreate = true
+			break
+		}
+	}
+	if !sawCreate {
+		t.Fatalf("Pat's receive must include the create revision on tasks/work: %v", got)
+	}
+
 	claimants := []struct {
 		p  *proc
 		as string
@@ -1234,45 +1282,22 @@ func TestTaskClaimContentionAcrossProcesses(t *testing.T) {
 			successes, conflicts, results, errTexts)
 	}
 
-	// A receive call with nothing new yet returns an empty batch rather than
-	// waiting, so poll rather than asserting on a single call - the same
-	// pattern TestLeaseContentionBetweenProcesses uses for cross-process
-	// settling. An unacknowledged batch is simply redelivered.
-	var got map[string]any
-	sawCreate := false
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !sawCreate {
-		got, e = b.call(t, "receive", map[string]any{"as": "Pat"})
-		if e != "" {
-			t.Fatal(e)
-		}
-		for _, m := range messagesOf(t, got) {
-			if mm, ok := m.(map[string]any); ok && mm["channel"] == "tasks/work" {
-				sawCreate = true
-				break
-			}
-		}
-		if !sawCreate {
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-	if !sawCreate {
-		t.Fatalf("Pat's receive must include the create revision on tasks/work: %v", got)
-	}
-
-	listed, e := a.call(t, "task_list", map[string]any{"as": "Sam", "channel": "tasks/work"})
-	if e != "" {
-		t.Fatal(e)
-	}
-	tasks, ok := listed["tasks"].([]any)
-	if !ok || len(tasks) != 1 {
-		t.Fatalf("expected one task in task_list: %v", listed)
+	// task_list returns a bare JSON array, like list_channels and discover
+	// (see callOK's comment above), so it can't go through p.call's
+	// map[string]any decode.
+	tasks := callArray(t, a, "task_list", map[string]any{"as": "Sam", "channel": "tasks/work"})
+	if len(tasks) != 1 {
+		t.Fatalf("expected one task in task_list: %v", tasks)
 	}
 	if st, _ := tasks[0].(map[string]any)["status"].(string); st != "in_progress" {
 		t.Fatalf("expected the claimed task to be in_progress: %v", tasks[0])
 	}
 
-	if _, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "tasks/work", "content": "nope"}); decodeErr(t, e).Code != "validation" {
+	_, e = a.call(t, "send", map[string]any{"as": "Sam", "channel": "tasks/work", "content": "nope"})
+	if e == "" {
+		t.Fatal("send to a task list was accepted")
+	}
+	if decodeErr(t, e).Code != "validation" {
 		t.Fatalf("send to a task list must fail with validation: %q", e)
 	}
 }

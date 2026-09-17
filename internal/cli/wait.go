@@ -19,7 +19,7 @@ type WaitOptions struct {
 	As         string
 	Channels   []string
 	IncludeOwn bool
-	Filter     string // regexp on content; non-matching messages are skipped
+	Filter     string // regexp on content; non-matching messages are skipped, except direct messages
 	Timeout    time.Duration
 }
 
@@ -38,7 +38,10 @@ func Wait(o WaitOptions, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("filter: %w", err)
 		}
-		match = func(m bus.Message) bool { return re.MatchString(m.Content) }
+		inbox := bus.DMChannel(o.As)
+		// A direct message is addressed to this identity by definition, so
+		// it wakes the waiter even when its text does not match the filter.
+		match = func(m bus.Message) bool { return m.Channel == inbox || re.MatchString(m.Content) }
 	}
 	b, err := bus.Open(o.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

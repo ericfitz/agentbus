@@ -92,7 +92,7 @@ func run(cmd string, args []string) int {
 		fs.StringVar(&o.As, "as", "", "identity to wait for (default: what `agentbus identity` reports)")
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
-		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname')")
+		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages")
 		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever)")
 		if err := fs.Parse(args); err != nil {
 			return 2

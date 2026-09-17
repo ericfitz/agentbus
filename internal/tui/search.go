@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -90,15 +91,25 @@ func (m *Model) runSearch() tea.Cmd {
 }
 
 // jumpTo selects the hit's channel (loading its latest page on a first
-// visit, via selectChannel's own returned cmd), puts the normal-mode cursor
-// on the hit, and loads the page of history before it too, so no gap is
-// left between the hit and whatever selectChannel already loaded (the
-// historyMsg handler keeps the cursor on the hit across both loads).
+// visit, via selectChannel's/the sessions-pane equivalent's own returned
+// cmd), puts the normal-mode cursor on the hit, and loads the page of
+// history before it too, so no gap is left between the hit and whatever was
+// already loaded (the historyMsg handler keeps the cursor on the hit across
+// both loads). A hit in a DM inbox selects that session in the sessions
+// pane instead of the channel list, since DM inboxes are never in
+// m.channels.
 func (m *Model) jumpTo(hit bus.Message) tea.Cmd {
 	var cmds []tea.Cmd
-	for i, c := range m.channels {
-		if c.Name == hit.Channel {
-			cmds = append(cmds, m.selectChannel(i))
+	if owner, ok := strings.CutPrefix(hit.Channel, bus.DMPrefix); ok {
+		if i := slices.Index(m.sessionNames(), owner); i >= 0 {
+			m.sessSel = i
+			cmds = append(cmds, m.showSelected())
+		}
+	} else {
+		for i, c := range m.channels {
+			if c.Name == hit.Channel {
+				cmds = append(cmds, m.selectChannel(i))
+			}
 		}
 	}
 	if len(cmds) == 0 {

@@ -53,6 +53,58 @@ func TestSearchFindsMessagesAndJumps(t *testing.T) {
 	}
 }
 
+// TestSearchJumpFromSessionsPaneLeavesSessions guards a regression: jumping
+// to a channel hit while the sessions pane held the selection used to leave
+// sessSel set, so the stream stayed on the session's inbox instead of the
+// hit's channel.
+func TestSearchJumpFromSessionsPaneLeavesSessions(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "the release script")
+	f.receive(t)
+	f.key("esc")
+	f.key("tab") // channels -> sessions
+	if f.m.pane() != paneSessions {
+		t.Fatalf("setup: pane=%v", f.m.pane())
+	}
+	f.key("/")
+	f.key("release")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	f.key("enter")
+	if f.m.sessSel != -1 || f.m.pane() == paneSessions {
+		t.Fatalf("jumping to a channel hit must leave the sessions pane: sessSel=%d pane=%v", f.m.sessSel, f.m.pane())
+	}
+	if got := f.m.selected(); got == nil || got.Name != "dev" {
+		t.Fatalf("must land on dev, got %v", got)
+	}
+}
+
+// TestSearchJumpToADMHitSelectsTheSession: a hit inside a DM inbox is never
+// in m.channels, so jumping to it must select that identity's session in the
+// sessions pane instead of toasting "not in the rail yet".
+func TestSearchJumpToADMHitSelectsTheSession(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // populates m.dms and sessionNames()
+	r := f.agentSend(t, "dm/Sam", "note about the release")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("release")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 || f.m.search.hits[0].Channel != "dm/Sam" {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	f.key("enter")
+	if f.m.mode != modeNormal || f.m.sessSel < 0 || f.m.selName() != "dm/Sam" {
+		t.Fatalf("jumping to a DM hit must select that session: mode=%v sessSel=%d sel=%q", f.m.mode, f.m.sessSel, f.m.selName())
+	}
+	if f.m.cursor < 0 || f.m.msgs["dm/Sam"][f.m.cursor].Seq != r.Seq {
+		t.Fatalf("cursor must sit on the hit, cursor=%d", f.m.cursor)
+	}
+}
+
 func TestSearchTabCyclesModeAndSemanticUnavailableShowsBadge(t *testing.T) {
 	f := newFixture(t)
 	f.m.c.cfg.EmbeddingEndpoint = "http://127.0.0.1:9/v1/embeddings"

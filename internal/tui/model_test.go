@@ -509,3 +509,114 @@ func TestExpiredSubscriptionIsResubscribed(t *testing.T) {
 	}
 	t.Fatal("message sent after resubscribe was not delivered")
 }
+
+// TestSetChannelsKeepsSelectionByNameWhileASessionIsSelected guards a
+// regression: while the sessions pane holds the selection, a channel-list
+// refresh (e.g. the periodic status tick) used to leave m.sel exactly where
+// it was even as the channel list's sort order shifted under it, so
+// returning home could land on the wrong channel or no channel at all.
+func TestSetChannelsKeepsSelectionByNameWhileASessionIsSelected(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.ab.CreateChannel(f.sam, "alpha", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.CreateChannel(f.sam, "zulu", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd()) // channels sorted: alpha, dev, dev-notes, zulu
+	f.key("esc")
+	for f.m.selected() == nil || f.m.selected().Name != "zulu" {
+		f.key("down")
+	}
+	f.key("tab") // channels -> sessions
+	if f.m.pane() != paneSessions {
+		t.Fatalf("setup: pane=%v", f.m.pane())
+	}
+	if _, err := f.ab.DeleteChannel("alpha", f.c.as); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd()) // alpha drops out from ahead of zulu in the sort order
+	f.key("home")
+	if f.m.selName() != "zulu" {
+		t.Fatalf("must still be on zulu after a channel ahead of it was deleted, got %q", f.m.selName())
+	}
+}
+
+// TestSessionSweepReindexesSelectionByName guards a regression: sessionNames
+// is sorted, so a session's index shifting when another one ages out of the
+// TUI's local tracking used to leave sessSel pointing at a different
+// identity's inbox (or out of range) instead of following the one selected.
+func TestSessionSweepReindexesSelectionByName(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // sessionNames: Sam, eric
+	f.key("esc")
+	f.key("tab")  // channels -> sessions, sessSel=0 ("Sam")
+	f.key("down") // sessSel=1 ("eric", the TUI's own inbox)
+	if got := f.m.sessionNames()[f.m.sessSel]; got != f.c.as {
+		t.Fatalf("setup: expected %q selected, got %q", f.c.as, got)
+	}
+	// Sam ages out of the TUI's local tracking (simulated directly: the real
+	// bus session would take attachmentExpiryMs to time out for real, far
+	// longer than a test should wait). eric shifts from index 1 to index 0.
+	f.m.sessionsSeen["Sam"] = time.Now().Add(-2 * idleSessionTTL)
+	f.send(statusMsg{st: bus.Status{Channels: f.m.status.Channels, Sessions: []bus.Session{{Sender: f.c.as}}}})
+	if names := f.m.sessionNames(); len(names) != 1 || names[0] != f.c.as {
+		t.Fatalf("Sam must have aged out: %v", names)
+	}
+	if f.m.sessSel != 0 || f.m.selName() != bus.DMChannel(f.c.as) {
+		t.Fatalf("sessSel must follow eric by identity, got sessSel=%d sel=%q", f.m.sessSel, f.m.selName())
+	}
+}
+
+// TestSessionSweepReturnsToChannelsWhenNoSessionsRemain guards a regression:
+// losing every session used to leave sessSel >= 0 with nothing left for it
+// to name, so selected() returned nil and the header read "no channels yet"
+// even though the channel list was untouched.
+func TestSessionSweepReturnsToChannelsWhenNoSessionsRemain(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd())
+	f.key("esc")
+	f.key("tab") // channels -> sessions
+	if f.m.pane() != paneSessions {
+		t.Fatalf("setup: pane=%v", f.m.pane())
+	}
+	for name := range f.m.sessionsSeen {
+		f.m.sessionsSeen[name] = time.Now().Add(-2 * idleSessionTTL)
+	}
+	f.send(statusMsg{st: bus.Status{Channels: f.m.status.Channels}})
+	if len(f.m.sessionNames()) != 0 {
+		t.Fatalf("every session must have aged out: %v", f.m.sessionNames())
+	}
+	if f.m.sessSel != -1 || f.m.pane() != paneChannels || f.m.selName() != "dev" {
+		t.Fatalf("losing every session must return to the channel list: sessSel=%d pane=%v sel=%q", f.m.sessSel, f.m.pane(), f.m.selName())
+	}
+}
+
+// TestHomeFromStreamKeepsScrollAndDivider guards a regression: focusPane
+// used to always run showSelected's full reset (GotoBottom, a fresh
+// divider, markSeen) even when the channel-pane selection wasn't actually
+// changing, so home from the stream after scrolling up snapped it straight
+// back to the bottom and discarded the "new" divider.
+func TestHomeFromStreamKeepsScrollAndDivider(t *testing.T) {
+	f := newFixture(t)
+	for i := 0; i < 40; i++ {
+		f.agentSend(t, "dev", fmt.Sprintf("msg %d", i))
+	}
+	f.receive(t)
+	f.m.height = 20
+	f.m.layout()
+	f.key("shift+tab") // compose -> stream directly
+	f.key("g")         // scroll to the top; follow=false
+	f.m.divider = 12   // a sentinel the full reset would clobber
+	offset := f.m.stream.YOffset
+	f.key("home")
+	if f.m.pane() != paneChannels {
+		t.Fatalf("home must reach the channel pane, got %v", f.m.pane())
+	}
+	if f.m.stream.YOffset != offset {
+		t.Fatalf("home must not move the stream, got YOffset=%d want=%d", f.m.stream.YOffset, offset)
+	}
+	if f.m.divider != 12 {
+		t.Fatalf("home must not reset the divider, got %d", f.m.divider)
+	}
+}

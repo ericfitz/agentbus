@@ -492,9 +492,12 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 // focusPane moves focus. Entering the stream keeps a cursor that is still
 // valid, else lands on the newest message; leaving it resumes following new
 // messages if the view is at the bottom (moveCursor stops following).
-// Entering channels or sessions applies the same reset selecting a channel
-// or session does (showSelected), since the stream now shows a different
-// selection.
+// Entering channels or sessions only runs showSelected's full reset when the
+// selection actually changes between them (the stream now shows something
+// different); moving focus there without that change -- home from the
+// channel list, or a stray refocus of the pane already selecting -- keeps
+// the lighter pre-existing reset instead, so it doesn't snap the stream to
+// the bottom or discard the "new" divider.
 func (m *Model) focusPane(p pane) tea.Cmd {
 	if p == paneStream {
 		m.mode = modeNormal
@@ -511,13 +514,21 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	}
 	m.mode = modeNormal
 	m.compose.Blur()
-	if p == paneSessions {
+	wasSessions := m.sessSel >= 0
+	switch p {
+	case paneSessions:
 		if len(m.sessionNames()) == 0 {
 			return nil
 		}
 		m.sessSel = max(m.sessSel, 0)
-	} else {
+	default: // paneChannels
 		m.sessSel = -1
+	}
+	if wasSessions == (p == paneSessions) {
+		m.follow = m.stream.AtBottom()
+		m.cursor = -1
+		m.refreshStream()
+		return nil
 	}
 	return m.showSelected()
 }
@@ -675,14 +686,17 @@ func (m *Model) dividerFor(ch string) int64 {
 	return -1
 }
 
-// selectChannel moves the channel-list selection (clamped) and applies
-// showSelected's reset.
+// selectChannel moves the channel-list selection (clamped), leaves the
+// sessions pane if it held the selection (selecting a channel always means
+// the channel list is what's being viewed now), and applies showSelected's
+// reset.
 func (m *Model) selectChannel(i int) tea.Cmd {
 	if len(m.channels) == 0 {
 		m.sel = -1
 		return nil
 	}
 	m.sel = min(max(i, 0), len(m.channels)-1)
+	m.sessSel = -1
 	return m.showSelected()
 }
 
@@ -787,12 +801,40 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 	for _, s := range msg.st.Sessions {
 		m.sessionsSeen[s.Sender] = now
 	}
+	// sessionNames() is sorted, so an index alone doesn't survive the sweep
+	// below: a session ahead of the selected one expiring would silently
+	// repoint sessSel at a different identity's inbox. Remember the selected
+	// session by name instead, and re-resolve it once the sweep is done.
+	var selName string
+	hadSel := m.sessSel >= 0
+	if hadSel {
+		if names := m.sessionNames(); m.sessSel < len(names) {
+			selName = names[m.sessSel]
+		}
+	}
 	for name, at := range m.sessionsSeen {
 		if now.Sub(at) > idleSessionTTL {
 			delete(m.sessionsSeen, name)
 		}
 	}
-	return m.setChannels(msg.st.Channels, "oldest")
+	cmds := []tea.Cmd{m.setChannels(msg.st.Channels, "oldest")}
+	if hadSel {
+		names := m.sessionNames()
+		switch i := slices.Index(names, selName); {
+		case len(names) == 0:
+			// The last session aged out: return to the channel list.
+			m.sessSel = -1
+			cmds = append(cmds, m.showSelected())
+		case i >= 0:
+			m.sessSel = i // still the same inbox, just possibly reindexed
+		default:
+			// selName aged out: clamp to a valid neighbor and refresh the
+			// stream for whatever that now points at.
+			m.sessSel = min(m.sessSel, len(names)-1)
+			cmds = append(cmds, m.showSelected())
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // setChannels replaces the channel list (sorted by name), keeps the current
@@ -800,7 +842,16 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 // inboxes (dm/*) are split out into m.dms: they show in the sessions rail,
 // never the channel list, and are never selectable.
 func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
-	cur := m.selName()
+	// cur comes from the channel list itself, not selName(): while the
+	// sessions pane holds the selection, selName() names a DM inbox that
+	// would never match a channel, silently losing the channel list's
+	// selection on every status refresh. Sourcing it from m.channels keeps
+	// the rematch below correct (and safe to run unconditionally) whichever
+	// pane is currently selecting.
+	cur := ""
+	if m.sel >= 0 && m.sel < len(m.channels) {
+		cur = m.channels[m.sel].Name
+	}
 	chans = slices.Clone(chans) // don't sort the caller's slice (bus.Status.Channels) in place
 	sort.Slice(chans, func(i, j int) bool { return chans[i].Name < chans[j].Name })
 	// chans (all of them, DM and ordinary) is still needed below to subscribe
@@ -816,15 +867,10 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	}
 	m.dms = dms
 	m.channels = channels
-	// While the sessions pane holds the selection, cur names a DM inbox that
-	// will never match a channel; leave m.sel alone so the channel list keeps
-	// its last selection for when the user returns to it.
-	if m.sessSel < 0 {
-		m.sel = -1
-		for i, c := range m.channels {
-			if c.Name == cur {
-				m.sel = i
-			}
+	m.sel = -1
+	for i, c := range m.channels {
+		if c.Name == cur {
+			m.sel = i
 		}
 	}
 	var cmds []tea.Cmd
@@ -833,6 +879,9 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 			cmds = append(cmds, m.subscribeCmd(c, from))
 		}
 	}
+	// Only auto-select a first channel while the channel list itself is what
+	// nothing has picked from yet; while a session is selected this must not
+	// steal the selection away to the channel list.
 	if m.sessSel < 0 && m.sel < 0 && len(m.channels) > 0 {
 		cmds = append(cmds, m.selectChannel(0))
 	}

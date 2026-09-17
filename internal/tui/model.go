@@ -71,6 +71,7 @@ type Model struct {
 	sel        int
 	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
 	msgs       map[string][]bus.Message
+	tasks      map[string][]bus.TaskSummary // task channel name -> its current tree
 	gaps       map[string][]bus.Gap
 	loaded     map[string]bool
 	seen       map[string]int64
@@ -128,6 +129,7 @@ func New(c *client, th Theme) Model {
 		divider:      -1,
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
+		tasks:        map[string][]bus.TaskSummary{},
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
 		seen:         map[string]int64{},
@@ -223,6 +225,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.prepend && msg.channel == m.selName():
 			m.stream.SetYOffset(m.stream.YOffset + (m.stream.TotalLineCount() - prevLines))
 		}
+	case tasksMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.showToast("tasks: "+errText(msg.err)))
+			break
+		}
+		m.tasks[msg.ch] = msg.tasks
+		m.refreshStream()
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
 			m.toast = ""
@@ -322,6 +331,9 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 	case "pgup", "pgdown":
 		return m.scrollStream(msg)
 	case "enter":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.showToast(tasksReadOnlyToast)
+		}
 		return m.submitCompose()
 	case "alt+enter":
 		m.compose.InsertString("\n")
@@ -353,11 +365,17 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "q":
 		return tea.Quit
 	case "i":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.showToast(tasksReadOnlyToast)
+		}
 		m.mode = modeInsert
 		return m.compose.Focus()
 	// enter performs the pane's action: reply to the cursor message in the
 	// stream, compose to the selected channel otherwise.
 	case "enter":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.showToast(tasksReadOnlyToast)
+		}
 		if r, ok := m.cursorRow(); ok {
 			if !m.replyAllowed() {
 				return m.showToast(replyRefusedToast)
@@ -417,6 +435,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case " ":
 		m.toggleExpand()
 	case "r":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.showToast(tasksReadOnlyToast)
+		}
 		if !m.replyAllowed() {
 			return m.showToast(replyRefusedToast)
 		}
@@ -444,6 +465,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "/":
 		return m.openSearch()
 	case "m":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.showToast(tasksReadOnlyToast)
+		}
 		return m.openMemories()
 	case "h":
 		return m.openHealth()
@@ -494,9 +518,9 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && len(m.msgs[m.selName()]) > 0:
+		case p == paneStream && len(m.msgs[m.selName()]) > 0 && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
-		case p == paneCompose && m.selName() != "":
+		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
 		}
 	}
@@ -741,6 +765,9 @@ func (m *Model) showSelected() tea.Cmd {
 	m.markSeen(ch)
 	m.refreshStream()
 	m.stream.GotoBottom()
+	if bus.IsTaskChannel(ch) {
+		return m.loadTasks(ch)
+	}
 	if ch != "" && !m.loaded[ch] {
 		return m.loadHistory(ch, nil)
 	}
@@ -768,10 +795,14 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 	for _, x := range res.Messages {
 		byCh[x.Channel] = append(byCh[x.Channel], x)
 	}
+	var cmds []tea.Cmd
 	for ch, ms := range byCh {
 		m.addMessages(ch, ms)
 		for _, x := range ms {
 			m.peekReply(ch, x)
+		}
+		if bus.IsTaskChannel(ch) {
+			cmds = append(cmds, m.loadTasks(ch))
 		}
 	}
 	for _, g := range res.Gaps {
@@ -787,7 +818,6 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 	if m.follow {
 		m.stream.GotoBottom()
 	}
-	var cmds []tea.Cmd
 	for _, ch := range res.Expired {
 		// The bus dropped the subscription but c.subscribed[ch] is still
 		// true, so client.subscribe would no-op; forget it first so the

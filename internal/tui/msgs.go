@@ -54,4 +54,9 @@ type (
 		channel string
 		err     error
 	}
+	tasksMsg struct {
+		ch    string
+		tasks []bus.TaskSummary
+		err   error
+	}
 )

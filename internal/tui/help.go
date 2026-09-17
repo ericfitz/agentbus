@@ -53,6 +53,7 @@ func (m Model) helpLines() []string {
 		{"alt+enter", "newline"},
 		{"↑", "recall the last sent message"},
 		{"ctrl+u", "clear"},
+		{"(task lists)", "tasks/ channels show the task tree; read-only"},
 	}
 	key, dim := m.theme.Style(m.theme.Agent), m.theme.Style(m.theme.Dim)
 	lines := make([]string, 0, len(rows))

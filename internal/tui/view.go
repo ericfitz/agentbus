@@ -56,6 +56,7 @@ const (
 	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
 	iconUser  = "\U0001F9D1\uFE0F "           // adult
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
+	iconTasks = "\U0001F4CB\uFE0F "           // clipboard
 )
 
 func (m Model) View() string {
@@ -142,7 +143,10 @@ func (m Model) renderRails() string {
 	l.WriteString(dim.Render("channels") + "\n")
 	for i, c := range m.channels {
 		mark := iconChat
-		if c.Kind == "memory" {
+		switch {
+		case bus.IsTaskChannel(c.Name):
+			mark = iconTasks
+		case c.Kind == "memory":
 			mark = iconMem
 		}
 		line := m.chanStyle(c).Render(mark + c.Name)
@@ -223,6 +227,9 @@ func (m *Model) renderStream() string {
 	m.cursorLine = -1
 	if ch == "" {
 		return ""
+	}
+	if bus.IsTaskChannel(ch) {
+		return m.renderTasks(ch)
 	}
 	if len(ms) == 0 {
 		return dim.Render("no messages yet in " + ch + " · type below to send the first")

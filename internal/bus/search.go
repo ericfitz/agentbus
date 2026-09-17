@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,15 @@ type SearchResult struct {
 	Hits                []SearchHit `json:"hits"`
 	Next                string      `json:"next,omitempty"`
 	SemanticUnavailable bool        `json:"semantic_unavailable,omitempty"`
+}
+
+// searchHitBytes measures a SearchHit's own serialized size, including its
+// score field (unlike envelopeBytes, sized for a bare Message). SearchHit
+// holds only strings, ints, a float, and pointers/maps/slices of those, so
+// json.Marshal cannot fail.
+func searchHitBytes(h SearchHit) int {
+	j, _ := json.Marshal(h)
+	return len(j)
 }
 
 const (
@@ -90,14 +100,16 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 }
 
 // textSearch runs the FTS5 query joined back to messages (excluding
-// tombstones) and returns hits ranked by bm25, best match first.
+// tombstones) and returns hits ranked by bm25, best match first. Every
+// caller reaches this through Search, which already rejects a blank query,
+// so fq (derived from in.Query) is never empty here.
 func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, error) {
 	fq := ftsQuery(in.Query)
-	if fq == "" {
-		return []SearchHit{}, nil
-	}
 	filters, fargs := b.searchFilters(as, in)
-	q := "SELECT " + qualifiedColumns("m") + ", bm25(messages_fts) FROM messages_fts JOIN messages m ON m.seq=messages_fts.rowid WHERE messages_fts MATCH ? AND m.tombstone=0" + filters + " ORDER BY bm25(messages_fts) LIMIT ?"
+	// ORDER BY rank is FTS5's own alias for bm25(messages_fts) with default
+	// weights; used here instead of repeating the bm25() call so the sort
+	// and the scored column read the same value by construction.
+	q := "SELECT " + qualifiedColumns("m") + ", bm25(messages_fts) FROM messages_fts JOIN messages m ON m.seq=messages_fts.rowid WHERE messages_fts MATCH ? AND m.tombstone=0" + filters + " ORDER BY rank LIMIT ?"
 	args := append([]any{fq}, fargs...)
 	args = append(args, limit)
 	rows, err := b.db.Query(q, args...)
@@ -163,6 +175,10 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	var err error
 	switch in.Mode {
 	case "text":
+		// ponytail: every page re-runs and re-decodes the full top-1000-candidate
+		// query (searchPageMax), then slices to the requested page in Go; fine
+		// at this ceiling, add real cursor-based paging in SQL if 1000 rows per
+		// call ever shows up in profiling.
 		ranked, err = b.textSearch(as, in, searchPageMax)
 	case "semantic", "both":
 		ranked, res.SemanticUnavailable, err = b.rankedSearch(as, in)
@@ -188,7 +204,7 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	reserve := marshalLen(SearchResult{Next: placeholderNext, SemanticUnavailable: res.SemanticUnavailable})
 	limit := min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes) - reserve
 	if limit > 0 {
-		page = trimToBytes(page, func(h SearchHit) int { return envelopeBytes(h.Message) }, limit)
+		page = trimToBytes(page, searchHitBytes, limit)
 	} else {
 		// C2: the reserve alone exceeds the limit; return metadata only
 		// rather than fail.

@@ -34,6 +34,19 @@ Post to the project pair unless the content is true for every project on this
 machine. A Go toolchain bug goes in `memory`. This repo's test fixture rule
 goes in `<repo>-memory`.
 
+## Direct messages
+
+Every identity has an inbox, the channel `dm/<name>`. `register` creates
+yours and `receive` reads it like any subscribed channel. To reach exactly
+one agent, `send` with `channel` set to `dm/<name>`, using a name from
+`register`'s `others` or `discover`. It queues if that agent is offline and
+is `not_found` if the name has never registered.
+
+Direct messages are one-way. Answer one by sending to `dm/<its sender>` with
+`reply_to` set to its seq. You cannot subscribe to, list, or read another
+identity's inbox. `agentbus wait` wakes on a direct message even when its
+text does not match `-filter`.
+
 ## Session protocol
 
 1. `register` with the repo identity. Pass the returned `as` on every call.
@@ -71,14 +84,15 @@ question only the user can answer, after posting what you are waiting for.
 | Finishing such a task | `<repo>` | What changed, commit or branch, anything other agents now depend on |
 | Blocked | `<repo>` | What is blocked and what would unblock it |
 | Changed something others depend on (API, schema, fixture rule, build step) | `<repo>` | What changed and what callers must do |
+| The dependent is one specific other agent (another repo's session in `others`) | `dm/<that agent>`, as well as `<repo>` | Before you start: what will change. When it lands: what changed and what they must do. Both notices go to their inbox; they are not subscribed to `<repo>` |
 | Handing off to a reviewer | `<repo>` | Diff location; reviewer replies with `reply_to` on the same thread |
 | Starting a deployment | `<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
-| Question only the user can answer, while running autonomously | `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
+| Question only the user can answer, while running autonomously | `dm/<the human's TUI identity>` when it is live in `others`, else `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
 | Verified a non-obvious fact about this repo | `<repo>-memory` | Fact, how you verified it, workaround if any |
 | Verified a non-obvious fact about a tool, harness, or machine | `memory` | Same shape |
-| Cross-repo coordination | `general` | Only when more than one repo is involved |
+| Cross-repo coordination with no single counterpart | `general` | Only when more than one repo is involved and you cannot name the agent to `dm/` |
 
 Memory post shape, one of:
 
@@ -116,4 +130,5 @@ outcome. The next session reads `history` on `<repo>` and has both.
 | Re-deriving a known gotcha | `search` `<repo>-memory` first, in `both` mode. |
 | Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then run `agentbus wait -filter @<name>` with `run_in_background: true` and `receive` when it exits. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |
+| Announcing a cross-repo change on your own `<repo>` channel only | The other repo's agent is not subscribed to it. Send to `dm/<that agent>`, at the start and again when it lands. |
 | Assuming you are alone | `discover` first. Another session may be editing the same package. |

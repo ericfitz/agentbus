@@ -152,6 +152,24 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-17: channel colors, session end, direct-messages design
+
+Pushed to `main` (9aa09dd, fast-forward):
+
+- **TUI**: channel names carry their kind's color in the channel list and the
+  stream header, as in the compose row (`chanStyle`).
+- **Session end**: `Bus.EndSessions()`; the MCP server (stdin close or
+  SIGTERM/SIGINT/SIGHUP) and the TUI (quit) delete their own session rows, so
+  a name is free at once instead of after the 30-second expiry. Human
+  decision: no harness hook.
+- **Direct messages**: design
+  (`docs/superpowers/specs/2026-09-17-direct-messages-design.md`) and plan
+  (`docs/superpowers/plans/2026-09-17-direct-messages.md`). The
+  implementation is on branch `direct-messages`, not yet pushed when this
+  entry was written.
+- `using-agentbus` skill baseline test (writing-skills) done: five control
+  and five with-skill paper runs; results in ADR 0004.
+
 ## 2026-09-16 (night): size display, embedding key env var, gear redraw, v1.1.0 release
 
 Pushed to `main`:

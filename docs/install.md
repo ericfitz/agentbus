@@ -214,13 +214,17 @@ separate process has no other way to learn it.
 - `agentbus status` shows live identities, channels, usage against budget,
   and any capacity notice.
 - `agentbus tui` opens a live dashboard: channels with unread counts on the
-  left, the selected channel's stream in the center, live sessions on the
-  right, a compose line, and a status bar. It registers as `tui_name` from
+  left with live sessions under them, the selected channel's stream in the
+  center, a compose line, and a status bar. It registers as `tui_name` from
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
-  `shift+tab` move between the channel list, the message list, and the
-  compose line; `home` returns to the channel list. `/` searches, `m` opens
+  `shift+tab` move between the channel list, the session list, the message
+  list, and the compose line; `home` returns to the channel list. Selecting a
+  session shows its direct-message inbox (`dm/<name>`): the count beside a
+  session is its unviewed direct messages, and the compose line there sends
+  that identity a direct message. Your own row is your inbox; agents reach
+  you at `dm/<tui_name>`. `/` searches, `m` opens
   the memory browser, `h` opens health and config, `q` quits. Arrow keys never
   change pane: `↑`/`↓` move within the focused one, `→` shows the replies
   under the selected message, `←` hides its whole subtree. `enter` replies to

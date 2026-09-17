@@ -37,6 +37,7 @@ type Config struct {
 	EmbeddingEndpoint            string   `json:"embedding_endpoint"`
 	EmbeddingModel               string   `json:"embedding_model"`
 	EmbeddingAPIKeyFile          string   `json:"embedding_api_key_file"`
+	EmbeddingAPIKeyEnv           string   `json:"embedding_api_key_env"`
 	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string   `json:"log_level"`
 	TUIName                      string   `json:"tui_name"`

@@ -402,6 +402,7 @@ startup, so a change takes effect as harnesses restart.
 | `embedding_endpoint` | unset | | URL | OpenAI-compatible embeddings endpoint |
 | `embedding_model` | unset | | nonempty | Model name sent with each request |
 | `embedding_api_key_file` | unset | | readable file | Key file; bare key or `export` line |
+| `embedding_api_key_env` | unset | | env var name | Human decision 2026-09-16: key from this environment variable; wins over the key file when set and non-empty |
 | `log_level` | `info` | | `debug`, `info`, `warn`, `error` | Diagnostic verbosity; no payload logging |
 
 `receive_default_count <= receive_max_count`. `embedding_model` is required

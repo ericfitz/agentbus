@@ -83,6 +83,10 @@ its own). For a remote provider, set `embedding_endpoint` and
 `embedding_model` to that provider's values and add
 `"embedding_api_key_file": "~/.keys/VOYAGE_API_KEY"`. The file may be a bare
 key or a one-line `export NAME='value'`; its contents are never logged.
+`"embedding_api_key_env": "OPENAI_API_KEY"` names an environment variable to
+read the key from instead; it wins when set and non-empty, and the key file is
+the fallback for processes started without it (a harness-spawned MCP server
+only sees the variable if the harness was launched from a shell that had it).
 `embedding_query_timeout_seconds` (default 10, range 0.1-120) bounds the
 query embedding during a search; past it, `semantic` and `both` searches fall
 back to text results and set `semantic_unavailable`.

@@ -44,7 +44,12 @@ func readKeyFile(path string) (string, error) {
 
 func newEmbedder(cfg config.Config) (*embedder, error) {
 	e := &embedder{endpoint: cfg.EmbeddingEndpoint, model: cfg.EmbeddingModel, client: &http.Client{}, queryTimeout: time.Duration(cfg.EmbeddingQueryTimeoutSeconds * float64(time.Second))}
-	if cfg.EmbeddingAPIKeyFile != "" {
+	// The named environment variable wins; a process started without it
+	// (a harness-spawned MCP server) falls back to the key file.
+	if cfg.EmbeddingAPIKeyEnv != "" {
+		e.key = os.Getenv(cfg.EmbeddingAPIKeyEnv)
+	}
+	if e.key == "" && cfg.EmbeddingAPIKeyFile != "" {
 		k, err := readKeyFile(cfg.EmbeddingAPIKeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("embedding_api_key_file: %w", err)

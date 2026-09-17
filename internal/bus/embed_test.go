@@ -89,6 +89,15 @@ func TestVectorCodecAndKeyFile(t *testing.T) {
 	if k, _ := readKeyFile(p); k != "quoted" {
 		t.Fatal(k)
 	}
+	// The env var wins; unset, the key file is the fallback.
+	cfg := config.Config{EmbeddingAPIKeyEnv: "AGENTBUS_TEST_EMBED_KEY", EmbeddingAPIKeyFile: p}
+	if e, err := newEmbedder(cfg); err != nil || e.key != "quoted" {
+		t.Fatal(e, err)
+	}
+	t.Setenv("AGENTBUS_TEST_EMBED_KEY", "from-env")
+	if e, err := newEmbedder(cfg); err != nil || e.key != "from-env" {
+		t.Fatal(e, err)
+	}
 }
 
 func TestEmbedBatchAndSemanticSearch(t *testing.T) {

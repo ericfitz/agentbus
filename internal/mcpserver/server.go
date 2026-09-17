@@ -252,7 +252,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {
@@ -270,11 +270,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in channelIn) (*mcp.CallToolResult, any, error) {
 			return result(b.CreateChannel(in.As, in.Name, in.Kind))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "list_channels", Description: "Agentbus: list all channels with kind, message count, and latest sequence."},
+	mcp.AddTool(s, &mcp.Tool{Name: "list_channels", Description: "Agentbus: list all channels with kind, message count, and latest sequence. Direct-message inboxes are not listed."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.ListChannels(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions."},
+	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in subscribeIn) (*mcp.CallToolResult, any, error) {
 			if err := b.Subscribe(in.As, in.Channel, in.From); err != nil {
 				return nil, nil, err
@@ -292,7 +292,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json."},
+	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json. Direct-message channels (dm/...) are not accepted."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in unsubscribeIn) (*mcp.CallToolResult, any, error) {
 			if err := b.Unsubscribe(in.As, in.Channel); err != nil {
 				return nil, nil, err
@@ -310,7 +310,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe."},
+	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})

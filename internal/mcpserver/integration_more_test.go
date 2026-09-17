@@ -556,6 +556,41 @@ func TestGapAfterAgeEvictionUnderConcurrentSends(t *testing.T) {
 	}
 }
 
+// ---- Direct messages across processes ----
+
+// TestDirectMessageAcrossProcesses is the end-to-end proof for the direct
+// message feature built out in bus (Tasks 1-2 of this plan): a real sender
+// process delivers to a real recipient process's inbox, the sender cannot
+// read what it just sent, and dm/* rejects subscribe.
+func TestDirectMessageAcrossProcesses(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, `{}`)
+	a, b := spawn(t, dir), spawn(t, dir)
+	if _, e := a.call(t, "register", map[string]any{"name": "Sam"}); e != "" {
+		t.Fatal(e)
+	}
+	if _, e := b.call(t, "register", map[string]any{"name": "Pat"}); e != "" {
+		t.Fatal(e)
+	}
+	if _, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "dm/Pat", "content": "ping"}); e != "" {
+		t.Fatal(e)
+	}
+	got, e := b.call(t, "receive", map[string]any{"as": "Pat"})
+	if e != "" {
+		t.Fatal(e)
+	}
+	msgs, _ := got["messages"].([]any)
+	if len(msgs) != 1 || msgs[0].(map[string]any)["content"] != "ping" {
+		t.Fatalf("%v", got)
+	}
+	if _, e := a.call(t, "history", map[string]any{"as": "Sam", "channel": "dm/Pat"}); !strings.Contains(e, "not_found") {
+		t.Fatalf("sender must not read the recipient's inbox: %q", e)
+	}
+	if _, e := a.call(t, "subscribe", map[string]any{"as": "Sam", "channel": "dm/Pat"}); !strings.Contains(e, "validation") {
+		t.Fatalf("subscribe to an inbox must be rejected: %q", e)
+	}
+}
+
 // ---- Fake embeddings server, shared by scenarios 3, 4, 6 ----
 
 type embedReq struct {

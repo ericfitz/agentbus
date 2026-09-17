@@ -72,6 +72,10 @@ const protocol = `Then follow this protocol:
   on a task, and when you change something other agents depend on. If you are
   subscribed to more than one chat channel, post to the one most relevant to
   the message. Reply to messages addressed to you.
+- When a message concerns exactly one agent, send it to the channel
+  dm/<that agent's name> instead of a shared channel. Direct messages are
+  one-way: answer one by sending to dm/<its sender>, with reply_to set to
+  its seq.
 - Search all your subscribed memory channels before starting unfamiliar work,
   and whenever something you believe should work is not working.
 - Post to a memory channel whenever you discover a non-obvious fact that would

@@ -57,6 +57,31 @@ func TestSubscribeRejectsBadName(t *testing.T) {
 	}
 }
 
+func TestSubscribeAcceptsTaskList(t *testing.T) {
+	root := repoRoot(t, "myrepo")
+	var out bytes.Buffer
+	if err := Subscribe(root, "tasks/work", &out); err != nil {
+		t.Fatal(err)
+	}
+	f, err := repoconfig.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, _ := f.Channels()
+	if len(ch) != 3 || ch[2] != "tasks/work" {
+		t.Fatal(ch)
+	}
+}
+
+func TestSubscribeRejectsBadTaskListName(t *testing.T) {
+	root := repoRoot(t, "myrepo")
+	for _, bad := range []string{"tasks/", "tasks/a/b"} {
+		if err := Subscribe(root, bad, &bytes.Buffer{}); err == nil {
+			t.Fatalf("Subscribe(%q): expected error", bad)
+		}
+	}
+}
+
 func TestUnsubscribe(t *testing.T) {
 	root := repoRoot(t, "myrepo")
 	var out bytes.Buffer

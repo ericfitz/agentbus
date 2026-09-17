@@ -8,6 +8,27 @@ import (
 	"strings"
 )
 
+// ChannelNameRule is the channel name rule shared by CreateChannel, the CLI's
+// persistent subscribe list, and repoconfig: a name is valid if it passes
+// NameRule directly, or if it has the tasks/ prefix and the remainder passes
+// NameRule. It does not decide reserved names (dm, tasks) or channel kind;
+// callers apply those separately.
+func ChannelNameRule(name string) error {
+	if rest, ok := strings.CutPrefix(name, TaskPrefix); ok {
+		return NameRule(rest)
+	}
+	return NameRule(name)
+}
+
+// validateChannelName wraps ChannelNameRule in the bus's validation-error
+// shape, like validateName wraps NameRule for identities.
+func validateChannelName(name string) error {
+	if err := ChannelNameRule(name); err != nil {
+		return errf("validation", false, "name %v", err)
+	}
+	return nil
+}
+
 type Channel struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
@@ -52,17 +73,14 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Channel{}, err
 	}
+	if err := validateChannelName(name); err != nil {
+		return Channel{}, err
+	}
 	if IsTaskChannel(name) {
-		if err := validateName(strings.TrimPrefix(name, TaskPrefix)); err != nil {
-			return Channel{}, err
-		}
 		if kind != "memory" {
 			return Channel{}, errf("validation", false, "task lists (tasks/...) must have kind memory")
 		}
 	} else {
-		if err := validateName(name); err != nil {
-			return Channel{}, err
-		}
 		switch name {
 		case "dm":
 			return Channel{}, errf("validation", false, "channel name %q is reserved for direct messages", name)

@@ -2,6 +2,19 @@ package bus
 
 import "testing"
 
+func TestChannelNameRule(t *testing.T) {
+	for _, ok := range []string{"reviews", "general", "tasks/work", "tasks/a-b_c"} {
+		if err := ChannelNameRule(ok); err != nil {
+			t.Errorf("ChannelNameRule(%q): %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "bad/name", "tasks/", "tasks/a/b", "dm/Sam"} {
+		if err := ChannelNameRule(bad); err == nil {
+			t.Errorf("ChannelNameRule(%q): want error", bad)
+		}
+	}
+}
+
 func TestDefaultChannelsExistSurviveResetAndYieldToExisting(t *testing.T) {
 	b := newTestBus(t)
 	kinds := func() map[string]string {

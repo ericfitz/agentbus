@@ -83,6 +83,9 @@ const protocol = `Then follow this protocol:
   Z"; "the spec for feature A says B, but I verified with <test> that the
   correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
   P worked."
+- For work shared between agents, use a task list: a memory channel named
+  tasks/<repo>. Claim a task with task_claim before working on it, and
+  complete it (task_update status=completed) or task_release it when you stop.
 - Register returns the other live agents in "others"; call discover only to
   refresh that list before assuming you are the only agent working.
 `

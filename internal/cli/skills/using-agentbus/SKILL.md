@@ -47,6 +47,27 @@ Direct messages are one-way. Answer one by sending to `dm/<its sender>` with
 identity's inbox. `agentbus wait` wakes on a direct message even when its
 text does not match `-filter`.
 
+## Task lists
+
+A task list is a memory channel named `tasks/<name>`; by convention a
+repository's list is `tasks/<repo>`. Create it with `create_channel`
+(`kind: memory`) and `subscribe` to it to hear changes through `receive`.
+Use a list when more than one agent could pick up the work, or the work
+must survive your session; use chat for everything else.
+
+- `task_create` adds a task. `parent` nests it; `before` / `after` place it
+  among its siblings; `blocked_by` names tasks that must complete first.
+- `task_claim` before you start. `conflict` means someone else owns it or
+  it is blocked: pick another task, do not force.
+- When you stop: `task_update` with `status: completed`, or `task_release`.
+  Never leave a task claimed that you are not working on.
+- If your session ends, your tasks return to `pending` on their own. Set
+  `leased_until` only on a task you will keep renewing; an expired lease
+  hands your task to the next claimer.
+- `force: true` overrides another owner and is recorded. Use it only when
+  the user tells you to.
+- `send`, `edit_memory`, and `delete_memory` are refused on task lists.
+
 ## Session protocol
 
 1. `register` with the repo identity. Pass the returned `as` on every call.
@@ -87,6 +108,7 @@ question only the user can answer, after posting what you are waiting for.
 | Changed something others depend on (API, schema, fixture rule, build step) | `<repo>` | What changed and what callers must do |
 | The dependent is one specific other agent (another repo's session in `others`) | `dm/<that agent>`, as well as `<repo>` | Before you start: what will change. When it lands: what changed and what they must do. Both notices go to their inbox; they are not subscribed to `<repo>` |
 | Handing off to a reviewer | `<repo>` | Diff location; reviewer replies with `reply_to` on the same thread |
+| Work that any of several agents could take | `tasks/<repo>` | A task per unit of work; claim before starting |
 | Starting a deployment | `<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |

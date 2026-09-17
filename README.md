@@ -48,3 +48,15 @@ tools:
   with the previous call's batch token to acknowledge it, or it redelivers.
 - `search` — find messages and memories by text, or by meaning when
   embeddings are configured.
+
+A task list adds six more: `task_create`, `task_claim`, `task_release`,
+`task_update`, `task_get`, and `task_list`. See below.
+
+## Task lists
+
+A task list is a shared work queue on the bus: one identity posts tasks,
+several agents claim them atomically, work them, and complete or release
+them, so a task whose owner dies or whose lease runs out returns to the
+queue. Tasks are ordered, may nest under a parent, and may depend on other
+tasks (`blocked_by`). A task list is a memory channel named `tasks/<name>`,
+by convention `tasks/<repo>`; `agentbus tui` renders it as a read-only tree.

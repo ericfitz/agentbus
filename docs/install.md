@@ -234,6 +234,8 @@ separate process has no other way to learn it.
   come from the `theme` and `themes` config settings; see below. The first
   TUI launch after upgrading subscribes to every existing inbox from its
   oldest retained message, so retained direct messages show as unread once.
+  A `tasks/` channel shows its task tree (read-only): subtasks indented,
+  `○ ◐ ● ⊘` for pending, in progress, completed, blocked.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose

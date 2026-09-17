@@ -128,6 +128,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Post to your subscribed chat channel",
 		"- Search all your subscribed memory channels",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
+		"- For work shared between agents, use a task list",
 		"- Register returns the other live agents in \"others\"; call discover only to",
 	} {
 		if !strings.Contains(got, want) {

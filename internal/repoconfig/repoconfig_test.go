@@ -94,6 +94,34 @@ func TestChannelsDedupesAndReportsBad(t *testing.T) {
 	}
 }
 
+func TestChannelsAcceptsTaskListRejectsBadTaskName(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam","channels":["tasks/work","tasks/","tasks/a/b"]}`)
+	f, _ := Load(dir)
+	got, bad := f.Channels()
+	if !reflect.DeepEqual(got, []string{"tasks/work"}) {
+		t.Fatal(got)
+	}
+	if !reflect.DeepEqual(bad, []string{"tasks/", "tasks/a/b"}) {
+		t.Fatal(bad)
+	}
+}
+
+func TestAddChannelAcceptsTaskListRejectsBadTaskName(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam"}`)
+	f, _ := Load(dir)
+	got, err := f.AddChannel("tasks/work")
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "tasks/work"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, bad := range []string{"tasks/", "tasks/a/b"} {
+		if _, err := f.AddChannel(bad); err == nil {
+			t.Fatalf("AddChannel(%q): expected error", bad)
+		}
+	}
+}
+
 func TestAddChannelMaterializesDefaultsAndPreservesUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)

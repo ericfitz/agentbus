@@ -75,7 +75,7 @@ func Find(dir string) (*File, error) {
 
 // Channels returns the persistent channel list: DefaultChannels when the key
 // is absent, otherwise the deduplicated entries in file order. Entries that
-// are not strings or fail bus.NameRule are returned in bad and omitted.
+// are not strings or fail bus.ChannelNameRule are returned in bad and omitted.
 func (f *File) Channels() (channels []string, bad []string) {
 	v, ok := f.Raw["channels"]
 	if !ok {
@@ -86,7 +86,7 @@ func (f *File) Channels() (channels []string, bad []string) {
 	seen := map[string]bool{}
 	for _, e := range list {
 		s, ok := e.(string)
-		if !ok || bus.NameRule(s) != nil {
+		if !ok || bus.ChannelNameRule(s) != nil {
 			bad = append(bad, fmt.Sprint(e))
 			continue
 		}
@@ -113,9 +113,9 @@ func Create(dir, identity string) (*File, error) {
 
 // AddChannel appends channel to the file's list (materializing DefaultChannels
 // first when the key is absent), dedupes, writes the file, and returns the
-// resulting list. channel must pass bus.NameRule.
+// resulting list. channel must pass bus.ChannelNameRule.
 func (f *File) AddChannel(channel string) ([]string, error) {
-	if err := bus.NameRule(channel); err != nil {
+	if err := bus.ChannelNameRule(channel); err != nil {
 		return nil, fmt.Errorf("channel %q: %w", channel, err)
 	}
 	// bus.DMPrefix ("dm/") already fails NameRule's '/' check above; the

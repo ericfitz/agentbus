@@ -180,31 +180,38 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 	if b.embedder == nil {
 		return 0, nil
 	}
-	if _, err := b.db.Exec("DELETE FROM embeddings WHERE model<>?", b.embedder.model); err != nil {
+	// Only pay for the DELETE when there is actually a stale-model row to
+	// remove (e.g. embedding_model changed since these were written), not on
+	// every batch pass.
+	var stale bool
+	if err := b.db.QueryRow("SELECT EXISTS(SELECT 1 FROM embeddings WHERE model<>?)", b.embedder.model).Scan(&stale); err != nil {
 		return 0, internal(err)
+	}
+	if stale {
+		if _, err := b.db.Exec("DELETE FROM embeddings WHERE model<>?", b.embedder.model); err != nil {
+			return 0, internal(err)
+		}
 	}
 	rows, err := b.db.Query(`SELECT m.seq, m.content FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq
 	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL ORDER BY m.seq LIMIT ?`, embedBatchSize)
 	if err != nil {
 		return 0, internal(err)
 	}
+	defer func() { _ = rows.Close() }()
 	var seqs []int64
 	var texts []string
 	for rows.Next() {
 		var s int64
 		var c string
 		if err := rows.Scan(&s, &c); err != nil {
-			_ = rows.Close()
 			return 0, internal(err)
 		}
 		seqs = append(seqs, s)
 		texts = append(texts, c)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return 0, internal(err)
 	}
-	_ = rows.Close()
 	if len(seqs) == 0 {
 		return 0, nil
 	}

@@ -29,8 +29,9 @@ const (
 	modeConfirmChannel // d on the channel list; y deletes, anything else cancels
 )
 
-// pane is the focused main-screen region; tab and shift+tab cycle them and
-// home returns to the channel list. Focus is derived from mode and cursor
+// pane is the focused main-screen region; tab and shift+tab cycle them
+// (channels and sessions share one slot, see paneKey) and home returns to
+// the channel list. Focus is derived from mode and cursor
 // rather than stored, so the existing keymap keeps working unchanged.
 type pane int
 
@@ -39,7 +40,6 @@ const (
 	paneSessions
 	paneStream
 	paneCompose
-	paneCount
 )
 
 const (
@@ -371,9 +371,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
-	// Arrows never change pane: up/down move within the focused one, right
-	// shows the cursor message's direct replies, left hides its whole
-	// subtree.
+	// up/down move within the focused pane. Channels and sessions are one
+	// rail: down past the last channel enters the sessions, up from the first
+	// session returns to the last channel. right shows the cursor message's
+	// direct replies, left hides its whole subtree.
 	case "down":
 		switch m.pane() {
 		case paneStream:
@@ -381,6 +382,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		case paneSessions:
 			return m.selectSession(m.sessSel + 1)
 		default:
+			if m.sel >= len(m.channels)-1 && len(m.sessionNames()) > 0 {
+				return m.selectSession(0)
+			}
 			return m.selectChannel(m.sel + 1)
 		}
 	case "up":
@@ -388,6 +392,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		case paneStream:
 			return m.moveCursor(-1)
 		case paneSessions:
+			if m.sessSel == 0 && len(m.channels) > 0 {
+				return m.selectChannel(len(m.channels) - 1)
+			}
 			return m.selectSession(m.sessSel - 1)
 		default:
 			return m.selectChannel(m.sel - 1)
@@ -461,9 +468,12 @@ func (m *Model) pane() pane {
 }
 
 // paneKey handles tab (next pane), shift+tab (previous pane), and home
-// (channel list), skipping panes with nothing to focus: sessions when there
-// are no sessions, the stream when the channel has no messages, compose when
-// no channel is selected.
+// (channel list). The cycle is rail, messages, compose, where the rail is
+// whichever of channels or sessions holds the selection; tab never moves
+// between those two (arrows do), so the messages of the highlighted channel
+// or session are always one tab away. Panes with nothing to focus are
+// skipped: the stream when it has no messages, compose when nothing is
+// selected.
 func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 	d := 1
 	switch keyString(msg) {
@@ -472,13 +482,17 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 	case "home":
 		return m.focusPane(paneChannels)
 	}
-	p := m.pane()
-	for range paneCount - 1 {
-		p = (p + pane(d) + paneCount) % paneCount
+	rail := paneChannels
+	if m.sessSel >= 0 {
+		rail = paneSessions
+	}
+	order := []pane{rail, paneStream, paneCompose}
+	i := slices.Index(order, m.pane())
+	for range len(order) - 1 {
+		i = (i + d + len(order)) % len(order)
+		p := order[i]
 		switch {
-		case p == paneChannels:
-			return m.focusPane(p)
-		case p == paneSessions && len(m.sessionNames()) > 0:
+		case p == rail:
 			return m.focusPane(p)
 		case p == paneStream && len(m.msgs[m.selName()]) > 0:
 			return m.focusPane(p)

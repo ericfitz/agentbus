@@ -219,8 +219,10 @@ separate process has no other way to learn it.
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
-  `shift+tab` move between the channel list, the session list, the message
-  list, and the compose line; `home` returns to the channel list. Selecting a
+  `shift+tab` move between the rail (channels and sessions), the message
+  list of the highlighted channel or session, and the compose line; `↓` past
+  the last channel moves into the sessions and `↑` from the first session
+  moves back; `home` returns to the channel list. Selecting a
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends
   that identity a direct message. Your own row is your inbox; agents reach

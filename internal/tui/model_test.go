@@ -83,6 +83,16 @@ func (f *fixture) send(msg tea.Msg) {
 	f.run(cmd)
 }
 
+// toSessions walks down the rail from the channel list into the sessions.
+func (f *fixture) toSessions() {
+	for range len(f.m.channels) + 1 {
+		if f.m.pane() == paneSessions {
+			return
+		}
+		f.key("down")
+	}
+}
+
 func (f *fixture) key(k string) {
 	switch k {
 	case "enter":
@@ -217,8 +227,22 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 		t.Fatalf("tab from compose wraps to channels, got pane=%v mode=%v", f.m.pane(), f.m.mode)
 	}
 	f.key("tab")
+	// Channels and sessions are one rail: tab from the channel list goes to
+	// that channel's messages, never to the session list.
+	if f.m.pane() != paneStream || f.m.sessSel != -1 || f.m.selName() != "dev" {
+		t.Fatalf("tab from channels focuses dev's messages, got pane=%v sessSel=%d sel=%q", f.m.pane(), f.m.sessSel, f.m.selName())
+	}
+	f.key("shift+tab")
+	if f.m.pane() != paneChannels {
+		t.Fatalf("shift+tab from messages goes back to channels, got %v", f.m.pane())
+	}
+
+	// Down past the last channel crosses into the sessions; up from the
+	// first session crosses back to the last channel.
+	f.m.selectChannel(len(f.m.channels) - 1)
+	f.key("down")
 	if f.m.pane() != paneSessions || f.m.sessSel != 0 {
-		t.Fatalf("tab from channels focuses the sessions pane, got pane=%v sessSel=%d", f.m.pane(), f.m.sessSel)
+		t.Fatalf("down from the last channel focuses the first session, got pane=%v sessSel=%d", f.m.pane(), f.m.sessSel)
 	}
 	f.key("tab")
 	// Sam (the first session, sorted) has no DM messages yet, so its empty
@@ -228,12 +252,13 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 	}
 	f.key("shift+tab")
 	if f.m.pane() != paneSessions {
-		t.Fatalf("shift+tab from compose goes back to sessions (skipping the same empty stream), got %v", f.m.pane())
+		t.Fatalf("shift+tab from compose goes back to the session (skipping the same empty stream), got %v", f.m.pane())
 	}
-	f.key("shift+tab")
-	if f.m.pane() != paneChannels {
-		t.Fatalf("shift+tab from sessions goes back to channels, got %v", f.m.pane())
+	f.key("up")
+	if f.m.pane() != paneChannels || f.m.sel != len(f.m.channels)-1 {
+		t.Fatalf("up from the first session focuses the last channel, got pane=%v sel=%d", f.m.pane(), f.m.sel)
 	}
+	f.m.selectChannel(0)
 
 	// Reach dev's own stream directly: shift+tab from compose lands there in
 	// one step, without detouring through the sessions pane (which would
@@ -528,7 +553,7 @@ func TestSetChannelsKeepsSelectionByNameWhileASessionIsSelected(t *testing.T) {
 	for f.m.selected() == nil || f.m.selected().Name != "zulu" {
 		f.key("down")
 	}
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if f.m.pane() != paneSessions {
 		t.Fatalf("setup: pane=%v", f.m.pane())
 	}
@@ -550,7 +575,7 @@ func TestSessionSweepReindexesSelectionByName(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd()) // sessionNames: Sam, eric
 	f.key("esc")
-	f.key("tab")  // channels -> sessions, sessSel=0 ("Sam")
+	f.toSessions()
 	f.key("down") // sessSel=1 ("eric", the TUI's own inbox)
 	if got := f.m.sessionNames()[f.m.sessSel]; got != f.c.as {
 		t.Fatalf("setup: expected %q selected, got %q", f.c.as, got)
@@ -576,7 +601,7 @@ func TestSessionSweepReturnsToChannelsWhenNoSessionsRemain(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
 	f.key("esc")
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if f.m.pane() != paneSessions {
 		t.Fatalf("setup: pane=%v", f.m.pane())
 	}
@@ -587,7 +612,7 @@ func TestSessionSweepReturnsToChannelsWhenNoSessionsRemain(t *testing.T) {
 	if len(f.m.sessionNames()) != 0 {
 		t.Fatalf("every session must have aged out: %v", f.m.sessionNames())
 	}
-	if f.m.sessSel != -1 || f.m.pane() != paneChannels || f.m.selName() != "dev" {
+	if f.m.sessSel != -1 || f.m.pane() != paneChannels || f.m.selName() != "memory" { // the last channel, where the walk down the rail left the list
 		t.Fatalf("losing every session must return to the channel list: sessSel=%d pane=%v sel=%q", f.m.sessSel, f.m.pane(), f.m.selName())
 	}
 }

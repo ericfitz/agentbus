@@ -28,7 +28,7 @@ func (m *Model) updateHelp(msg tea.Msg) tea.Cmd {
 // home, the compose editing keys) live only here.
 func (m Model) helpLines() []string {
 	rows := [][2]string{
-		{"tab / shift+tab", "next / previous pane (channels, sessions, messages, compose)"},
+		{"tab / shift+tab", "next / previous pane (channel or session list, its messages, compose)"},
 		{"home", "channel list"},
 		{"esc", "leave compose; clear the message cursor"},
 		{"i", "compose (in the sessions pane, sends a direct message)"},

@@ -62,7 +62,7 @@ func TestSearchJumpFromSessionsPaneLeavesSessions(t *testing.T) {
 	f.agentSend(t, "dev", "the release script")
 	f.receive(t)
 	f.key("esc")
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if f.m.pane() != paneSessions {
 		t.Fatalf("setup: pane=%v", f.m.pane())
 	}

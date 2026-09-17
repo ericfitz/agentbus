@@ -58,7 +58,7 @@ func TestRailHighlightFollowsFocusBetweenPanes(t *testing.T) {
 	if strings.Contains(sessionRow(), markSel) {
 		t.Fatalf("sessions pane must not be highlighted while the channel list holds the selection: %q", sessionRow())
 	}
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if strings.Contains(channelRow(), markSel) {
 		t.Fatalf("channel list must lose its highlight once the sessions pane holds the selection: %q", channelRow())
 	}
@@ -71,7 +71,7 @@ func TestSessionsPaneShowsInboxAndComposesDM(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
 	f.key("esc")
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if f.m.pane() != paneSessions {
 		t.Fatalf("pane=%v", f.m.pane())
 	}
@@ -108,7 +108,7 @@ func TestReplyOnlyInOwnInbox(t *testing.T) {
 	f.agentSend(t, "dm/Sam", "note")
 	f.receive(t)
 	f.key("esc")
-	f.key("tab")
+	f.toSessions()
 	sel := func(name string) {
 		for i, n := range f.m.sessionNames() {
 			if n == name {

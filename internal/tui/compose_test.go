@@ -146,7 +146,7 @@ func TestSubscribeAndDeleteNoopInSessionsPane(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd()) // learn Sam's session
 	f.key("esc")
-	f.key("tab") // channels -> sessions
+	f.toSessions()
 	if f.m.pane() != paneSessions {
 		t.Fatalf("pane=%v", f.m.pane())
 	}

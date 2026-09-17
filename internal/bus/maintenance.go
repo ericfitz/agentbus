@@ -142,23 +142,21 @@ func (b *Bus) deleteOrdinaryChunk(cond string, args []any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer func() { _ = rows.Close() }()
 	var seqs []any
 	maxByChannel := map[string]int64{}
 	for rows.Next() {
 		var s int64
 		var ch string
 		if err := rows.Scan(&s, &ch); err != nil {
-			_ = rows.Close()
 			return 0, err
 		}
 		seqs = append(seqs, s)
 		maxByChannel[ch] = s
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return 0, err
 	}
-	_ = rows.Close()
 	if len(seqs) == 0 {
 		return 0, nil
 	}

@@ -107,6 +107,32 @@ func TestMemoryDeleteAsksThenTombstones(t *testing.T) {
 	}
 }
 
+// TestMemoriesOverlayFallbackSkipsTaskChannels covers Minor 3 of the final
+// review: openMemories' fallback (no memory channel selected) must not pick
+// a tasks/ channel just because it too is Kind "memory" -- task lists are
+// read-only in the TUI, and the design says the memories overlay is
+// disabled for them. m.channels is set directly so the fallback is
+// exercised with no other "memory"-kind channel ahead of it in rail order
+// (in real use the un-deletable default "memory" channel always sorts
+// first, which is why this needs a synthetic channel list to reach at all).
+func TestMemoriesOverlayFallbackSkipsTaskChannels(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	f.key("esc")
+	f.m.channels = []bus.Channel{{Name: "tasks/work", Kind: "memory"}}
+	f.m.sel, f.m.sessSel = -1, -1
+
+	f.run(f.m.openMemories())
+	if f.m.mode == modeMemories {
+		t.Fatalf("opened the memories overlay on task channel %q", f.m.mem.channel)
+	}
+	if f.m.toast == "" {
+		t.Fatal("expected the no-memory-channels toast")
+	}
+}
+
 // With nothing but the default channels, m opens the memories overlay on
 // the default "memory" channel with an empty list.
 func TestMemoriesOpensDefaultMemoryChannel(t *testing.T) {

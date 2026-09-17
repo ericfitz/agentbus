@@ -572,8 +572,15 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 }
 
 // moveCursor moves the normal-mode stream cursor and scrolls to keep it
-// visible (refreshStream renders the cursor row highlighted).
+// visible (refreshStream renders the cursor row highlighted). A task
+// channel renders the task tree instead of the stream (see renderTasks) and
+// has no cursor: m.msgs still accumulates its raw revisions as they arrive
+// through receive, so without this early return the cursor would walk rows
+// that are never shown.
 func (m *Model) moveCursor(d int) tea.Cmd {
+	if bus.IsTaskChannel(m.selName()) {
+		return nil
+	}
 	n := len(m.rows(m.selName()))
 	if n == 0 {
 		m.cursor = -1
@@ -627,9 +634,14 @@ func (m *Model) scrollStream(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// loadOlder pages history backwards from the oldest loaded message.
+// loadOlder pages history backwards from the oldest loaded message. A task
+// channel has no history view (renderTasks ignores m.msgs), so paging it is
+// pure waste.
 func (m *Model) loadOlder() tea.Cmd {
 	ch := m.selName()
+	if bus.IsTaskChannel(ch) {
+		return nil
+	}
 	ms := m.msgs[ch]
 	if ch == "" || len(ms) == 0 {
 		return nil

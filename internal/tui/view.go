@@ -13,6 +13,16 @@ import (
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
+// senderName renders an envelope's sender for display: "bus" for the empty
+// sender a tick reclaim writes (design: "the TUI shows it as bus"), else the
+// sender as-is.
+func senderName(s string) string {
+	if s == "" {
+		return "bus"
+	}
+	return s
+}
+
 func fmtBytes(n int64) string {
 	switch {
 	case n >= 1<<30:
@@ -257,9 +267,10 @@ func (m *Model) renderStream() string {
 			lineNum++
 			newShown = true
 		}
-		name := th.Style(th.Agent).Render(x.Sender)
+		disp := senderName(x.Sender)
+		name := th.Style(th.Agent).Render(disp)
 		if x.Sender == m.c.as {
-			name = th.Style(th.User).Render(x.Sender)
+			name = th.Style(th.User).Render(disp)
 		}
 		// The tree prefix (indent plus expand/collapse marker) is applied
 		// after wrapping so every wrapped line sits at the row's depth.

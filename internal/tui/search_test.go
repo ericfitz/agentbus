@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ericfitz/agentbus/internal/bus"
 )
 
 func TestSearchFindsMessagesAndJumps(t *testing.T) {
@@ -200,5 +205,51 @@ func TestSearchHitListWindowsToFitTheOverlay(t *testing.T) {
 	}
 	if lines := strings.Count(v, "\n") + 1; lines > f.m.height {
 		t.Fatalf("overlay must fit within height=%d, rendered %d lines:\n%s", f.m.height, lines, v)
+	}
+}
+
+// TestSearchHitShowsBusForEmptySender covers Minor 4 of the final review: a
+// tick reclaim writes its revision with an empty sender (design: "the TUI
+// shows it as bus"), reachable through search since text search finds task
+// rows. The lease is set to expire rather than killing the owner's session,
+// so the reclaim is deterministic without touching the bus's private state.
+func TestSearchHitShowsBusForEmptySender(t *testing.T) {
+	cfg := testConfig(t)
+	ab, sam := agent(t, cfg, "Sam")
+	other, pat := agent(t, cfg, "Pat")
+	if _, err := ab.CreateChannel(sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := ab.TaskCreate(sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "zzyzx unique subject"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := ab.Now()
+	lease := now.Add(50 * time.Millisecond).UnixMilli()
+	if _, err := other.TaskClaim(pat, tk.ID, lease, ""); err != nil {
+		t.Fatal(err)
+	}
+	future := func() time.Time { return now.Add(2 * time.Second) }
+	ab.Now, other.Now = future, future
+	ab.Tick(context.Background())
+
+	c, err := newClient(cfg, "eric", discardLog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.close() })
+	f := &fixture{c: c, ab: ab, sam: sam, m: New(c, LoadTheme(cfg, io.Discard))}
+	f.m.width, f.m.height = 100, 32
+	f.run(f.m.Init())
+	f.key("esc")
+	f.key("/")
+	f.key("zzyzx")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	v := f.m.View()
+	if !strings.Contains(v, "bus") {
+		t.Fatalf("reclaim's empty sender must show as bus:\n%s", v)
 	}
 }

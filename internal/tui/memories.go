@@ -45,7 +45,7 @@ func (m *Model) openMemories() tea.Cmd {
 	}
 	if ch == "" {
 		for _, c := range m.channels {
-			if c.Kind == "memory" {
+			if c.Kind == "memory" && !bus.IsTaskChannel(c.Name) {
 				ch = c.Name
 				break
 			}
@@ -251,7 +251,7 @@ func (m Model) memoriesTail(budget int) string {
 	}
 	contentBudget := max(budget-overhead, 1)
 	var b strings.Builder
-	b.WriteString("\n" + dim.Render(fmt.Sprintf("#%d · revision %d of %d · %s · %s", m.mem.currentID(), m.mem.rev+1, len(m.mem.revs), r.Sender, clock(r.CreatedAt))) + "\n")
+	b.WriteString("\n" + dim.Render(fmt.Sprintf("#%d · revision %d of %d · %s · %s", m.mem.currentID(), m.mem.rev+1, len(m.mem.revs), senderName(r.Sender), clock(r.CreatedAt))) + "\n")
 	lines := strings.Split(r.Content, "\n")
 	if len(lines) > contentBudget {
 		show := max(contentBudget-1, 1)

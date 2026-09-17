@@ -138,6 +138,66 @@ func TestTaskTreeRefreshesOnRevision(t *testing.T) {
 	}
 }
 
+// TestTaskChannelMoveCursorIsNoop covers T6-1 of the final review: a
+// search jump can land the cursor on one of a task channel's raw revisions
+// in m.msgs (never rendered; renderTasks draws the tree instead, which is
+// why the jump itself is harmless), but arrow keys after that must not walk
+// those hidden rows. The jump itself is out of scope here (see the search
+// tests); this sets the cursor directly to reach the same state.
+func TestTaskChannelMoveCursorIsNoop(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.receive(t)
+	f.selectTaskChannel(t, "tasks/work")
+	if len(f.m.msgs["tasks/work"]) < 2 {
+		t.Fatalf("expected m.msgs to hold the channel's raw revisions, got %d", len(f.m.msgs["tasks/work"]))
+	}
+	f.m.cursor = 0
+
+	f.key("down")
+	if f.m.cursor != 0 {
+		t.Fatalf("down moved the cursor to %d on a task channel", f.m.cursor)
+	}
+	f.key("up")
+	if f.m.cursor != 0 {
+		t.Fatalf("up moved the cursor to %d on a task channel", f.m.cursor)
+	}
+}
+
+// TestTaskChannelPgupDoesNotLoadHistory covers T6-2 of the final review:
+// pgup at the top of a task channel must not page in history that
+// renderTasks never shows.
+func TestTaskChannelPgupDoesNotLoadHistory(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.receive(t) // populate m.msgs["tasks/work"], as a real session would
+	f.selectTaskChannel(t, "tasks/work")
+	if len(f.m.msgs["tasks/work"]) == 0 {
+		t.Fatal("expected m.msgs to hold the channel's raw revisions")
+	}
+
+	if cmd := f.m.loadOlder(); cmd != nil {
+		t.Fatal("loadOlder must be a no-op on a task channel")
+	}
+}
+
 func TestTaskIndentIsCapped(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")

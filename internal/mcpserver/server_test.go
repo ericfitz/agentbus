@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -144,6 +145,102 @@ func TestBackgroundLoopsStopBeforeCallerCanCloseSafely(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "heartbeat failed") {
 		t.Fatalf("a heartbeat ran against the closed bus: %s", buf.String())
+	}
+}
+
+// TestBackgroundLoopsWaitForInFlightHeartbeatBeforeReturning strengthens
+// TestBackgroundLoopsStopBeforeCallerCanCloseSafely (xfa #74's deferred
+// minor): that test only shows wg.Wait returns and the bus survives, which
+// would also pass if wg.Wait never actually waited on anything. Here a
+// second connection holds the database's write lock while a heartbeat is
+// due, so Heartbeat's UPDATE is provably still in flight (blocked on
+// busy_timeout) when ctx is canceled; only releasing that lock lets wg.Wait
+// return, proving the wait is real.
+func TestBackgroundLoopsWaitForInFlightHeartbeatBeforeReturning(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.CleanupIntervalSeconds = 5 // long enough not to fire during this test
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	b, err := bus.Open(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+
+	db := openDirectDB(t, cfg.DataDirectory)
+	tx, err := db.Begin() // _txlock=immediate takes the write lock now
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := StartBackgroundLoops(ctx, b, cfg, log, 5*time.Millisecond)
+	time.Sleep(30 * time.Millisecond) // let a heartbeat fire and block on the held write lock
+	cancel()
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("wg.Wait returned while the in-flight heartbeat was still blocked on the write lock")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("wg.Wait did not return after the blocked heartbeat was released")
+	}
+}
+
+// TestRegisterPendingTrimmedToResultBudget covers Task 12 round 2's
+// deferred minor: no test exercised sessions.Register's own trimToBytes call
+// on Pending. result_default_kib is dropped to 1 KiB so a few dozen
+// subscriptions are enough to force the trim without a slow multi-thousand
+// channel setup.
+func TestRegisterPendingTrimmedToResultBudget(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.ResultDefaultKiB = 1
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	const channels = 80
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	for i := 0; i < channels; i++ {
+		name := fmt.Sprintf("chan%03d", i)
+		call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": name, "kind": "ordinary"})
+		call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": name})
+	}
+
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	pending, _ := reg["pending"].([]any)
+	if len(pending) == 0 || len(pending) >= channels {
+		t.Fatalf("expected the pending list trimmed below %d entries, got %d", channels, len(pending))
+	}
+	j, err := json.Marshal(reg["pending"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j) > cfg.ResultDefaultKiB*1024+512 { // slack for framing/the first-record allowance
+		t.Fatalf("trimmed pending list is %d bytes, want roughly within the %d KiB budget", len(j), cfg.ResultDefaultKiB)
 	}
 }
 

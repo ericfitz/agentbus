@@ -23,10 +23,9 @@ type rotatingWriter struct {
 	maxBytes int64
 	keep     int
 
-	mu  sync.Mutex // process-local: makes the critical section visible to the race detector, which can't see flock's cross-process ordering
-	f   *os.File
-	dev uint64
-	ino uint64
+	mu sync.Mutex // process-local: makes the critical section visible to the race detector, which can't see flock's cross-process ordering
+	f  *os.File
+	fi os.FileInfo // stat result from when f was opened, compared via os.SameFile to detect a rotation by another process
 }
 
 func (w *rotatingWriter) Write(p []byte) (int, error) {
@@ -78,10 +77,8 @@ func (w *rotatingWriter) lockAcrossProcesses() (func(), error) {
 // cross-process lock.
 func (w *rotatingWriter) ensureCurrent() error {
 	if w.f != nil {
-		if fi, err := os.Stat(w.path); err == nil {
-			if dev, ino, ok := fileIdentity(fi); ok && dev == w.dev && ino == w.ino {
-				return nil // still the file we have open
-			}
+		if fi, err := os.Stat(w.path); err == nil && os.SameFile(fi, w.fi) {
+			return nil // still the file we have open
 		}
 		_ = w.f.Close()
 		w.f = nil
@@ -96,18 +93,8 @@ func (w *rotatingWriter) ensureCurrent() error {
 		return err
 	}
 	w.f = f
-	w.dev, w.ino, _ = fileIdentity(fi)
+	w.fi = fi
 	return nil
-}
-
-// fileIdentity extracts (device, inode) from a stat result, when the
-// platform's FileInfo.Sys() supports it (darwin and linux both do).
-func fileIdentity(fi os.FileInfo) (dev, ino uint64, ok bool) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0, false
-	}
-	return uint64(st.Dev), uint64(st.Ino), true
 }
 
 // rotate shifts path.1..path.(keep-1) up by one, archives the current file

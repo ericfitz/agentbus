@@ -202,6 +202,11 @@ func Load(path string) (Config, string, error) {
 	case errors.Is(err, os.ErrNotExist):
 	case err != nil:
 		return c, path, fmt.Errorf("read %s: %w", path, err)
+	case len(bytes.TrimSpace(body)) == 0:
+		// A missing file means defaults (handled above); an existing but
+		// empty file is malformed, but json.Decode's bare "EOF" for it is
+		// unhelpful, so name the problem instead.
+		return c, path, fmt.Errorf("%s: file is empty, expected a JSON object", path)
 	default:
 		// Decoding a JSON array into a non-empty slice reuses its elements,
 		// so the file's first theme would inherit the built-in default's

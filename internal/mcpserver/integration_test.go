@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,8 +47,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	binary = filepath.Join(dir, "agentbus")
-	build := exec.Command("go", "build", "-o", binary, "../..")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	args := []string{"build", "-o", binary}
+	cgoEnabled := "CGO_ENABLED=0"
+	if raceEnabled {
+		// This test binary was itself built with -race (see race_on_test.go),
+		// so build the spawned child the same way: -race needs cgo, and an
+		// uninstrumented child would give integration tests no race coverage
+		// of the actual server code under test.
+		args = append(args, "-race")
+		cgoEnabled = "CGO_ENABLED=1"
+	}
+	args = append(args, "../..")
+	build := exec.Command("go", args...)
+	build.Env = append(os.Environ(), cgoEnabled)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build agentbus: %v\n%s", err, out)
 		os.Exit(1)
@@ -121,7 +133,12 @@ func spawn(t *testing.T, dataDir string) *proc {
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).
 		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		if cmd.Process != nil {
+		// go-sdk's Client.Connect already closes the session (which kills and
+		// waits the child) on every failure past a successful process start
+		// (e.g. a handshake timeout), so ProcessState set means it's already
+		// reaped and this is a no-op; only a pipe-setup failure before Start
+		// leaves a live, unreaped process for us to clean up here.
+		if cmd.Process != nil && cmd.ProcessState == nil {
 			if kerr := cmd.Process.Kill(); kerr != nil {
 				t.Logf("kill orphaned agentbus process after failed connect: %v", kerr)
 			}
@@ -341,10 +358,15 @@ func TestDeadProcessHoldsNameUntilExpiry(t *testing.T) {
 	// Expiry after 30s is covered by the fake-clock test TestStaleOwnerLosesName in package bus.
 }
 
+// TestHookRunsInSendingProcess covers actual provenance, not just rejection:
+// the hook script records its own parent pid, which must be the spawned
+// sending process (a), proving the bus execs the hook directly from within
+// that process rather than some other process producing the same rejection.
 func TestHookRunsInSendingProcess(t *testing.T) {
 	dir := t.TempDir()
 	hook := filepath.Join(dir, "hook.sh")
-	script := "#!/bin/sh\ncat >/dev/null; echo '{\"allow\":false,\"reason\":\"blocked by test\"}'\n"
+	ppidFile := filepath.Join(dir, "hook.ppid")
+	script := "#!/bin/sh\ncat >/dev/null; echo $PPID >" + ppidFile + "\necho '{\"allow\":false,\"reason\":\"blocked by test\"}'\n"
 	if err := os.WriteFile(hook, []byte(script), 0o700); err != nil {
 		t.Fatalf("write hook script: %v", err)
 	}
@@ -360,6 +382,13 @@ func TestHookRunsInSendingProcess(t *testing.T) {
 	env := decodeErr(t, e)
 	if env.Code != "inspection_rejected" || !strings.Contains(env.Message, "blocked by test") {
 		t.Fatalf("expected inspection_rejected with the hook's reason: %s", e)
+	}
+	ppidBytes, err := os.ReadFile(ppidFile)
+	if err != nil {
+		t.Fatalf("hook did not run (no ppid file): %v", err)
+	}
+	if got := strings.TrimSpace(string(ppidBytes)); got != strconv.Itoa(a.cmd.Process.Pid) {
+		t.Fatalf("hook ran under ppid %s, want the sending process's pid %d", got, a.cmd.Process.Pid)
 	}
 }
 

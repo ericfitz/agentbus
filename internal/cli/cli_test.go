@@ -10,19 +10,37 @@ import (
 	"github.com/ericfitz/agentbus/internal/config"
 )
 
+// mkdirAll and writeFile are t.MkdirAll/os.WriteFile for test setup with the
+// error actually checked, instead of the `_ = ...` this file used to drop.
+func mkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeIdentityFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "myrepo")
 	sub := filepath.Join(root, "a", "b")
-	_ = os.MkdirAll(sub, 0o755)
-	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	mkdirAll(t, sub)
+	mkdirAll(t, filepath.Join(root, ".git"))
 	var out bytes.Buffer
 	if err := Identity(sub, &out); err != nil || out.String() != identityLine("myrepo") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
-	_ = os.MkdirAll(filepath.Join(root, ".local"), 0o755)
-	_ = os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity": "Sam"}`), 0o600)
+	mkdirAll(t, filepath.Join(root, ".local"))
+	writeIdentityFile(t, filepath.Join(root, ".local", "agentbus.json"), `{"identity": "Sam"}`)
 	out.Reset()
-	_ = Identity(sub, &out)
+	if err := Identity(sub, &out); err != nil {
+		t.Fatal(err)
+	}
 	if out.String() != identityLine("Sam") {
 		t.Fatal(out.String())
 	}
@@ -35,24 +53,24 @@ func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {
 func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	outer := filepath.Join(t.TempDir(), "outer")
 	inner := filepath.Join(outer, "inner")
-	_ = os.MkdirAll(filepath.Join(outer, ".git"), 0o755)
-	_ = os.MkdirAll(filepath.Join(inner, ".git"), 0o755)
+	mkdirAll(t, filepath.Join(outer, ".git"))
+	mkdirAll(t, filepath.Join(inner, ".git"))
 	var out bytes.Buffer
 	if err := Identity(inner, &out); err != nil || out.String() != identityLine("inner") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
 	// Outer identity file must not leak into the inner repo's default.
-	_ = os.MkdirAll(filepath.Join(outer, ".local"), 0o755)
-	_ = os.WriteFile(filepath.Join(outer, ".local", "agentbus.json"), []byte(`{"identity": "OuterName"}`), 0o600)
+	mkdirAll(t, filepath.Join(outer, ".local"))
+	writeIdentityFile(t, filepath.Join(outer, ".local", "agentbus.json"), `{"identity": "OuterName"}`)
 	out.Reset()
 	if err := Identity(inner, &out); err != nil || out.String() != identityLine("inner") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
 	// An identity file at the inner (nearest) level still applies.
-	_ = os.MkdirAll(filepath.Join(inner, ".local"), 0o755)
-	_ = os.WriteFile(filepath.Join(inner, ".local", "agentbus.json"), []byte(`{"identity": "InnerName"}`), 0o600)
+	mkdirAll(t, filepath.Join(inner, ".local"))
+	writeIdentityFile(t, filepath.Join(inner, ".local", "agentbus.json"), `{"identity": "InnerName"}`)
 	out.Reset()
 	if err := Identity(inner, &out); err != nil || out.String() != identityLine("InnerName") {
 		t.Fatalf("%q %v", out.String(), err)
@@ -64,12 +82,12 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 // rule, must warn (not silently ignore) and fall back to the next level.
 func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "myrepo")
-	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	_ = os.MkdirAll(filepath.Join(root, ".local"), 0o755)
+	mkdirAll(t, filepath.Join(root, ".git"))
+	mkdirAll(t, filepath.Join(root, ".local"))
 	identityPath := filepath.Join(root, ".local", "agentbus.json")
 
 	// Malformed JSON: warn and fall back to the repo basename.
-	_ = os.WriteFile(identityPath, []byte(`{not json`), 0o600)
+	writeIdentityFile(t, identityPath, `{not json`)
 	var out, warn bytes.Buffer
 	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
 		t.Fatalf("%q %v", out.String(), err)
@@ -79,7 +97,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	}
 
 	// Identity value fails the name rule (contains '/'): warn and fall back.
-	_ = os.WriteFile(identityPath, []byte(`{"identity": "a/b"}`), 0o600)
+	writeIdentityFile(t, identityPath, `{"identity": "a/b"}`)
 	out.Reset()
 	warn.Reset()
 	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
@@ -90,7 +108,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	}
 
 	// A valid identity produces no warning.
-	_ = os.WriteFile(identityPath, []byte(`{"identity": "Sam"}`), 0o600)
+	writeIdentityFile(t, identityPath, `{"identity": "Sam"}`)
 	out.Reset()
 	warn.Reset()
 	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("Sam") {

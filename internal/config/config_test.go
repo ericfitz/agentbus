@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,14 +131,103 @@ func TestDataDirEnvOverrideAndTilde(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.DataDirectory != filepath.Join(home, "x") {
 		t.Fatalf("tilde not resolved: %s", c.DataDirectory)
 	}
 	t.Setenv("AGENTBUS_DATA_DIR", "/tmp/override")
-	c, _, _ = Load(p)
+	c, _, err = Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.DataDirectory != "/tmp/override" {
 		t.Fatalf("env override ignored: %s", c.DataDirectory)
+	}
+}
+
+func TestRejectsEmptyConfigFile(t *testing.T) {
+	p := write(t, t.TempDir(), ``)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("want empty-file error, got %v", err)
+	}
+}
+
+func TestRejectsWrongType(t *testing.T) {
+	p := write(t, t.TempDir(), `{"sqlite_budget_mib": "not-a-number"}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "sqlite_budget_mib") {
+		t.Fatalf("want type error naming the key, got %v", err)
+	}
+}
+
+func TestRejectsInvalidLogLevel(t *testing.T) {
+	p := write(t, t.TempDir(), `{"log_level": "verbose"}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "log_level") {
+		t.Fatalf("want log_level error, got %v", err)
+	}
+}
+
+func TestRejectsReceiveDefaultAboveMax(t *testing.T) {
+	p := write(t, t.TempDir(), `{"receive_default_count": 500, "receive_max_count": 100}`)
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "receive_default_count") {
+		t.Fatalf("want ordering error, got %v", err)
+	}
+}
+
+func TestRejectsTooManyInspectionCommandEntries(t *testing.T) {
+	entries := make([]string, 65)
+	for i := range entries {
+		entries[i] = "arg"
+	}
+	enc, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := write(t, t.TempDir(), `{"inspection_command": `+string(enc)+`}`)
+	_, _, err = Load(p)
+	if err == nil || !strings.Contains(err.Error(), "inspection_command") {
+		t.Fatalf("want inspection_command entry-count error, got %v", err)
+	}
+}
+
+func TestRejectsOversizedInspectionCommand(t *testing.T) {
+	entries := make([]string, 64)
+	for i := range entries {
+		entries[i] = strings.Repeat("x", 600) // 64 * ~600B > 32 KiB encoded
+	}
+	enc, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := write(t, t.TempDir(), `{"inspection_command": `+string(enc)+`}`)
+	_, _, err = Load(p)
+	if err == nil || !strings.Contains(err.Error(), "32 KiB") {
+		t.Fatalf("want inspection_command size error, got %v", err)
+	}
+}
+
+// TestConfigPathParamTakesPrecedenceOverEnv covers the --config precedence
+// Load implements: an explicit path always wins over AGENTBUS_CONFIG.
+func TestConfigPathParamTakesPrecedenceOverEnv(t *testing.T) {
+	dir := t.TempDir()
+	envPath := write(t, dir, `{"log_level": "debug"}`)
+	argPath := filepath.Join(dir, "arg-config.json")
+	if err := os.WriteFile(argPath, []byte(`{"log_level": "warn"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTBUS_CONFIG", envPath)
+	c, gotPath, err := Load(argPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != argPath || c.LogLevel != "warn" {
+		t.Fatalf("explicit path must win over AGENTBUS_CONFIG: path=%s level=%s", gotPath, c.LogLevel)
 	}
 }
 

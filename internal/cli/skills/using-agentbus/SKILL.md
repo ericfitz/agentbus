@@ -66,6 +66,11 @@ must survive your session; use chat for everything else.
   hands your task to the next claimer.
 - `force: true` overrides another owner and is recorded. Use it only when
   the user tells you to.
+- To renew a lease, call `task_claim` again; calling `task_update` after it
+  has already expired does nothing, since the task is already back to
+  pending.
+- `receive` delivers a task's latest revision, not every intermediate one,
+  and never a deletion; call `task_list` when you need the full picture.
 - `send`, `edit_memory`, and `delete_memory` are refused on task lists.
 
 ## Session protocol

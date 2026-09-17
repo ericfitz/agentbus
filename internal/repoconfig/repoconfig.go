@@ -118,7 +118,7 @@ func (f *File) AddChannel(channel string) ([]string, error) {
 	if err := bus.ChannelNameRule(channel); err != nil {
 		return nil, fmt.Errorf("channel %q: %w", channel, err)
 	}
-	// bus.DMPrefix ("dm/") already fails NameRule's '/' check above; the
+	// bus.DMPrefix ("dm/") already fails ChannelNameRule's '/' check above; the
 	// bare name "dm" would not, and would otherwise resubscribe (and fail)
 	// at every register. Direct-message inboxes are managed by register,
 	// not the persistent list.

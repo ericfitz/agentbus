@@ -101,12 +101,12 @@ returns the raw JSON.
 
 | Tool | Input | Result |
 |---|---|---|
-| `task_create` | `channel`, `subject`, `description?`, `parent?`, `before?`, `after?`, `blocked_by?`, `metadata?`, `idempotency_key?` | `task_id` and the task |
-| `task_claim` | `task_id`, `leased_until?`, `idempotency_key?` | the task |
-| `task_release` | `task_id`, `idempotency_key?` | the task |
-| `task_update` | `task_id` and any of `status`, `owner`, `subject`, `description`, `parent`, `before`, `after`, `add_blocked_by`, `remove_blocked_by`, `leased_until`, `metadata`, `delete`, `force`, `idempotency_key` | the task and the revision it replaced |
+| `task_create` | `channel`, `subject`, `description?`, `parent?`, `before?`, `after?`, `blocked_by?`, `metadata?`, `idempotency_key?` | the task (its `id` is the task id) |
+| `task_claim` | `task_id`, `leased_until?`, `idempotency_key?` | `{task, replaced, deleted?}` |
+| `task_release` | `task_id`, `idempotency_key?` | `{task, replaced, deleted?}` |
+| `task_update` | `task_id` and any of `status`, `owner`, `subject`, `description`, `parent`, `before`, `after`, `add_blocked_by`, `remove_blocked_by`, `leased_until`, `metadata`, `delete`, `force`, `idempotency_key` | `{task, replaced, deleted?}`: `replaced` is the seq of the revision this one replaced, `deleted` is set on a delete |
 | `task_get` | `task_id` | the task, plus derived `blocked` and `open_blockers` |
-| `task_list` | `channel`, `status?`, `owner?` | summaries: `id`, `subject`, `status`, `owner`, `parent`, `open_blockers`, `leased_until` |
+| `task_list` | `channel`, `status?`, `owner?` | a bare array of summaries: `id`, `subject`, `status`, `owner`, `parent`, `depth`, `open_blockers`, `leased_until` |
 
 `task_claim` is `task_update {owner: <caller>, status: "in_progress",
 leased_until}`. `task_release` is `task_update {owner: "", status:

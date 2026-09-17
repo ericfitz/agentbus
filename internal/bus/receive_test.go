@@ -616,3 +616,49 @@ func TestReceiveDefersDeliveryWhileGapsExceedCap(t *testing.T) {
 		t.Fatalf("survivor must be delivered once the gap backlog drains: %+v", r2.Messages)
 	}
 }
+
+// Ack must re-check readability the same way delivery does: a pending batch
+// left over from when as could read a DM inbox (it was the TUI observer)
+// must not be ack-able once observer status has moved to someone else, even
+// though the row still matches on sender+token.
+func TestAckRejectsUnreadableSubscription(t *testing.T) {
+	b, _ := twoAgents(t)
+	if _, err := b.Send("Sam", SendInput{Channel: "dm/Pat", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	b.SetObserver("Sam")
+	if err := b.Subscribe("Sam", "dm/Pat", "oldest"); err != nil {
+		t.Fatal(err)
+	}
+	// IncludeOwn: Sam is both the sender of this DM and the observer
+	// receiving it here; without it the default own-message filter would
+	// hide the very message this test needs pending.
+	r1, err := b.Receive("Sam", ReceiveInput{Channels: []string{"dm/Pat"}, IncludeOwn: true})
+	if err != nil || r1.Batch == "" || len(r1.Messages) != 1 {
+		t.Fatalf("observer must receive the pending DM batch: %+v %v", r1, err)
+	}
+	var cursorBefore, endBefore int64
+	if err := b.db.QueryRow("SELECT cursor_seq, pending_end_seq FROM subscriptions WHERE sender='Sam' AND channel='dm/Pat'").Scan(&cursorBefore, &endBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	// Observer status moves to someone else; Sam's own subscription row to
+	// dm/Pat is now unreadable to Sam.
+	b.SetObserver("Pat")
+
+	r2, err := b.Receive("Sam", ReceiveInput{Ack: r1.Batch})
+	if err != nil {
+		t.Fatalf("ack of a now-unreadable batch must not error: %v", err)
+	}
+	if !r2.AckIgnored {
+		t.Fatal("ack of a now-unreadable subscription must be ignored, not applied")
+	}
+	var cursorAfter, endAfter int64
+	var token string
+	if err := b.db.QueryRow("SELECT cursor_seq, pending_end_seq, pending_token FROM subscriptions WHERE sender='Sam' AND channel='dm/Pat'").Scan(&cursorAfter, &endAfter, &token); err != nil {
+		t.Fatal(err)
+	}
+	if cursorAfter != cursorBefore || endAfter != endBefore || token != r1.Batch {
+		t.Fatalf("rejected ack must not touch the subscription: before=(%d,%d) after=(%d,%d,%q)", cursorBefore, endBefore, cursorAfter, endAfter, token)
+	}
+}

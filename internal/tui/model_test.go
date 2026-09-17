@@ -88,7 +88,11 @@ func (f *fixture) key(k string) {
 	case "enter":
 		f.send(tea.KeyMsg{Type: tea.KeyEnter})
 	case " ":
-		f.send(tea.KeyMsg{Type: tea.KeySpace})
+		// Runes carries the literal space so a textarea's default keybinding
+		// (insert whatever Runes holds) types it; normal-mode " " (toggle
+		// expand) matches on the key's Type/String, not Runes, so this is
+		// safe there too.
+		f.send(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
 	case "esc":
 		f.send(tea.KeyMsg{Type: tea.KeyEsc})
 	case "tab":
@@ -198,8 +202,9 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 }
 
 // TestTabCyclesPanesAndHomeReturnsToChannels: compose -> channels ->
-// messages -> compose, shift+tab back, home from anywhere to channels, and
-// an empty channel's message pane is skipped.
+// sessions -> compose (a session with no DM messages skips its empty
+// stream), shift+tab back, home from anywhere to channels, and a full lap
+// must not leave follow off.
 func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "x")
@@ -212,36 +217,50 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 		t.Fatalf("tab from compose wraps to channels, got pane=%v mode=%v", f.m.pane(), f.m.mode)
 	}
 	f.key("tab")
-	if f.m.pane() != paneStream || f.m.cursor != 0 {
-		t.Fatalf("tab from channels focuses the newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+	if f.m.pane() != paneSessions || f.m.sessSel != 0 {
+		t.Fatalf("tab from channels focuses the sessions pane, got pane=%v sessSel=%d", f.m.pane(), f.m.sessSel)
 	}
 	f.key("tab")
+	// Sam (the first session, sorted) has no DM messages yet, so its empty
+	// stream is skipped straight to compose.
 	if f.m.pane() != paneCompose || f.m.mode != modeInsert {
-		t.Fatalf("tab from messages focuses compose, got pane=%v", f.m.pane())
+		t.Fatalf("tab skips a session's empty message pane, got pane=%v", f.m.pane())
 	}
 	f.key("shift+tab")
-	if f.m.pane() != paneStream {
-		t.Fatalf("shift+tab from compose goes back to messages, got %v", f.m.pane())
+	if f.m.pane() != paneSessions {
+		t.Fatalf("shift+tab from compose goes back to sessions (skipping the same empty stream), got %v", f.m.pane())
+	}
+	f.key("shift+tab")
+	if f.m.pane() != paneChannels {
+		t.Fatalf("shift+tab from sessions goes back to channels, got %v", f.m.pane())
+	}
+
+	// Reach dev's own stream directly: shift+tab from compose lands there in
+	// one step, without detouring through the sessions pane (which would
+	// switch the selection to a session's own inbox).
+	f.key("i")
+	f.key("shift+tab")
+	if f.m.pane() != paneStream || f.m.cursor != 0 {
+		t.Fatalf("shift+tab from compose focuses dev's newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
 	}
 	f.key("tab")
 	f.key("tab") // stream -> compose -> channels: a lap must not leave follow off
-	if !f.m.follow {
-		t.Fatal("leaving the message pane at the bottom must keep following new messages")
+	if f.m.pane() != paneChannels || !f.m.follow {
+		t.Fatalf("leaving the message pane at the bottom must keep following new messages, pane=%v follow=%v", f.m.pane(), f.m.follow)
 	}
-	f.key("tab")
-	f.key("up") // in the channel pane up moves channels: dev is first, so it stays
+
+	f.key("down") // dev-notes
 	f.key("home")
 	if f.m.pane() != paneChannels || f.m.cursor != -1 {
 		t.Fatalf("home returns to channels, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
 	}
-	f.key("down") // dev-notes: no messages, so tab must skip the message pane
-	f.key("tab")
-	if f.m.pane() != paneCompose {
-		t.Fatalf("tab skips an empty message pane, got %v", f.m.pane())
+	f.key("i")
+	if f.m.compose.Value() != "" {
+		t.Fatalf("compose must start empty, got %q", f.m.compose.Value())
 	}
 	f.key("x")
 	if f.m.compose.Value() != "x" {
-		t.Fatalf("compose must type after tab, got %q", f.m.compose.Value())
+		t.Fatalf("compose must type, got %q", f.m.compose.Value())
 	}
 	f.key("home")
 	if f.m.pane() != paneChannels {
@@ -363,9 +382,13 @@ func TestArrowsFollowTheFocusedPane(t *testing.T) {
 		t.Fatal("right in the channel pane never changes pane")
 	}
 	f.key("up")
-	f.key("tab")
+	// i then shift+tab reaches the stream directly, without detouring
+	// through the sessions pane (which would switch the selection to a
+	// session's own inbox).
+	f.key("i")
+	f.key("shift+tab")
 	if f.m.pane() != paneStream || f.m.cursor != 1 {
-		t.Fatalf("tab enters dev on its newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
+		t.Fatalf("shift+tab from compose focuses the stream on its newest message, got pane=%v cursor=%d", f.m.pane(), f.m.cursor)
 	}
 	f.key("left")
 	if f.m.pane() != paneStream {
@@ -393,8 +416,9 @@ func TestEnterRepliesToTheCursorMessage(t *testing.T) {
 	if f.m.mode != modeInsert || f.m.replyTo != nil {
 		t.Fatalf("enter in the channel pane composes without a reply target, got mode=%v replyTo=%v", f.m.mode, f.m.replyTo)
 	}
-	f.key("esc")
-	f.key("tab")
+	// shift+tab from compose reaches the stream directly, without detouring
+	// through the sessions pane.
+	f.key("shift+tab")
 	f.key("up")
 	f.key("enter")
 	if f.m.mode != modeInsert || f.m.replyTo == nil || f.m.replyTo.Seq != one.Seq {
@@ -432,8 +456,7 @@ func TestNormalModeCursorScrollsIntoView(t *testing.T) {
 	f.receive(t)
 	f.m.height = 20
 	f.m.layout()
-	f.key("esc")
-	f.key("tab") // into the message pane
+	f.key("shift+tab") // compose -> stream directly, into the message pane
 	for i := 0; i < 30; i++ {
 		f.key("up")
 	}

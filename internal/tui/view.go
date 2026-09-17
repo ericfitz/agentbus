@@ -94,12 +94,18 @@ func (m Model) View() string {
 }
 
 // chanStyle is the color a channel's name is drawn in everywhere: memory
-// channels in the memory color, chat channels in the agent color.
+// channels in the memory color, a DM inbox in the user color for the TUI's
+// own inbox and the agent color for anyone else's, chat channels in the
+// agent color.
 func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
-	if c.Kind == "memory" {
+	switch {
+	case c.Kind == "memory":
 		return m.theme.Style(m.theme.Mem)
+	case c.Name == bus.DMChannel(m.c.as):
+		return m.theme.Style(m.theme.User)
+	default:
+		return m.theme.Style(m.theme.Agent)
 	}
-	return m.theme.Style(m.theme.Agent)
 }
 
 func (m Model) renderHeader() string {
@@ -107,7 +113,12 @@ func (m Model) renderHeader() string {
 	if ch == nil {
 		return m.theme.Style(m.theme.Dim).Render("no channels yet · c to create one")
 	}
-	s := fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
+	var s string
+	if owner, ok := strings.CutPrefix(ch.Name, bus.DMPrefix); ok {
+		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
+	} else {
+		s = fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
+	}
 	if m.status.Notice != "" {
 		s += "   " + m.theme.Style(m.theme.Warn).Render("! capacity: "+m.status.Notice)
 	}
@@ -141,7 +152,9 @@ func (m Model) renderRails() string {
 		if !m.c.isSubscribed(c.Name) {
 			line += dim.Render(" (off)")
 		}
-		if i == m.sel {
+		// While a session is selected, the channel list draws no highlighted
+		// row; the sessions list below highlights instead.
+		if m.sessSel < 0 && i == m.sel {
 			line = th.Highlight(markSel+line, rail)
 		} else {
 			line = " " + line
@@ -156,7 +169,7 @@ func (m Model) renderRails() string {
 		live[s.Sender] = s
 	}
 	names := m.sessionNames()
-	for _, n := range names {
+	for i, n := range names {
 		var row string
 		if s, ok := live[n]; ok {
 			ctx, name := s.Context, th.Style(th.Agent).Render(n)
@@ -174,6 +187,11 @@ func (m Model) renderRails() string {
 		}
 		if c := m.unread(bus.DMChannel(n)); c > 0 {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
+		}
+		if i == m.sessSel {
+			row = th.Highlight(markSel+row, rail)
+		} else {
+			row = " " + row
 		}
 		r.WriteString(trunc.Render(row) + "\n")
 	}
@@ -308,12 +326,18 @@ func (m Model) renderCompose() string {
 	label := ""
 	hint := ""
 	if ch != nil {
-		mark := iconChat
+		mark, text := iconChat, ch.Name
 		if ch.Kind == "memory" {
 			mark = iconMem
 			hint = th.Style(th.Dim).Render("  ⏎ new memory")
 		}
-		label = m.chanStyle(*ch).Render(mark + ch.Name)
+		if owner, ok := strings.CutPrefix(ch.Name, bus.DMPrefix); ok {
+			mark, text = iconAgent, "@"+owner
+			if owner == m.c.as {
+				mark = iconUser
+			}
+		}
+		label = m.chanStyle(*ch).Render(mark + text)
 	}
 	prompt := label + th.Style(th.Dim).Render(" › ")
 	if m.mode != modeInsert {

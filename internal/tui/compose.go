@@ -30,6 +30,12 @@ func (m *Model) submitCompose() tea.Cmd {
 	if strings.TrimSpace(text) == "" || ch == "" {
 		return nil
 	}
+	// A reply while viewing the TUI's own inbox goes back to the sender, not
+	// into the inbox being viewed; every other send targets the selected
+	// channel as usual.
+	if m.replyTo != nil && ch == bus.DMChannel(m.c.as) {
+		ch = bus.DMChannel(m.replyTo.Sender)
+	}
 	in := bus.SendInput{Channel: ch, Content: text}
 	if m.replyTo != nil {
 		seq := m.replyTo.Seq

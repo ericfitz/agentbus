@@ -36,6 +36,7 @@ type pane int
 
 const (
 	paneChannels pane = iota
+	paneSessions
 	paneStream
 	paneCompose
 	paneCount
@@ -68,6 +69,7 @@ type Model struct {
 	channels   []bus.Channel
 	dms        []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
 	sel        int
+	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
 	msgs       map[string][]bus.Message
 	gaps       map[string][]bus.Gap
 	loaded     map[string]bool
@@ -118,6 +120,7 @@ func New(c *client, th Theme) Model {
 		theme:        th,
 		mode:         modeNormal, // channel list focused; i or enter opens compose
 		sel:          -1,
+		sessSel:      -1,
 		cursor:       -1,
 		cursorLine:   -1,
 		expanded:     map[int64]bool{},
@@ -356,6 +359,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	// stream, compose to the selected channel otherwise.
 	case "enter":
 		if r, ok := m.cursorRow(); ok {
+			if !m.replyAllowed() {
+				return m.showToast(replyRefusedToast)
+			}
 			m.replyTo = &r.msg
 			m.layout()
 		}
@@ -369,15 +375,23 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	// shows the cursor message's direct replies, left hides its whole
 	// subtree.
 	case "down":
-		if m.pane() == paneStream {
+		switch m.pane() {
+		case paneStream:
 			return m.moveCursor(1)
+		case paneSessions:
+			return m.selectSession(m.sessSel + 1)
+		default:
+			return m.selectChannel(m.sel + 1)
 		}
-		return m.selectChannel(m.sel + 1)
 	case "up":
-		if m.pane() == paneStream {
+		switch m.pane() {
+		case paneStream:
 			return m.moveCursor(-1)
+		case paneSessions:
+			return m.selectSession(m.sessSel - 1)
+		default:
+			return m.selectChannel(m.sel - 1)
 		}
-		return m.selectChannel(m.sel - 1)
 	case "right":
 		m.expandCursor()
 	case "left":
@@ -396,6 +410,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case " ":
 		m.toggleExpand()
 	case "r":
+		if !m.replyAllowed() {
+			return m.showToast(replyRefusedToast)
+		}
 		if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
 			target := rs[m.cursor].msg
 			m.replyTo = &target
@@ -409,9 +426,12 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "c":
 		return m.createChannelPrompt()
 	case "s":
+		if m.sessSel >= 0 {
+			return nil
+		}
 		return m.toggleSubscribe()
 	case "d":
-		if m.selected() != nil {
+		if m.sessSel < 0 && m.selected() != nil {
 			m.mode = modeConfirmChannel
 		}
 	case "/":
@@ -433,14 +453,17 @@ func (m *Model) pane() pane {
 		return paneCompose
 	case m.cursor >= 0:
 		return paneStream
+	case m.sessSel >= 0:
+		return paneSessions
 	default:
 		return paneChannels
 	}
 }
 
 // paneKey handles tab (next pane), shift+tab (previous pane), and home
-// (channel list), skipping panes with nothing to focus: the stream when the
-// channel has no messages, compose when no channel is selected.
+// (channel list), skipping panes with nothing to focus: sessions when there
+// are no sessions, the stream when the channel has no messages, compose when
+// no channel is selected.
 func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 	d := 1
 	switch keyString(msg) {
@@ -452,7 +475,14 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 	p := m.pane()
 	for range paneCount - 1 {
 		p = (p + pane(d) + paneCount) % paneCount
-		if p == paneChannels || (p == paneStream && len(m.msgs[m.selName()]) > 0) || (p == paneCompose && m.selName() != "") {
+		switch {
+		case p == paneChannels:
+			return m.focusPane(p)
+		case p == paneSessions && len(m.sessionNames()) > 0:
+			return m.focusPane(p)
+		case p == paneStream && len(m.msgs[m.selName()]) > 0:
+			return m.focusPane(p)
+		case p == paneCompose && m.selName() != "":
 			return m.focusPane(p)
 		}
 	}
@@ -462,6 +492,9 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 // focusPane moves focus. Entering the stream keeps a cursor that is still
 // valid, else lands on the newest message; leaving it resumes following new
 // messages if the view is at the bottom (moveCursor stops following).
+// Entering channels or sessions applies the same reset selecting a channel
+// or session does (showSelected), since the stream now shows a different
+// selection.
 func (m *Model) focusPane(p pane) tea.Cmd {
 	if p == paneStream {
 		m.mode = modeNormal
@@ -471,16 +504,22 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 		}
 		return m.moveCursor(0)
 	}
-	m.follow = m.stream.AtBottom()
 	if p == paneCompose {
+		m.follow = m.stream.AtBottom()
 		m.mode = modeInsert
 		return m.compose.Focus()
 	}
 	m.mode = modeNormal
 	m.compose.Blur()
-	m.cursor = -1
-	m.refreshStream()
-	return nil
+	if p == paneSessions {
+		if len(m.sessionNames()) == 0 {
+			return nil
+		}
+		m.sessSel = max(m.sessSel, 0)
+	} else {
+		m.sessSel = -1
+	}
+	return m.showSelected()
 }
 
 // moveCursor moves the normal-mode stream cursor and scrolls to keep it
@@ -557,12 +596,44 @@ func (m *Model) selName() string {
 	return ""
 }
 
+// selected is the single switch point between the channel list and the
+// sessions pane: everything keyed on selName() (stream, history, unread,
+// markSeen, divider) works for a DM inbox unchanged once this returns one.
 func (m *Model) selected() *bus.Channel {
+	if m.sessSel >= 0 {
+		names := m.sessionNames()
+		if m.sessSel >= len(names) {
+			return nil
+		}
+		want := bus.DMChannel(names[m.sessSel])
+		for i := range m.dms {
+			if m.dms[i].Name == want {
+				return &m.dms[i]
+			}
+		}
+		// A session seen before the status report listed its inbox: no
+		// channel to show yet, treated like nothing selected.
+		return nil
+	}
 	if m.sel < 0 || m.sel >= len(m.channels) {
 		return nil
 	}
 	return &m.channels[m.sel]
 }
+
+// replyAllowed reports whether a reply may be started for the current
+// selection: always outside the sessions pane, and inside it only for the
+// TUI's own inbox -- replying inside another identity's inbox would send as
+// if the TUI were that identity.
+func (m *Model) replyAllowed() bool {
+	if m.sessSel < 0 {
+		return true
+	}
+	names := m.sessionNames()
+	return m.sessSel < len(names) && names[m.sessSel] == m.c.as
+}
+
+const replyRefusedToast = "can't reply inside another identity's inbox; compose sends them a direct message"
 
 func (m *Model) unread(ch string) int {
 	n := 0
@@ -604,25 +675,45 @@ func (m *Model) dividerFor(ch string) int64 {
 	return -1
 }
 
-// selectChannel moves the selection (clamped), places the "new" divider
-// just before the oldest unread message loaded so far, marks everything
-// seen, and loads history on first visit.
+// selectChannel moves the channel-list selection (clamped) and applies
+// showSelected's reset.
 func (m *Model) selectChannel(i int) tea.Cmd {
 	if len(m.channels) == 0 {
 		m.sel = -1
 		return nil
 	}
-	i = min(max(i, 0), len(m.channels)-1)
-	m.sel = i
+	m.sel = min(max(i, 0), len(m.channels)-1)
+	return m.showSelected()
+}
+
+// selectSession moves the sessions-pane selection (clamped) and applies
+// showSelected's reset.
+func (m *Model) selectSession(i int) tea.Cmd {
+	names := m.sessionNames()
+	if len(names) == 0 {
+		m.sessSel = -1
+		return nil
+	}
+	m.sessSel = min(max(i, 0), len(names)-1)
+	return m.showSelected()
+}
+
+// showSelected resets stream state for whatever selected() now points at:
+// cursor cleared, following resumed, any pending reply cancelled, the "new"
+// divider placed just before the oldest unread message loaded so far,
+// everything marked seen, and history loaded on first visit. Shared by
+// selectChannel, selectSession, and focusPane's channels/sessions targets,
+// so switching pane, channel, or session all apply the same reset.
+func (m *Model) showSelected() tea.Cmd {
 	m.cursor = -1
 	m.follow = true
 	m.replyTo = nil
-	ch := m.channels[i].Name
+	ch := m.selName()
 	m.divider = m.dividerFor(ch)
 	m.markSeen(ch)
 	m.refreshStream()
 	m.stream.GotoBottom()
-	if !m.loaded[ch] {
+	if ch != "" && !m.loaded[ch] {
 		return m.loadHistory(ch, nil)
 	}
 	return nil
@@ -725,10 +816,15 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	}
 	m.dms = dms
 	m.channels = channels
-	m.sel = -1
-	for i, c := range m.channels {
-		if c.Name == cur {
-			m.sel = i
+	// While the sessions pane holds the selection, cur names a DM inbox that
+	// will never match a channel; leave m.sel alone so the channel list keeps
+	// its last selection for when the user returns to it.
+	if m.sessSel < 0 {
+		m.sel = -1
+		for i, c := range m.channels {
+			if c.Name == cur {
+				m.sel = i
+			}
 		}
 	}
 	var cmds []tea.Cmd
@@ -737,7 +833,7 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 			cmds = append(cmds, m.subscribeCmd(c, from))
 		}
 	}
-	if m.sel < 0 && len(m.channels) > 0 {
+	if m.sessSel < 0 && m.sel < 0 && len(m.channels) > 0 {
 		cmds = append(cmds, m.selectChannel(0))
 	}
 	return tea.Batch(cmds...)

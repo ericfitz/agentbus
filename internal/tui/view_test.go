@@ -152,8 +152,7 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 	f := newFixture(t)
 	f.agentSend(t, "dev", "hello from sam")
 	f.receive(t)
-	f.key("esc")
-	f.key("tab") // focus the stream: cursor lands on the last message
+	f.key("shift+tab") // compose -> stream directly: cursor lands on the last message
 	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
 	if !strings.Contains(first, "Sam") || strings.Count(first, "44m") < 3 {
 		t.Fatalf("segments after a reset lost the selection background: %q", first)
@@ -176,8 +175,7 @@ func TestReplyIndentAppliesToWrappedLines(t *testing.T) {
 	f.receive(t)
 	f.m.width = 60
 	f.m.layout()
-	f.key("esc")
-	f.key("tab")
+	f.key("shift+tab") // compose -> stream directly
 	f.key("up")
 	f.key("right")
 	var reply []string

@@ -73,9 +73,8 @@ func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
 	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A2"}) {
 		t.Fatalf("newest reply is the only peek: %v", got)
 	}
-	f.key("esc")
-	f.key("tab") // cursor on the last row, A2
-	f.key("up")  // root A
+	f.key("shift+tab") // compose -> stream directly; cursor on the last row, A2
+	f.key("up")        // root A
 	f.key(" ")
 	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1", ">A2"}) {
 		t.Fatalf("space on the root shows direct children only: %v", got)
@@ -95,8 +94,7 @@ func TestLeftCollapsesTheWholeSubtree(t *testing.T) {
 	a1 := f.agentReply(t, "dev", a.Seq, "A1")
 	f.agentReply(t, "dev", a1.Seq, "A11")
 	f.receive(t)
-	f.key("esc")
-	f.key("tab") // cursor on the last row
+	f.key("shift+tab") // compose -> stream directly; cursor on the last row
 	f.key("up")
 	f.key("up") // root A
 	f.key("right")

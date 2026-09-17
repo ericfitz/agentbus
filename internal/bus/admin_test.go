@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,8 +27,8 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	if err := admin.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "y"}); err == nil {
-		t.Fatal("live process must lose registration after reset")
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "y"}); err == nil || !strings.Contains(err.Error(), "not_registered") {
+		t.Fatalf("live process must lose registration after reset with not_registered, got %v", err)
 	}
 	r, _ := b.Register("Sam", "", "", true)
 	if r.Sender != "Sam" || r.Resumed || len(filterDMPending(r.Pending)) != 0 {

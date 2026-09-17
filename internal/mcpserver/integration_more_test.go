@@ -1155,3 +1155,124 @@ func TestSearchFallsBackWhenEmbeddingEndpointFails(t *testing.T) {
 		t.Fatalf("expected one text-search hit as fallback: %v", r)
 	}
 }
+
+// ---- Scenario 7: task claim contention across processes ----
+
+// TestTaskClaimContentionAcrossProcesses proves task_claim's ownership
+// guard holds across real processes (not just goroutines sharing one Bus):
+// two processes race to claim the same task, exactly one wins and the other
+// gets a conflict envelope, a subscriber sees the task_create revision
+// through the ordinary receive path, task_list reflects the winner's claim,
+// and a task list channel still refuses plain send (bus.Send's own
+// IsTaskChannel guard, exercised here through the MCP tool).
+func TestTaskClaimContentionAcrossProcesses(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, `{}`)
+	a, b := spawn(t, dir), spawn(t, dir)
+	if _, e := a.call(t, "register", map[string]any{"name": "Sam"}); e != "" {
+		t.Fatal(e)
+	}
+	if _, e := b.call(t, "register", map[string]any{"name": "Pat"}); e != "" {
+		t.Fatal(e)
+	}
+	if _, e := a.call(t, "create_channel", map[string]any{"as": "Sam", "name": "tasks/work", "kind": "memory"}); e != "" {
+		t.Fatal(e)
+	}
+	if _, e := b.call(t, "subscribe", map[string]any{"as": "Pat", "channel": "tasks/work"}); e != "" {
+		t.Fatal(e)
+	}
+	created, e := a.call(t, "task_create", map[string]any{"as": "Sam", "channel": "tasks/work", "subject": "x"})
+	if e != "" {
+		t.Fatal(e)
+	}
+	taskID, ok := created["id"].(float64)
+	if !ok {
+		t.Fatalf("task_create result missing id: %v", created)
+	}
+
+	claimants := []struct {
+		p  *proc
+		as string
+	}{{a, "Sam"}, {b, "Pat"}}
+	results := make([]map[string]any, len(claimants))
+	errTexts := make([]string, len(claimants))
+	protoErrs := make([]error, len(claimants))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, c := range claimants {
+		wg.Add(1)
+		go func(i int, p *proc, as string) {
+			defer wg.Done()
+			<-start
+			// callSafe, not p.call: this runs on a worker goroutine, and
+			// only the test goroutine may call t.Fatalf.
+			r, e, protoErr := callSafe(p, "task_claim", map[string]any{"as": as, "task_id": taskID})
+			results[i], errTexts[i], protoErrs[i] = r, e, protoErr
+		}(i, c.p, c.as)
+	}
+	close(start)
+	wg.Wait()
+	for i, pe := range protoErrs {
+		if pe != nil {
+			t.Fatalf("claimant %d: %v", i, pe)
+		}
+	}
+
+	conflicts, successes := 0, 0
+	for i, errText := range errTexts {
+		if errText == "" {
+			successes++
+			continue
+		}
+		if env := decodeErr(t, errText); env.Code != "conflict" {
+			t.Fatalf("claimant %d: expected conflict, got %q: %s", i, env.Code, errText)
+		}
+		conflicts++
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("expected exactly one success and one conflict, got %d successes, %d conflicts (results=%v errs=%v)",
+			successes, conflicts, results, errTexts)
+	}
+
+	// A receive call with nothing new yet returns an empty batch rather than
+	// waiting, so poll rather than asserting on a single call - the same
+	// pattern TestLeaseContentionBetweenProcesses uses for cross-process
+	// settling. An unacknowledged batch is simply redelivered.
+	var got map[string]any
+	sawCreate := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !sawCreate {
+		got, e = b.call(t, "receive", map[string]any{"as": "Pat"})
+		if e != "" {
+			t.Fatal(e)
+		}
+		for _, m := range messagesOf(t, got) {
+			if mm, ok := m.(map[string]any); ok && mm["channel"] == "tasks/work" {
+				sawCreate = true
+				break
+			}
+		}
+		if !sawCreate {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !sawCreate {
+		t.Fatalf("Pat's receive must include the create revision on tasks/work: %v", got)
+	}
+
+	listed, e := a.call(t, "task_list", map[string]any{"as": "Sam", "channel": "tasks/work"})
+	if e != "" {
+		t.Fatal(e)
+	}
+	tasks, ok := listed["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("expected one task in task_list: %v", listed)
+	}
+	if st, _ := tasks[0].(map[string]any)["status"].(string); st != "in_progress" {
+		t.Fatalf("expected the claimed task to be in_progress: %v", tasks[0])
+	}
+
+	if _, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "tasks/work", "content": "nope"}); decodeErr(t, e).Code != "validation" {
+		t.Fatalf("send to a task list must fail with validation: %q", e)
+	}
+}

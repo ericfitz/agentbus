@@ -60,7 +60,7 @@ func TestToolsRegisteredWithPrefixDescriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"register": true, "create_channel": true, "list_channels": true, "subscribe": true, "unsubscribe": true, "send": true, "receive": true, "history": true, "search": true, "get_memory": true, "edit_memory": true, "delete_memory": true, "discover": true}
+	want := map[string]bool{"register": true, "create_channel": true, "list_channels": true, "subscribe": true, "unsubscribe": true, "send": true, "receive": true, "history": true, "search": true, "get_memory": true, "edit_memory": true, "delete_memory": true, "discover": true, "task_create": true, "task_claim": true, "task_release": true, "task_update": true, "task_get": true, "task_list": true}
 	for _, tl := range tools.Tools {
 		if !strings.HasPrefix(tl.Description, "Agentbus:") {
 			t.Fatalf("%s description must start with Agentbus:", tl.Name)

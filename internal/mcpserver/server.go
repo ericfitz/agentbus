@@ -87,6 +87,33 @@ type deleteIn struct {
 	ID             int64  `json:"id"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
+type taskCreateIn struct {
+	As string `json:"as,omitempty"`
+	bus.TaskCreateInput
+}
+type taskUpdateIn struct {
+	As string `json:"as,omitempty"`
+	bus.TaskPatch
+}
+type taskClaimIn struct {
+	As             string `json:"as,omitempty"`
+	TaskID         int64  `json:"task_id"`
+	LeasedUntil    int64  `json:"leased_until,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+type taskReleaseIn struct {
+	As             string `json:"as,omitempty"`
+	TaskID         int64  `json:"task_id"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+type taskGetIn struct {
+	As     string `json:"as,omitempty"`
+	TaskID int64  `json:"task_id"`
+}
+type taskListIn struct {
+	As string `json:"as,omitempty"`
+	bus.TaskListInput
+}
 
 // result marshals v as the tool's text content. On error it returns the
 // error itself: AddTool's generated handler treats a returned error as a
@@ -266,7 +293,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			applyPersistent(b, cwd, &reg)
 			return result(reg, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "create_channel", Description: "Agentbus: create a named channel of kind ordinary or memory. Idempotent when the kind matches."},
+	mcp.AddTool(s, &mcp.Tool{Name: "create_channel", Description: "Agentbus: create a named channel of kind ordinary or memory. Idempotent when the kind matches. A task list is a memory channel named tasks/<name>."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in channelIn) (*mcp.CallToolResult, any, error) {
 			return result(b.CreateChannel(in.As, in.Name, in.Kind))
 		})
@@ -310,7 +337,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to."},
+	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
@@ -341,6 +368,34 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "discover", Description: "Agentbus: list live registered identities with their repository context."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Discover(in.As))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_create", Description: "Agentbus: add a task to a task list (a memory channel named tasks/<name>; create one with create_channel kind=memory). New tasks are pending and unowned. parent nests it under an existing task in the same list; before or after (a sibling task id) places it, default last. blocked_by lists task ids in the same list that must complete first."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskCreateIn) (*mcp.CallToolResult, any, error) {
+			return result(b.TaskCreate(in.As, in.TaskCreateInput))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_claim", Description: "Agentbus: claim a task: if it has no owner you become its owner and it becomes in_progress. Fails with conflict if someone else owns it or it is blocked. A task whose owner's session has ended, or whose lease ran out, counts as unowned. leased_until (unix ms UTC, optional) sets a lease you must renew with task_update before it passes."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskClaimIn) (*mcp.CallToolResult, any, error) {
+			return result(b.TaskClaim(in.As, in.TaskID, in.LeasedUntil, in.IdempotencyKey))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_release", Description: "Agentbus: release a task: clears the owner and lease and returns it to pending. Do this when you stop working on a task you have not completed."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskReleaseIn) (*mcp.CallToolResult, any, error) {
+			return result(b.TaskRelease(in.As, in.TaskID, in.IdempotencyKey))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_update", Description: "Agentbus: change a task by id; only the fields you pass change. status is pending, in_progress, or completed. While a task is in_progress only its owner may change or delete it; force=true overrides that for anyone and is recorded. owner=\"\" clears the owner, parent=0 moves the task to the top level, leased_until=0 clears the lease (any other value must be in the future). before/after reorder among siblings. delete=true deletes a task that has no subtasks."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskUpdateIn) (*mcp.CallToolResult, any, error) {
+			return result(b.TaskUpdate(in.As, in.TaskPatch))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_get", Description: "Agentbus: get one task in full, with blocked and open_blockers derived from its blocked_by tasks."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskGetIn) (*mcp.CallToolResult, any, error) {
+			return result(b.TaskGet(in.As, in.TaskID))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in taskListIn) (*mcp.CallToolResult, any, error) {
+			tasks, err := b.TaskList(in.As, in.TaskListInput)
+			if err != nil {
+				return nil, nil, err
+			}
+			return result(map[string]any{"tasks": tasks}, nil)
 		})
 	return s
 }

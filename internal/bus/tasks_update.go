@@ -203,25 +203,38 @@ func applyPatch(ts []Task, cur Task, p TaskPatch, as string, now int64, ownerKno
 		patched.LeasedUntil = 0
 	}
 
-	// Rule 9: parent and blocked_by links, checked against a copy whose
-	// blocked_by is pruned of ids that no longer exist in ts and were not
-	// added by this patch. A blocker deleted since it was set doesn't lock
-	// the dependent out of later, unrelated updates (design: "a deleted
-	// blocker stops blocking"); patched.BlockedBy itself is left as stored.
-	// A blocked_by id this patch is adding must still resolve.
-	check := patched
-	if len(check.BlockedBy) > 0 {
+	// Rule 9: parent and blocked_by links.
+	//
+	// blocked_by: an id no longer live in ts is tolerated and pruned from
+	// the stored list on this write (design: "a deleted blocker stops
+	// blocking"); an id this patch is adding via AddBlockedBy must still
+	// resolve, not self-reference, and not create a cycle.
+	if len(patched.BlockedBy) > 0 {
 		added := make(map[int64]bool, len(p.AddBlockedBy))
 		for _, id := range p.AddBlockedBy {
 			added[id] = true
 		}
-		live := make([]int64, 0, len(check.BlockedBy))
-		for _, id := range check.BlockedBy {
+		live := make([]int64, 0, len(patched.BlockedBy))
+		for _, id := range patched.BlockedBy {
 			if added[id] || taskByID(ts, id) != nil {
 				live = append(live, id)
 			}
 		}
-		check.BlockedBy = live
+		patched.BlockedBy = live
+	}
+
+	// parent: validated only when this patch names a new parent
+	// (p.Parent != nil). A stored parent that's gone stale since it was
+	// set (an orphan, e.g. after retention or a write by an old binary) is
+	// tolerated: the task stays updatable and keeps its stored parent
+	// unless this patch moves it (design: "a task whose parent is missing
+	// ... is treated as a root task"). validateTaskLinks always requires
+	// an existing non-zero parent, so when this patch isn't naming one,
+	// validate a root-parented copy instead, leaving patched.Parent as
+	// stored.
+	check := patched
+	if p.Parent == nil {
+		check.Parent = 0
 	}
 	if err := validateTaskLinks(ts, check); err != nil {
 		return Task{}, err

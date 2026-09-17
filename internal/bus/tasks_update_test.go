@@ -403,6 +403,39 @@ func TestBlockedByCapAndDedupe(t *testing.T) {
 	}
 }
 
+// TestOrphanedParentStaysUpdatable covers the review ruling: a task whose
+// stored parent is no longer live (an orphan, as after retention or a
+// write by an old binary — see TestPlaceRankUsesEffectiveParentForOrphans
+// in tasks_test.go for the same simulated-orphan pattern) stays
+// updatable — claim, complete, and rename all succeed — and keeps its
+// stored parent unless the patch itself moves it.
+func TestOrphanedParentStaysUpdatable(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+	const orphanID = int64(500)
+	orphanDoc := `{"subject":"orphan","status":"pending","rank":"W","parent":999999}`
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,bytes,memory_id,revision) VALUES('tasks/work','Sam','',0,?,8,?,1)", orphanDoc, orphanID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := b.TaskClaim("Sam", orphanID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	completed := "completed"
+	if _, err := b.TaskUpdate("Sam", TaskPatch{ID: orphanID, Status: &completed}); err != nil {
+		t.Fatal(err)
+	}
+	subj := "renamed orphan"
+	res, err := b.TaskUpdate("Sam", TaskPatch{ID: orphanID, Subject: &subj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Task.Parent != 999999 {
+		t.Fatalf("stored parent changed: %+v", res.Task)
+	}
+}
+
 func TestParentRules(t *testing.T) {
 	b := newTestBus(t)
 	reg(t, b, "Sam")

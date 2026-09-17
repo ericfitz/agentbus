@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -34,8 +35,49 @@ func TestWaitWakesOnDirectMessageDespiteFilter(t *testing.T) {
 	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 2 * time.Second}, &out); err != nil {
 		t.Fatalf("a direct message must wake the waiter despite a non-matching filter: %v", err)
 	}
-	if !strings.Contains(out.String(), "rename landed") {
-		t.Fatalf("%q", out.String())
+	if strings.Contains(out.String(), "rename landed") {
+		t.Fatalf("a direct message's content must not be printed: %q", out.String())
+	}
+	if !strings.Contains(out.String(), `"channel":"dm/Pat"`) {
+		t.Fatalf("channel must still be printed: %q", out.String())
+	}
+}
+
+// TestWaitWithholdsDirectMessageContentFromJSON reproduces F2: wait's JSON
+// output is easy to leave in a shell's scrollback or a background-job log,
+// unlike an MCP tool call, so a direct message's content must not be
+// printed. Other fields (seq, channel, sender, created_at) are unaffected.
+func TestWaitWithholdsDirectMessageContentFromJSON(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	if _, err := b.Register("Pat", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("Sam", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "secret payload"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Timeout: 2 * time.Second}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got bus.Message
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("output must still be valid JSON: %v (%q)", err, out.String())
+	}
+	if got.Content != "" {
+		t.Fatalf("content must be withheld, got %q", got.Content)
+	}
+	if got.Channel != "dm/Pat" || got.Sender != "Sam" || got.Seq == 0 {
+		t.Fatalf("other fields must be unaffected: %+v", got)
 	}
 }
 

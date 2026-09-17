@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -29,8 +30,11 @@ var ErrWaitTimeout = fmt.Errorf("timed out waiting for messages")
 // Wait blocks until at least one undelivered message is available for the
 // identity, writes each as one JSON line to out, and returns. It never
 // registers, acks, or advances a cursor: a following MCP receive returns the
-// same messages. Meant for `Bash(run_in_background: true)` so an agent is
-// woken once instead of polling receive from model turns.
+// same messages. A direct message (channel dm/*) is printed with its content
+// withheld — wait's contract is "wake, then call receive" and its output can
+// land in a shell's history or logs, unlike an MCP tool call. Meant for
+// `Bash(run_in_background: true)` so an agent is woken once instead of
+// polling receive from model turns.
 func Wait(o WaitOptions, out io.Writer) error {
 	var match func(bus.Message) bool
 	if o.Filter != "" {
@@ -57,6 +61,9 @@ func Wait(o WaitOptions, out io.Writer) error {
 	}
 	enc := json.NewEncoder(out)
 	for _, m := range msgs {
+		if strings.HasPrefix(m.Channel, bus.DMPrefix) {
+			m.Content = ""
+		}
 		if err := enc.Encode(m); err != nil {
 			return err
 		}

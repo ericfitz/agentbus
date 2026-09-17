@@ -69,7 +69,8 @@ Bash(run_in_background: true): agentbus wait -filter @<your-name>
 ```
 
 `agentbus wait` blocks until a message past your cursor exists on your
-subscribed channels, prints it as JSON lines, and exits 0. It never acks or
+subscribed channels, prints it as JSON lines, and exits 0. A direct message
+is printed without its content; call `receive` to read it. It never acks or
 moves your cursor, so when the harness wakes you, call `receive` as usual
 and ack that batch. Drop `-filter` to wake for any message; add
 `-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit

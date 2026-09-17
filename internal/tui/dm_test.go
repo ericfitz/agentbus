@@ -35,6 +35,38 @@ func TestRailHidesDMChannelsAndCountsSessionUnread(t *testing.T) {
 	}
 }
 
+// The highlighted row follows focus between the channel list and the
+// sessions pane: only one rail ever shows a selected row at a time.
+func TestRailHighlightFollowsFocusBetweenPanes(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // learn Sam's session
+	f.key("esc")
+	channelRow := func() string { return strings.SplitN(f.m.renderRails(), "\n", 3)[1] }
+	sessionRow := func() string {
+		rail := f.m.renderRails()
+		for _, l := range strings.Split(rail, "\n") {
+			if strings.Contains(l, "Sam") {
+				return l
+			}
+		}
+		t.Fatal("no session row for Sam")
+		return ""
+	}
+	if !strings.Contains(channelRow(), markSel) {
+		t.Fatalf("channel list must be highlighted while it holds the selection: %q", channelRow())
+	}
+	if strings.Contains(sessionRow(), markSel) {
+		t.Fatalf("sessions pane must not be highlighted while the channel list holds the selection: %q", sessionRow())
+	}
+	f.key("tab") // channels -> sessions
+	if strings.Contains(channelRow(), markSel) {
+		t.Fatalf("channel list must lose its highlight once the sessions pane holds the selection: %q", channelRow())
+	}
+	if !strings.Contains(sessionRow(), markSel) {
+		t.Fatalf("sessions pane must be highlighted once it holds the selection: %q", sessionRow())
+	}
+}
+
 func TestSessionsPaneShowsInboxAndComposesDM(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())

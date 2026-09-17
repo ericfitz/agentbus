@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 )
@@ -116,6 +117,13 @@ func Create(dir, identity string) (*File, error) {
 func (f *File) AddChannel(channel string) ([]string, error) {
 	if err := bus.NameRule(channel); err != nil {
 		return nil, fmt.Errorf("channel %q: %w", channel, err)
+	}
+	// bus.DMPrefix ("dm/") already fails NameRule's '/' check above; the
+	// bare name "dm" would not, and would otherwise resubscribe (and fail)
+	// at every register. Direct-message inboxes are managed by register,
+	// not the persistent list.
+	if channel == "dm" || strings.HasPrefix(channel, bus.DMPrefix) {
+		return nil, fmt.Errorf("channel %q: direct-message channels cannot be added to the persistent list; register manages your inbox", channel)
 	}
 	list, _ := f.Channels()
 	found := false

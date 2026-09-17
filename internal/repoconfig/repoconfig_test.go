@@ -128,6 +128,21 @@ func TestAddChannelRejectsInvalidName(t *testing.T) {
 	}
 }
 
+// TestAddChannelRejectsDMChannels reproduces F5: a persisted "dm" or
+// "dm/x" channel resubscribes at every register and fails every time (DM
+// inboxes are managed by register, not the persistent list). "dm/x" already
+// fails bus.NameRule's '/' check; the bare name "dm" did not.
+func TestAddChannelRejectsDMChannels(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam"}`)
+	f, _ := Load(dir)
+	for _, bad := range []string{"dm", "dm/Sam", "dm/Sam/impl"} {
+		if _, err := f.AddChannel(bad); err == nil {
+			t.Fatalf("AddChannel(%q): expected error", bad)
+		}
+	}
+}
+
 func TestRemoveChannel(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)

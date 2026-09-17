@@ -662,3 +662,38 @@ func TestAckRejectsUnreadableSubscription(t *testing.T) {
 		t.Fatalf("rejected ack must not touch the subscription: before=(%d,%d) after=(%d,%d,%q)", cursorBefore, endBefore, cursorAfter, endAfter, token)
 	}
 }
+
+// A batch token spans channels: acking a batch that mixes a still-readable
+// channel with a now-unreadable inbox advances the former and leaves the
+// latter untouched.
+func TestAckOfMixedBatchAdvancesOnlyReadableRows(t *testing.T) {
+	b, other := twoAgents(t)
+	b.SetObserver("Sam")
+	if err := b.Subscribe("Sam", "dm/Pat", "oldest"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe("Sam", "general", "oldest"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range []string{"dm/Pat", "general"} {
+		if _, err := other.Send("Pat", SendInput{Channel: ch, Content: "hello " + ch}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r1, err := b.Receive("Sam", ReceiveInput{})
+	if err != nil || len(r1.Messages) != 2 {
+		t.Fatalf("observer must receive both channels in one batch: %+v %v", r1, err)
+	}
+	b.SetObserver("Pat")
+	r2, err := b.Receive("Sam", ReceiveInput{Ack: r1.Batch})
+	if err != nil || r2.AckIgnored || len(r2.Messages) != 0 {
+		t.Fatalf("the readable part of the batch must be acked, not redelivered: %+v %v", r2, err)
+	}
+	var token string
+	if err := b.db.QueryRow("SELECT pending_token FROM subscriptions WHERE sender='Sam' AND channel='dm/Pat'").Scan(&token); err != nil {
+		t.Fatal(err)
+	}
+	if token != r1.Batch {
+		t.Fatalf("the unreadable inbox row must stay pending, got token %q", token)
+	}
+}

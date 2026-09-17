@@ -307,43 +307,23 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	}
 
 	if in.Ack != "" {
-		// Mirror delivery's own readability filter (above) before applying the
-		// ack: a pending batch left over from when as could read this DM inbox
-		// (e.g. it was the TUI observer and no longer is) must not be
-		// ack-able now that it can't, even though it still matches on
-		// sender+token. An unknown token (no row, or already applied) falls
-		// through to the UPDATE below, which affects 0 rows and sets
-		// AckIgnored the same way it always has.
-		ackReadable := true
-		var ackChannel string
-		switch err := tx.QueryRow("SELECT channel FROM subscriptions WHERE sender=? AND pending_token=?", as, in.Ack).Scan(&ackChannel); {
-		case errors.Is(err, sql.ErrNoRows):
-		case err != nil:
-			return res, internal(err)
-		case !b.dmReadable(as, ackChannel):
-			ackReadable = false
-		}
-		if !ackReadable {
-			res.AckIgnored = true
-		} else {
-			r, err := tx.Exec("UPDATE subscriptions SET cursor_seq=pending_end_seq, pending_token='', pending_end_seq=0 WHERE sender=? AND pending_token=?", as, in.Ack)
-			if err != nil {
+		// Ack only the rows that survived the readability filter above, one
+		// by one: a batch token spans several channels, and a pending row
+		// left over from when as could read a DM inbox (it was the TUI
+		// observer and no longer is) must not advance just because it shares
+		// the token. An unknown or already-applied token matches nothing.
+		acked := false
+		for i := range subs {
+			if subs[i].pendingToken != in.Ack {
+				continue
+			}
+			if _, err := tx.Exec("UPDATE subscriptions SET cursor_seq=pending_end_seq, pending_token='', pending_end_seq=0 WHERE sender=? AND channel=?", as, subs[i].channel); err != nil {
 				return res, internal(err)
 			}
-			n, err := r.RowsAffected()
-			if err != nil {
-				return res, internal(err)
-			}
-			if n == 0 {
-				res.AckIgnored = true
-			} else {
-				for i := range subs {
-					if subs[i].pendingToken == in.Ack {
-						subs[i].cursor, subs[i].pendingToken, subs[i].pendingEnd = subs[i].pendingEnd, "", 0
-					}
-				}
-			}
+			subs[i].cursor, subs[i].pendingToken, subs[i].pendingEnd = subs[i].pendingEnd, "", 0
+			acked = true
 		}
+		res.AckIgnored = !acked
 	}
 
 	// Gaps: cursor below the channel's retention boundary. Resume from the

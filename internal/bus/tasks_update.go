@@ -309,7 +309,10 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 // before the write transaction opens; auth, the receipt check, and the
 // task's live state are then re-read inside the transaction against
 // committed state before the rate limit is charged and anything is
-// written.
+// written. Between the in-tx receipt check and the live-state read,
+// reclaimAbandoned fixes up the target if it is abandoned (design:
+// "Abandonment and fix-up"), so a claim on an abandoned task is a reclaim
+// followed by the claim, two revisions in one transaction.
 func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return TaskUpdateResult{}, err
@@ -386,6 +389,14 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 			return TaskUpdateResult{}, internal(err)
 		}
 		return r, nil
+	}
+
+	rctx, err := b.senderContext(tx, as)
+	if err != nil {
+		return TaskUpdateResult{}, internal(err)
+	}
+	if _, err := b.reclaimAbandoned(tx, as, rctx, channel, []int64{p.ID}); err != nil {
+		return TaskUpdateResult{}, err
 	}
 
 	ts, err := loadTasks(tx, channel)

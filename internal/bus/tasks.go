@@ -135,6 +135,10 @@ func dedupeIDs(ids []int64) []int64 {
 	return out
 }
 
+// ponytail: fix-up, list, and cycle checks parse every live task in the
+// channel; add an additive task_index table keyed by memory_id if lists
+// grow past a few thousand tasks.
+//
 // loadTasks returns every live task in channel: rows whose content is not a
 // JSON object with a non-empty subject and a valid status are skipped (an
 // old binary may have written a plain memory there). Derived fields
@@ -532,6 +536,8 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 }
 
 // TaskGet returns id's live task, including derived Blocked/OpenBlockers.
+// Reclaims id first if it is abandoned (design: "Abandonment and fix-up"),
+// staying read-only when it isn't.
 func (b *Bus) TaskGet(as string, id int64) (Task, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Task{}, err
@@ -551,6 +557,19 @@ func (b *Bus) TaskGet(as string, id int64) (Task, error) {
 	if t == nil {
 		return Task{}, errf("not_found", false, "memory %d is not a task", id)
 	}
+	if ab, err := b.abandoned(b.db, *t, b.nowMs()); err != nil {
+		return Task{}, err
+	} else if ab {
+		if err := b.fixUpAbandoned(as, channel, []int64{id}); err != nil {
+			return Task{}, err
+		}
+		if ts, err = loadTasks(b.db, channel); err != nil {
+			return Task{}, err
+		}
+		if t = taskByID(ts, id); t == nil {
+			return Task{}, errf("not_found", false, "memory %d is not a task", id)
+		}
+	}
 	return *t, nil
 }
 
@@ -562,6 +581,8 @@ func taskSummaryBytes(s TaskSummary) int {
 
 // TaskList returns channel's live tasks in depth-first tree order, filtered
 // by status/owner when set; filtering keeps the order (design: "Order").
+// Reclaims every abandoned task in the channel first, staying read-only
+// when none is abandoned.
 func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
@@ -578,6 +599,26 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 	ts, err := loadTasks(b.db, in.Channel)
 	if err != nil {
 		return nil, err
+	}
+	now := b.nowMs()
+	fixUp := false
+	for _, t := range ts {
+		ab, err := b.abandoned(b.db, t, now)
+		if err != nil {
+			return nil, err
+		}
+		if ab {
+			fixUp = true
+			break
+		}
+	}
+	if fixUp {
+		if err := b.fixUpAbandoned(as, in.Channel, nil); err != nil {
+			return nil, err
+		}
+		if ts, err = loadTasks(b.db, in.Channel); err != nil {
+			return nil, err
+		}
 	}
 	_, depth := taskTree(ts)
 	sums := make([]TaskSummary, 0, len(ts))

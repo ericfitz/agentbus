@@ -53,6 +53,9 @@ func (b *Bus) Tick(ctx context.Context) {
 				return b.deleteChunk("sessions", "heartbeat < ?", []any{now - attachmentExpiryMs})
 			})
 		}},
+		// After "stale sessions" so an owner whose session just expired
+		// counts as dead in the same tick.
+		{"abandoned tasks", func() error { return b.reclaimAllAbandonedTasks(tickCtx) }},
 		{"receipts", func() error {
 			return b.loopChunks(tickCtx, func() (int, error) {
 				return b.deleteChunk("receipts", "expires_at < ?", []any{now})

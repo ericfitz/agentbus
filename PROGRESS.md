@@ -152,6 +152,38 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.1);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (2e67c86).
 
+## 2026-09-17 (later): direct messages, v1.2.0 release
+
+Pushed to `main` (fast-forward of `direct-messages`, 14 commits) and released:
+
+- **Direct messages** per
+  `docs/superpowers/specs/2026-09-17-direct-messages-design.md` and ADR 0004
+  (`docs/adr/0004-direct-messages-and-session-end.md`): every identity gets a
+  one-way inbox channel `dm/<identity>` at register; `send` to `dm/<name>`;
+  only the owner (and the in-process TUI observer) can read it, enforced at
+  subscribe, history, search, and delivery; `agentbus wait` wakes on a direct
+  message regardless of `-filter` and prints it without content; the name
+  `dm` and `dm/...` are rejected for user and persistent channels. No schema
+  change.
+- **Human decision**: `resume=false` means set the cursor to HEAD: no backlog
+  of any kind, inbox included (ADR 0004 human decision 11).
+- **TUI**: inboxes are hidden from the channel list; the session list is a
+  pane (tab cycle, arrows within), rows show unread direct-message counts,
+  selecting a session shows its inbox, compose there sends a direct message,
+  reply works only in your own inbox; selection is tracked by name.
+- **Skill and hook text** document direct messages; the skill edit was
+  retested with paper scenarios (results in ADR 0004).
+- The whole-branch review found and fixed one Critical leak before merge:
+  delivery paths did not re-check inbox readability, so whoever re-registered
+  the TUI's freed name received every inbox.
+- Deferred minors (test gaps for rail highlight and colors, `d`/`s` no-ops,
+  empty-stream tab skip; comment cleanups; `receive` ack lacks a readability
+  filter, affecting only a future TUI unread count).
+- Not yet done: a TTY walkthrough of the sessions pane.
+- **v1.2.0 released** (e6cd42f, tag v1.2.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.2.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (5883c83).
+
 ## 2026-09-17: channel colors, session end, direct-messages design
 
 Pushed to `main` (9aa09dd, fast-forward):
@@ -165,8 +197,7 @@ Pushed to `main` (9aa09dd, fast-forward):
 - **Direct messages**: design
   (`docs/superpowers/specs/2026-09-17-direct-messages-design.md`) and plan
   (`docs/superpowers/plans/2026-09-17-direct-messages.md`). The
-  implementation is on branch `direct-messages`, not yet pushed when this
-  entry was written.
+  implementation followed the same day; see the entry above.
 - `using-agentbus` skill baseline test (writing-skills) done: five control
   and five with-skill paper runs; results in ADR 0004.
 

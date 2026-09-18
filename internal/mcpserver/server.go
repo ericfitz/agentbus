@@ -121,6 +121,9 @@ type taskListIn struct {
 // Error() text as content (see go-sdk mcp.CallToolResult.SetError) — for a
 // *bus.Error that text is already the {code,message,retryable} JSON the
 // agent needs, so no separate error-mapping step is required here.
+// result returns err unchanged: a bus error already carries its JSON
+// envelope, and any non-bus error reaching here is an SDK argument error.
+// Anything else must be wrapped as `internal` before being returned (ADR 0006).
 func result(v any, err error) (*mcp.CallToolResult, any, error) {
 	if err != nil {
 		return nil, nil, err

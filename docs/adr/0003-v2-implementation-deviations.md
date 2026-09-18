@@ -247,3 +247,10 @@ would require.
     legal since the lease bounds duplicated effort, not fairness).
     Why: each was a reviewer or preflight finding whose fix was mechanical.
     Cost if wrong: none.
+
+16. **Owner token is 12 random bytes.**
+    What: `randomToken` draws 12 bytes (96 bits, 24 hex characters) where
+    the brief said 16; batch tokens share the helper. Decided 2026-09-17 as
+    the final size (ADR 0006 item 3).
+    Why: 96 bits is far beyond guessable for a process-local secret.
+    Cost if wrong: none.

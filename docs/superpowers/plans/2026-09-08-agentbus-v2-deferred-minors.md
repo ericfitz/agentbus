@@ -86,7 +86,8 @@ the rest were fixed on `chore/minors-bus`, `chore/minors-edge`, and
 - tui: tests for rail highlight following the selection, memory and session
   row colors, and `d`/`s` no-ops with a session selected.
 
-Left open, each needing a human decision (behavior, schema, or contract):
+Decided 2026-09-17; see `docs/adr/0006-deferred-minor-rulings.md`. Items 1,
+2, 3, 5, and 6 shipped in v1.3.1; item 4 ships in v1.4.0. Original list:
 
 1. `AGENTBUS_DATA_DIR` is used verbatim (no `~/` expansion; relative paths
    resolve against the working directory).

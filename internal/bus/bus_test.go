@@ -45,7 +45,7 @@ func TestOpenCreatesSchemaWithFTSAndWAL(t *testing.T) {
 			t.Fatalf("table %s missing", tbl)
 		}
 	}
-	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('c','s','x',1,'','roses are red',13)"); err != nil {
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES('c','s','x',1,'','roses are red')"); err != nil {
 		t.Fatal(err)
 	}
 	var n int

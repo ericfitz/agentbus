@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `
 CREATE TABLE IF NOT EXISTS channels (
@@ -40,8 +40,7 @@ CREATE TABLE IF NOT EXISTS messages (
   memory_id INTEGER,
   revision INTEGER,
   tombstone INTEGER NOT NULL DEFAULT 0,
-  tombstone_at INTEGER,
-  bytes INTEGER NOT NULL
+  tombstone_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS messages_channel_seq ON messages(channel, seq);
 CREATE INDEX IF NOT EXISTS messages_memory ON messages(memory_id, tombstone);

@@ -194,9 +194,8 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		}
 		refs = string(j)
 	}
-	size := envelopeBytes(Message{Channel: in.Channel, Sender: as, Context: context, Type: in.Type, Content: in.Content, ReplyTo: in.ReplyTo, Metadata: in.Metadata, Refs: in.Refs})
-	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,reply_to,metadata,refs,bytes) VALUES(?,?,?,?,?,?,?,?,?,?)",
-		in.Channel, as, context, b.nowMs(), in.Type, in.Content, in.ReplyTo, meta, refs, size)
+	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,reply_to,metadata,refs) VALUES(?,?,?,?,?,?,?,?,?)",
+		in.Channel, as, context, b.nowMs(), in.Type, in.Content, in.ReplyTo, meta, refs)
 	if err != nil {
 		return 0, err
 	}

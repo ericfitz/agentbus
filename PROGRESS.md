@@ -415,3 +415,18 @@ Pushed to `main`:
   migration) is deferred to v1.4.0 as its own release.
 - **v1.3.1 released** (tag v1.3.1): build, sign, notarize, GitHub release,
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`.
+
+## 2026-09-17 (late): schema version 2, v1.4.0 release
+
+Pushed to `main`:
+
+- **First schema migration** (ADR 0006 item 4, spec
+  `docs/superpowers/specs/2026-09-17-schema-migration-design.md`):
+  `internal/bus/migrate.go` applies per-version steps on `Open`, each in one
+  immediate transaction with foreign keys off, re-checking `user_version`
+  under the lock. Step 1 to 2 rebuilds `messages` without the `bytes` column
+  and carries the `AUTOINCREMENT` counter over. Tested against a real
+  version 1 file. `release/release.sh` now uses `release/notes-<tag>.md`
+  for the GitHub release notes when present.
+- **v1.4.0 released** (tag v1.4.0). Every running old-binary session must be
+  restarted after `brew upgrade agentbus`; the release notes say so.

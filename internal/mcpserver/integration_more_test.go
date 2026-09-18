@@ -285,14 +285,14 @@ func seedOldMessages(t *testing.T, db *sql.DB, channel string, n int, createdAt 
 	if err != nil {
 		t.Fatalf("begin seed tx: %v", err)
 	}
-	stmt, err := tx.Prepare("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES(?,?,?,?,?,?,?)")
+	stmt, err := tx.Prepare("INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES(?,?,?,?,?,?)")
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("prepare seed insert: %v", err)
 	}
 	for i := 0; i < n; i++ {
 		content := fmt.Sprintf("old-%d", i)
-		if _, err := stmt.Exec(channel, "Seed", "test", createdAt, "", content, len(content)); err != nil {
+		if _, err := stmt.Exec(channel, "Seed", "test", createdAt, "", content); err != nil {
 			_ = stmt.Close()
 			_ = tx.Rollback()
 			t.Fatalf("seed message %d: %v", i, err)
@@ -779,8 +779,8 @@ func (f *fakeEmbedServer) completedSnapshot() []embedReq {
 // is what this scenario needs to test in isolation.
 func seedLiveMemory(t *testing.T, db *sql.DB, channel, content string) int64 {
 	t.Helper()
-	res, err := db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES(?,?,?,?,?,?,?)",
-		channel, "Seed", "test", time.Now().UnixMilli(), "", content, len(content))
+	res, err := db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES(?,?,?,?,?,?)",
+		channel, "Seed", "test", time.Now().UnixMilli(), "", content)
 	if err != nil {
 		t.Fatalf("seed memory message: %v", err)
 	}

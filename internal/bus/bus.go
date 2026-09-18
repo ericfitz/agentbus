@@ -121,8 +121,8 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	// A6: user_version records the schema this database was created with.
 	// Read it before touching the file (no DDL, no VACUUM) so an older binary
 	// opening a database a newer binary already stamped fails loudly and
-	// leaves it untouched instead of creating v1 objects in it; only a fresh
-	// (0) database gets stamped.
+	// leaves it untouched instead of creating stale objects in it; a fresh
+	// (0) database gets stamped, an older one is migrated (migrate.go).
 	var uv int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
 		_ = db.Close()
@@ -134,6 +134,11 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 		return nil, fmt.Errorf("database schema version %d is newer than this binary supports (schema version %d)", uv, schemaVersion)
 	case uv == 0:
 		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	case uv < schemaVersion:
+		if err := migrate(db, uv); err != nil {
 			_ = db.Close()
 			return nil, err
 		}

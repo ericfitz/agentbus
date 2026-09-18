@@ -197,7 +197,7 @@ func TestEvictToBudgetStopsPromptlyWhenCtxDone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < total; i++ {
-		if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('dev',?,'ctx',?,'','x',1)",
+		if _, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES('dev',?,'ctx',?,'','x')",
 			sam, i); err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +312,7 @@ func TestTickDeadlinePropagatesToEmbedding(t *testing.T) {
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
 	_, _ = b.CreateChannel(sam, "mem", "memory")
-	res, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,revision,bytes) VALUES('mem',?,'x',?,'','hello',1,5)",
+	res, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,revision) VALUES('mem',?,'x',?,'','hello',1)",
 		sam, b.nowMs())
 	if err != nil {
 		t.Fatal(err)

@@ -231,7 +231,7 @@ func TestLoadTasksSkipsForeignRows(t *testing.T) {
 	reg(t, b, "Sam")
 	taskList(t, b)
 	mustCreate(t, b, TaskCreateInput{Subject: "real"})
-	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,bytes,memory_id,revision) VALUES('tasks/work','x','',0,'not json',8,999,1)"); err != nil {
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,memory_id,revision) VALUES('tasks/work','x','',0,'not json',999,1)"); err != nil {
 		t.Fatal(err)
 	}
 	list, err := b.TaskList("Sam", TaskListInput{Channel: "tasks/work"})
@@ -284,7 +284,7 @@ func TestPlaceRankUsesEffectiveParentForOrphans(t *testing.T) {
 	// "after retention" scenario would.
 	const orphanID = int64(500)
 	orphanDoc := `{"subject":"orphan","status":"pending","rank":"W","parent":999999}`
-	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,bytes,memory_id,revision) VALUES('tasks/work','Sam','',0,?,8,?,1)", orphanDoc, orphanID); err != nil {
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,memory_id,revision) VALUES('tasks/work','Sam','',0,?,?,1)", orphanDoc, orphanID); err != nil {
 		t.Fatal(err)
 	}
 	// After: orphan must succeed (orphan is a sibling under the effective

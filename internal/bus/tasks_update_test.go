@@ -629,7 +629,7 @@ func TestOrphanedParentStaysUpdatable(t *testing.T) {
 	taskList(t, b)
 	const orphanID = int64(500)
 	orphanDoc := `{"subject":"orphan","status":"pending","rank":"W","parent":999999}`
-	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,bytes,memory_id,revision) VALUES('tasks/work','Sam','',0,?,8,?,1)", orphanDoc, orphanID); err != nil {
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,content,memory_id,revision) VALUES('tasks/work','Sam','',0,?,?,1)", orphanDoc, orphanID); err != nil {
 		t.Fatal(err)
 	}
 

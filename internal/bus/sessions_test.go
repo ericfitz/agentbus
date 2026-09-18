@@ -140,7 +140,7 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 	b := newTestBus(t)
 	_, _ = b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('c','ordinary',0)")
 	_, _ = b.db.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('Sam','c',0,?)", b.nowMs())
-	_, _ = b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('c','Other','',1,'','hi',2)")
+	_, _ = b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES('c','Other','',1,'','hi')")
 	r, _ := b.Register("Sam", "", "", true)
 	pend := filterDMPending(r.Pending)
 	if !r.Resumed || len(pend) != 1 || pend[0].Pending != 1 {

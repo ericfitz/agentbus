@@ -54,7 +54,10 @@ SHA="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
 echo "$SHA  $(basename "$TARBALL")" | tee "${TARBALL}.sha256"
 
 echo "==> Creating GitHub release $TAG"
-gh release create "$TAG" --repo "$GH_REPO" --title "$TAG" --generate-notes \
+# release/notes-<tag>.md, when present, replaces the generated notes.
+NOTES=(--generate-notes)
+[[ -f "${REPO_ROOT}/release/notes-${TAG}.md" ]] && NOTES=(--notes-file "${REPO_ROOT}/release/notes-${TAG}.md")
+gh release create "$TAG" --repo "$GH_REPO" --title "$TAG" "${NOTES[@]}" \
     "$TARBALL" "${TARBALL}.sha256"
 
 echo "==> Updating Homebrew tap"

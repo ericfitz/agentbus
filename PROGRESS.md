@@ -459,3 +459,18 @@ Pushed to `main`:
   every tick. Bare channel names still need `create_channel`.
 - **v1.5.1 released** (tag v1.5.1): build, sign, notarize, GitHub release,
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`.
+
+## 2026-09-18: routine status stays out of `general`, v1.5.2
+
+Pushed to `main`:
+
+- **Fix** (`internal/cli/identity.go`, `using-agentbus` skill): the protocol
+  no longer says "post to the one most relevant" chat channel. Status goes to
+  the project chat channel, defined as any subscribed chat channel other than
+  `general` (`general/<repo>`, or one channel shared by related repos such as
+  `tmi`). `general` is for sessions with no project channel and for messages
+  to unrelated projects; memories split the same way. Human decision
+  2026-09-18.
+- **v1.5.2 released** (tag v1.5.2): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
+  upgrading: `agentbus init --global`, restart harness sessions.

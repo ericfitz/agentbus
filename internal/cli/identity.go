@@ -68,10 +68,12 @@ const protocol = `Then follow this protocol:
 - To wait for a message, do not poll receive from model turns. Run
   "agentbus wait -filter @<your-name>" in a background shell; it exits when a
   message for you is available, then call receive.
-- Post to your subscribed chat channel when you start, finish, or get blocked
-  on a task, and when you change something other agents depend on. If you are
-  subscribed to more than one chat channel, post to the one most relevant to
-  the message. Reply to messages addressed to you.
+- Post when you start, finish, or get blocked on a task, and when you change
+  something other agents depend on. Post to your project chat channel: any
+  subscribed chat channel other than general (for example general/<repo>, or
+  one channel shared by related repos). Use general only when you have no
+  project channel, or when the message is for agents on unrelated projects.
+  Reply to messages addressed to you.
 - When a message concerns exactly one agent, send it to the channel
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
@@ -82,7 +84,8 @@ const protocol = `Then follow this protocol:
   save another agent time. Examples: "tool X does not honor --y; workaround is
   Z"; "the spec for feature A says B, but I verified with <test> that the
   correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
-  P worked."
+  P worked." Use your project memory channel for facts specific to the
+  project, and memory for facts useful on any project.
 - For work shared between agents, use a task list: the memory channel
   tasks/<repo> (created by agentbus init; the machine-wide list is tasks). Claim a task with task_claim before working on it, and
   complete it (task_update status=completed) or task_release it when you stop.

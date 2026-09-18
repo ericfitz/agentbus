@@ -429,3 +429,19 @@ Pushed to `main`:
 - **v1.4.0 released** (tag v1.4.0): build, sign, notarize, GitHub release,
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. Every running old-binary session must be
   restarted after `brew upgrade agentbus`; the release notes say so.
+
+## 2026-09-18: default tasks channel, prefixed project channels, v1.5.0
+
+Pushed to `main`:
+
+- **ADR 0007** (`docs/adr/0007-default-tasks-channel.md`): a machine-wide
+  task list `tasks` exists on every bus; project channels are
+  `general/<repo>`, `memory/<repo>`, `tasks/<repo>` (prefix implies kind);
+  `agentbus init` creates all three and renames a pre-existing `<repo>` or
+  `<repo>-memory` in place with history (`bus.RenameChannel`). Task lists
+  draw with U+2611 and the new theme color `tasks` (yellow). Skill, hook
+  text, README, and install guide updated.
+- **v1.5.0 released** (tag v1.5.0): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
+  upgrading: `agentbus init --global`, `agentbus init` in every repository
+  with old-style channels, restart the TUI and harness sessions.

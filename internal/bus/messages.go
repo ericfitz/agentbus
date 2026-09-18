@@ -112,8 +112,8 @@ func validateSendShape(in SendInput) error {
 // must exist (its kind decides memory vs ordinary), and reply_to, if set,
 // must name a real message. Kept separate from validateSendShape so it runs
 // only after the idempotency receipt lookup (R2).
-func (b *Bus) validateSendRefs(in SendInput) (kind string, err error) {
-	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
+func (b *Bus) validateSendRefs(q queryRower, in SendInput) (kind string, err error) {
+	switch err := q.QueryRow("SELECT kind FROM channels WHERE name=?", in.Channel).Scan(&kind); {
 	case errors.Is(err, sql.ErrNoRows):
 		if owner, ok := dmOwner(in.Channel); ok {
 			return "", errf("not_found", false, "%q has never registered; direct messages reach only known identities (see discover)", owner)
@@ -124,7 +124,7 @@ func (b *Bus) validateSendRefs(in SendInput) (kind string, err error) {
 	}
 	if in.ReplyTo != nil {
 		var n int
-		if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE seq=?", *in.ReplyTo).Scan(&n); err != nil {
+		if err := q.QueryRow("SELECT count(*) FROM messages WHERE seq=?", *in.ReplyTo).Scan(&n); err != nil {
 			return "", internal(err)
 		}
 		if n == 0 {
@@ -296,7 +296,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 		return receiptResult(prev)
 	}
 
-	kind, err := b.validateSendRefs(in)
+	kind, err := b.validateSendRefs(b.db, in)
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -335,6 +335,13 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 		return SendResult{}, err
 	} else if hit {
 		return receiptResult(prev)
+	}
+
+	// Re-run the channel and reply_to lookups on the write transaction (ADR
+	// 0006): a channel deleted or a reply_to evicted while the hook ran must
+	// fail not_found rather than be written into. Mirrors TaskCreate.
+	if kind, err = b.validateSendRefs(tx, in); err != nil {
+		return SendResult{}, err
 	}
 
 	// Authoritative envelope-size gate (R4/C1): same check as the preflight

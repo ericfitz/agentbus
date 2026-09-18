@@ -280,3 +280,28 @@ func TestRejectsEmptyTUIName(t *testing.T) {
 		t.Fatalf("want tui_name error, got %v", err)
 	}
 }
+
+func TestDataDirEnvResolvesTildeAndRelative(t *testing.T) {
+	p := write(t, t.TempDir(), `{}`)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env, want := range map[string]string{
+		"~/x":   filepath.Join(home, "x"),
+		"rel/d": filepath.Join(cwd, "rel/d"),
+	} {
+		t.Setenv("AGENTBUS_DATA_DIR", env)
+		c, _, err := Load(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.DataDirectory != want {
+			t.Fatalf("AGENTBUS_DATA_DIR=%s: got %s, want %s", env, c.DataDirectory, want)
+		}
+	}
+}

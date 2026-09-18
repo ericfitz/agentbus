@@ -261,8 +261,18 @@ func Load(path string) (Config, string, error) {
 			return c, path, err
 		}
 	}
+	// AGENTBUS_DATA_DIR is resolved once here (leading ~/ to the home
+	// directory, relative against the working directory) so every process
+	// started from the same repository agrees on the path (ADR 0006).
 	if d := os.Getenv("AGENTBUS_DATA_DIR"); d != "" {
-		c.DataDirectory = d
+		cwd, err := os.Getwd()
+		if err != nil {
+			return c, path, fmt.Errorf("resolve AGENTBUS_DATA_DIR: %w", err)
+		}
+		c.DataDirectory, err = resolve(cwd, d)
+		if err != nil {
+			return c, path, err
+		}
 	}
 	c.Path = path
 	return c, path, nil

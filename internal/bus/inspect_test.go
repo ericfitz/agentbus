@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,5 +206,53 @@ echo '{"allow": true}'
 	}
 	if n != 1 {
 		t.Fatalf("receipt rows = %d, want 1", n)
+	}
+}
+
+// TestSendRacingChannelDeleteIsNotFound (ADR 0006 item 5): a channel deleted
+// after Send's preflight lookup but before its write transaction must make
+// the send fail not_found, not write into the deleted channel. The hook
+// blocks between those two points, so the delete lands deterministically.
+func TestSendRacingChannelDeleteIsNotFound(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	body := fmt.Sprintf(`touch %q
+cat >/dev/null
+while [ ! -f %q ]; do sleep 0.02; done
+echo '{"allow": true}'
+`, started, release)
+
+	b := newTestBus(t)
+	b.cfg.InspectionCommand = []string{hookScript(t, body)}
+	b.cfg.InspectionTimeoutSeconds = 5
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+
+	errc := make(chan error, 1)
+	go func() {
+		_, err := b.Send(sam, SendInput{Channel: "dev", Content: "hello"})
+		errc <- err
+	}()
+	waitForFile(t, started, 5*time.Second) // past preflight, inside the hook
+	if _, err := b.DeleteChannel("dev", sam); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(release, []byte("go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := <-errc
+	var be *Error
+	if !errors.As(err, &be) || be.Code != "not_found" {
+		t.Fatalf("send after racing delete: got %v, want not_found", err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE channel='dev'").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("%d message(s) written into the deleted channel", n)
 	}
 }

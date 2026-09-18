@@ -445,3 +445,17 @@ Pushed to `main`:
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
   upgrading: `agentbus init --global`, `agentbus init` in every repository
   with old-style channels, restart the TUI and harness sessions.
+
+## 2026-09-18: register recreates missing project channels, v1.5.1
+
+Pushed to `main`:
+
+- **Fix** (`internal/mcpserver/server.go`): `register` ensures every
+  prefixed channel (`general/`, `memory/`, `tasks/<repo>`) listed in
+  `.local/agentbus.json` exists before subscribing. The tick reaps an empty
+  channel with no live subscriber, so a fresh `agentbus init`'s channels
+  could vanish before the first register; a pre-1.5.0 `agentbus mcp` process
+  left running after the upgrade also reaped `tasks` and `tasks/<repo>` on
+  every tick. Bare channel names still need `create_channel`.
+- **v1.5.1 released** (tag v1.5.1): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`.

@@ -176,6 +176,12 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		}
 	}
 	for _, c := range channels {
+		// A prefixed name implies its kind, so a listed project channel the
+		// tick reaped while empty and unsubscribed comes back here rather
+		// than failing until someone reruns agentbus init.
+		if _, ok := bus.PrefixKind(c); ok {
+			_ = b.EnsureChannel(c, "")
+		}
 		if err := b.Subscribe(reg.Sender, c, "now"); err != nil {
 			if reg.SubscribeFailed == nil {
 				reg.SubscribeFailed = map[string]string{}

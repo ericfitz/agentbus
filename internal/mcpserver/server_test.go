@@ -609,3 +609,32 @@ func TestPersistErrClassifiesIOAsInternalRetryable(t *testing.T) {
 		t.Fatalf("validation error: %+v", be)
 	}
 }
+
+// A prefixed channel listed in .local/agentbus.json (general/, memory/,
+// tasks/<repo>) is recreated by register if it is missing: the tick reaps
+// an empty channel with no live subscriber, so the ones agentbus init
+// created can be gone by the time the first session registers.
+func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general/Sam","memory/Sam","tasks/Sam","reviews"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general/Sam" || got[1] != "memory/Sam" || got[2] != "tasks/Sam" {
+		t.Fatal(reg)
+	}
+	failed, _ := reg["subscribe_failed"].(map[string]any)
+	if msg, _ := failed["reviews"].(string); !strings.Contains(msg, "does not exist") {
+		t.Fatal("a bare name still needs create_channel:", reg)
+	}
+	_, res := call(t, cs, "list_channels", map[string]any{"as": "Sam"})
+	var list []struct{ Name, Kind string }
+	_ = json.Unmarshal([]byte(res.Content[0].(*mcp.TextContent).Text), &list)
+	kinds := map[string]string{}
+	for _, c := range list {
+		kinds[c.Name] = c.Kind
+	}
+	if kinds["general/Sam"] != "ordinary" || kinds["memory/Sam"] != "memory" || kinds["tasks/Sam"] != "memory" {
+		t.Fatal(kinds)
+	}
+}

@@ -15,7 +15,7 @@ import (
 )
 
 // DefaultChannels is the persistent list when the file has no "channels" key.
-var DefaultChannels = []string{"general", "memory"}
+var DefaultChannels = []string{"general", "memory", "tasks"}
 
 // File is a parsed .local/agentbus.json. Raw holds every key so writers
 // preserve ones they do not understand.

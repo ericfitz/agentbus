@@ -8,16 +8,61 @@ import (
 	"strings"
 )
 
+// prefixKinds maps each channel-name prefix to the kind it implies: a
+// project channel is <default>/<repo>, named after the machine-wide default
+// it scopes (ADR 0007). dm/ is not here; inboxes are register's, not
+// CreateChannel's.
+var prefixKinds = map[string]string{"general/": "ordinary", "memory/": "memory", TaskPrefix: "memory"}
+
+// PrefixKind returns the kind a prefixed channel name implies and true, or
+// "" and false for an unprefixed name.
+func PrefixKind(name string) (string, bool) {
+	for p, k := range prefixKinds {
+		if strings.HasPrefix(name, p) {
+			return k, true
+		}
+	}
+	return "", false
+}
+
 // ChannelNameRule is the channel name rule shared by CreateChannel, the CLI's
 // persistent subscribe list, and repoconfig: a name is valid if it passes
-// NameRule directly, or if it has the tasks/ prefix and the remainder passes
-// NameRule. It does not decide reserved names (dm, tasks) or channel kind;
-// callers apply those separately.
+// NameRule directly, or if it has a general/, memory/, or tasks/ prefix and
+// the remainder passes NameRule. It does not decide reserved names (dm,
+// tasks) or channel kind; callers apply those separately.
 func ChannelNameRule(name string) error {
-	if rest, ok := strings.CutPrefix(name, TaskPrefix); ok {
-		return NameRule(rest)
+	for p := range prefixKinds {
+		if rest, ok := strings.CutPrefix(name, p); ok {
+			return NameRule(rest)
+		}
 	}
 	return NameRule(name)
+}
+
+// resolveKind applies the kind rules shared by CreateChannel and
+// EnsureChannel: a prefixed name implies its kind (an empty kind takes it, a
+// different one is refused); "dm" and "tasks" are reserved; otherwise kind
+// must be ordinary or memory.
+func resolveKind(name, kind string) (string, error) {
+	if name == "tasks" {
+		return "", errf("validation", false, "channel name %q is reserved for task lists", name)
+	}
+	if implied, ok := PrefixKind(name); ok {
+		if kind == "" {
+			return implied, nil
+		}
+		if kind != implied {
+			return "", errf("validation", false, "channels named %s.../ must have kind %s", name[:strings.Index(name, "/")], implied)
+		}
+		return kind, nil
+	}
+	if name == "dm" {
+		return "", errf("validation", false, "channel name %q is reserved for direct messages", name)
+	}
+	if kind != "ordinary" && kind != "memory" {
+		return "", errf("validation", false, "kind must be ordinary or memory")
+	}
+	return kind, nil
 }
 
 // validateChannelName wraps ChannelNameRule in the bus's validation-error
@@ -37,9 +82,10 @@ type Channel struct {
 }
 
 // DefaultChannels exist on every bus so agents have somewhere to talk and
-// remember before anyone creates a channel: "general" (ordinary) and
-// "memory" (memory). Decision of 2026-09-09, ADR 0002.
-var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "memory", Kind: "memory"}}
+// remember before anyone creates a channel: "general" (ordinary), "memory"
+// (memory), and the task list "tasks" (memory). Decisions of 2026-09-09
+// (ADR 0002) and 2026-09-17 (ADR 0007).
+var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "memory", Kind: "memory"}, {Name: "tasks", Kind: "memory"}}
 
 // ensureDefaults creates any missing default channel. A same-named channel
 // of another kind is left alone (INSERT OR IGNORE), so a user's earlier
@@ -57,11 +103,14 @@ func (b *Bus) ensureDefaults() error {
 // (it is the CLI's, for `agentbus init`). A same-named channel of another
 // kind is left alone, like ensureDefaults.
 func (b *Bus) EnsureChannel(name, kind string) error {
-	if err := validateName(name); err != nil {
+	if err := validateChannelName(name); err != nil {
 		return err
 	}
-	if name == "dm" {
-		return errf("validation", false, "channel name %q is reserved for direct messages", name)
+	if name != "tasks" { // the default list is the one bare "tasks" ensureDefaults may create
+		var err error
+		if kind, err = resolveKind(name, kind); err != nil {
+			return err
+		}
 	}
 	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", name, kind); err != nil {
 		return internal(err)
@@ -76,20 +125,9 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 	if err := validateChannelName(name); err != nil {
 		return Channel{}, err
 	}
-	if IsTaskChannel(name) {
-		if kind != "memory" {
-			return Channel{}, errf("validation", false, "task lists (tasks/...) must have kind memory")
-		}
-	} else {
-		switch name {
-		case "dm":
-			return Channel{}, errf("validation", false, "channel name %q is reserved for direct messages", name)
-		case "tasks":
-			return Channel{}, errf("validation", false, "channel name %q is reserved for task lists", name)
-		}
-		if kind != "ordinary" && kind != "memory" {
-			return Channel{}, errf("validation", false, "kind must be ordinary or memory")
-		}
+	kind, err := resolveKind(name, kind)
+	if err != nil {
+		return Channel{}, err
 	}
 	tx, err := b.db.Begin()
 	if err != nil {
@@ -247,4 +285,47 @@ func (b *Bus) reapEmptyChannels() error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// RenameChannel moves channel from to to, carrying its messages and
+// subscriptions, in one transaction. It is the CLI's, for `agentbus init`
+// migrating a pre-ADR-0007 project channel (<repo>, <repo>-memory) to its
+// prefixed name. from must exist, to must not, and to's implied kind must
+// match from's kind. Cursors keep their seqs, so subscribers resume where
+// they were.
+func (b *Bus) RenameChannel(from, to string) error {
+	if err := validateChannelName(to); err != nil {
+		return err
+	}
+	tx, err := b.db.Begin()
+	if err != nil {
+		return internal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var kind string
+	if err := tx.QueryRow("SELECT kind FROM channels WHERE name=?", from).Scan(&kind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errf("not_found", false, "channel %q does not exist", from)
+		}
+		return internal(err)
+	}
+	if _, err := resolveKind(to, kind); err != nil {
+		return err
+	}
+	var n int
+	if err := tx.QueryRow("SELECT count(*) FROM channels WHERE name=?", to).Scan(&n); err != nil {
+		return internal(err)
+	}
+	if n > 0 {
+		return errf("conflict", false, "channel %q already exists", to)
+	}
+	for _, q := range []string{"UPDATE channels SET name=? WHERE name=?", "UPDATE messages SET channel=? WHERE channel=?", "UPDATE subscriptions SET channel=? WHERE channel=?"} {
+		if _, err := tx.Exec(q, to, from); err != nil {
+			return internal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return internal(err)
+	}
+	return nil
 }

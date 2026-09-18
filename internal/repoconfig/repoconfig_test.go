@@ -66,7 +66,7 @@ func TestChannelsDefaultsWhenKeyAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, bad := f.Channels()
-	if !reflect.DeepEqual(got, []string{"general", "memory"}) || len(bad) != 0 {
+	if !reflect.DeepEqual(got, []string{"general", "memory", "tasks"}) || len(bad) != 0 {
 		t.Fatalf("%v %v", got, bad)
 	}
 }
@@ -112,7 +112,7 @@ func TestAddChannelAcceptsTaskListRejectsBadTaskName(t *testing.T) {
 	writeFile(t, dir, `{"identity":"Sam"}`)
 	f, _ := Load(dir)
 	got, err := f.AddChannel("tasks/work")
-	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "tasks/work"}) {
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "tasks", "tasks/work"}) {
 		t.Fatalf("%v %v", got, err)
 	}
 	for _, bad := range []string{"tasks/", "tasks/a/b"} {
@@ -127,7 +127,7 @@ func TestAddChannelMaterializesDefaultsAndPreservesUnknownKeys(t *testing.T) {
 	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)
 	f, _ := Load(dir)
 	got, err := f.AddChannel("reviews")
-	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "reviews"}) {
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "memory", "tasks", "reviews"}) {
 		t.Fatalf("%v %v", got, err)
 	}
 	f2, err := Load(dir)
@@ -138,7 +138,7 @@ func TestAddChannelMaterializesDefaultsAndPreservesUnknownKeys(t *testing.T) {
 		t.Fatal("unknown key dropped")
 	}
 	again, _ := f2.AddChannel("reviews")
-	if !reflect.DeepEqual(again, []string{"general", "memory", "reviews"}) {
+	if !reflect.DeepEqual(again, []string{"general", "memory", "tasks", "reviews"}) {
 		t.Fatal("duplicate added:", again)
 	}
 	body, _ := os.ReadFile(f.Path)
@@ -176,16 +176,16 @@ func TestRemoveChannel(t *testing.T) {
 	writeFile(t, dir, `{"identity":"Sam","future":{"x":1}}`)
 	f, _ := Load(dir)
 	got, err := f.RemoveChannel("memory")
-	if err != nil || !reflect.DeepEqual(got, []string{"general"}) {
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "tasks"}) {
 		t.Fatalf("%v %v", got, err)
 	}
 	got, err = f.RemoveChannel("nope")
-	if err != nil || !reflect.DeepEqual(got, []string{"general"}) {
+	if err != nil || !reflect.DeepEqual(got, []string{"general", "tasks"}) {
 		t.Fatalf("%v %v", got, err)
 	}
 	f2, _ := Load(dir)
 	ch, _ := f2.Channels()
-	if !reflect.DeepEqual(ch, []string{"general"}) {
+	if !reflect.DeepEqual(ch, []string{"general", "tasks"}) {
 		t.Fatal(ch)
 	}
 	if _, ok := f2.Raw["future"]; !ok {
@@ -206,7 +206,7 @@ func TestCreate(t *testing.T) {
 		t.Fatal("invalid identity must fail")
 	}
 	ch, _ := f.Channels()
-	if !reflect.DeepEqual(ch, []string{"general", "memory"}) {
+	if !reflect.DeepEqual(ch, []string{"general", "memory", "tasks"}) {
 		t.Fatal(ch)
 	}
 }

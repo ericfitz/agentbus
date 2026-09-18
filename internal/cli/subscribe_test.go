@@ -33,7 +33,7 @@ func TestSubscribeCreatesFileAndAddsChannel(t *testing.T) {
 	if err := Subscribe(root, "reviews", &out); err != nil {
 		t.Fatal(err)
 	}
-	want := "Agentbus: persistent channels for myrepo: general, memory, reviews\n"
+	want := "Agentbus: persistent channels for myrepo: general, memory, tasks, reviews\n"
 	if !strings.HasPrefix(out.String(), want) {
 		t.Fatalf("%q", out.String())
 	}
@@ -45,7 +45,7 @@ func TestSubscribeCreatesFileAndAddsChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch, _ := f.Channels()
-	if len(ch) != 3 || ch[2] != "reviews" {
+	if len(ch) != 4 || ch[3] != "reviews" {
 		t.Fatal(ch)
 	}
 }
@@ -68,7 +68,7 @@ func TestSubscribeAcceptsTaskList(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch, _ := f.Channels()
-	if len(ch) != 3 || ch[2] != "tasks/work" {
+	if len(ch) != 4 || ch[3] != "tasks/work" {
 		t.Fatal(ch)
 	}
 }
@@ -95,14 +95,14 @@ func TestUnsubscribe(t *testing.T) {
 	if err := Unsubscribe(root, "memory", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), "Agentbus: persistent channels for myrepo: general, reviews\n") {
+	if !strings.HasPrefix(out.String(), "Agentbus: persistent channels for myrepo: general, tasks, reviews\n") {
 		t.Fatalf("%q", out.String())
 	}
 	out.Reset()
 	if err := Unsubscribe(root, "nope", &out); err != nil {
 		t.Fatal("unsubscribing an unlisted channel is a no-op, got", err)
 	}
-	if !strings.HasPrefix(out.String(), "Agentbus: persistent channels for myrepo: general, reviews\n") {
+	if !strings.HasPrefix(out.String(), "Agentbus: persistent channels for myrepo: general, tasks, reviews\n") {
 		t.Fatalf("%q", out.String())
 	}
 }

@@ -114,7 +114,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	// The using-agentbus skill lands in each harness's personal skills dir.
 	for _, p := range []string{".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
 		skill, err := os.ReadFile(filepath.Join(home, p))
-		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "<repo>-memory") {
+		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "memory/<repo>") {
 			t.Fatalf("skill %s: %v\n%s", p, err, skill)
 		}
 	}
@@ -233,10 +233,10 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatal("repo init touched harness CLIs:", f.calls)
 	}
 	id := readJSON(t, filepath.Join(root, ".local", "agentbus.json"))
-	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","widgets","widgets-memory"]`) {
+	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","tasks","general/widgets","memory/widgets","tasks/widgets"]`) {
 		t.Fatalf("identity file: %v", id)
 	}
-	if got := channelKinds(t, o.Config); got["widgets"] != "ordinary" || got["widgets-memory"] != "memory" {
+	if got := channelKinds(t, o.Config); got["general/widgets"] != "ordinary" || got["memory/widgets"] != "memory" || got["tasks/widgets"] != "memory" {
 		t.Fatalf("project channels not created on the bus: %v", got)
 	}
 	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
@@ -260,7 +260,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if strings.Count(string(gi), ".local/") != 1 || !strings.Contains(out.String(), "set to \"Sam\"") {
 		t.Fatalf("rerun: gitignore=%q out=%s", gi, out.String())
 	}
-	if got := channelKinds(t, o.Config); got["Sam"] != "ordinary" || got["Sam-memory"] != "memory" {
+	if got := channelKinds(t, o.Config); got["general/Sam"] != "ordinary" || got["memory/Sam"] != "memory" || got["tasks/Sam"] != "memory" {
 		t.Fatalf("rerun did not create channels for the existing identity: %v", got)
 	}
 

@@ -405,7 +405,7 @@ func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
 		t.Fatal(reg)
 	}
 	if _, ok := reg["subscribe_failed"]; ok {
@@ -426,7 +426,7 @@ func TestRegisterSubscribesDefaultsWhenChannelsKeyAbsent(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam"}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
 		t.Fatal(reg)
 	}
 }
@@ -437,7 +437,7 @@ func TestRegisterMalformedRepoFileReportsFailureUnderPath(t *testing.T) {
 	writeRepoFile(t, dir, `{not json`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "memory" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
 		t.Fatal(reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)
@@ -505,12 +505,12 @@ func TestRegisterPersistentAppliesToSubagentsAndNoResume(t *testing.T) {
 	cs := testSessionIn(t, dir)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
 	sub, _ := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam"})
-	if got := stringsOf(sub["subscribed"]); len(got) != 2 {
+	if got := stringsOf(sub["subscribed"]); len(got) != 3 {
 		t.Fatal(sub)
 	}
 	call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "channel": "general"})
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam", "resume": false})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 }

@@ -33,13 +33,13 @@ func TestDefaultChannelsExistSurviveResetAndYieldToExisting(t *testing.T) {
 		}
 		return m
 	}
-	if got := kinds(); got["general"] != "ordinary" || got["memory"] != "memory" || len(got) != 2 {
+	if got := kinds(); got["general"] != "ordinary" || got["memory"] != "memory" || got["tasks"] != "memory" || len(got) != 3 {
 		t.Fatalf("open must create the defaults, got %v", got)
 	}
 	if err := b.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(); len(got) != 2 {
+	if got := kinds(); len(got) != 3 {
 		t.Fatalf("reset must recreate the defaults, got %v", got)
 	}
 	if _, err := b.db.Exec("UPDATE channels SET kind='ordinary' WHERE name='memory'"); err != nil {
@@ -51,4 +51,40 @@ func TestDefaultChannelsExistSurviveResetAndYieldToExisting(t *testing.T) {
 	if got := kinds(); got["memory"] != "ordinary" {
 		t.Fatalf("an existing channel of another kind must win, got %v", got)
 	}
+}
+
+func TestPrefixedNamesImplyKindAndRenameCarriesHistory(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if c, err := b.CreateChannel(sam, "memory/w", ""); err != nil || c.Kind != "memory" {
+		t.Fatalf("memory/ implies memory: %v %v", c, err)
+	}
+	wantCode(t, func() error { _, err := b.CreateChannel(sam, "general/w", "memory"); return err }(), "validation")
+	wantCode(t, func() error { _, err := b.CreateChannel(sam, "x/y", "memory"); return err }(), "validation")
+
+	if _, err := b.CreateChannel(sam, "widgets", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "widgets", Content: "kept"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe(sam, "widgets", "oldest"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RenameChannel("widgets", "general/widgets"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE channel='general/widgets'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("messages must move: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE channel='general/widgets' AND sender=?", sam).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("subscriptions must move: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM channels WHERE name='widgets'").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("old name must be gone: %d %v", n, err)
+	}
+	wantCode(t, b.RenameChannel("widgets", "general/widgets"), "not_found")
+	wantCode(t, b.RenameChannel("memory/w", "general/w"), "validation") // kind mismatch
+	wantCode(t, b.RenameChannel("memory/w", "general/widgets"), "validation") // still a kind mismatch, checked before the exists check
 }

@@ -66,7 +66,7 @@ const (
 	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
 	iconUser  = "\U0001F9D1\uFE0F "           // adult
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
-	iconTasks = "\U0001F4CB\uFE0F "           // clipboard
+	iconTasks = "\x1b[2X\u2611\uFE0F\x1b[1C " // ballot box with check; Neutral width, same treatment as the gear
 )
 
 func (m Model) View() string {
@@ -104,12 +104,14 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().Background(m.theme.BG).Foreground(m.theme.Text).Width(m.width).MaxHeight(m.height).Render(out)
 }
 
-// chanStyle is the color a channel's name is drawn in everywhere: memory
-// channels in the memory color, a DM inbox in the user color for the TUI's
+// chanStyle is the color a channel's name is drawn in everywhere: task
+// lists in the tasks color, other memory channels in the memory color, a DM inbox in the user color for the TUI's
 // own inbox and the agent color for anyone else's, chat channels in the
 // agent color.
 func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
 	switch {
+	case bus.IsTaskChannel(c.Name):
+		return m.theme.Style(m.theme.Tasks)
 	case c.Kind == "memory":
 		return m.theme.Style(m.theme.Mem)
 	case c.Name == bus.DMChannel(m.c.as):
@@ -345,7 +347,10 @@ func (m Model) renderCompose() string {
 	hint := ""
 	if ch != nil {
 		mark, text := iconChat, ch.Name
-		if ch.Kind == "memory" {
+		switch {
+		case bus.IsTaskChannel(ch.Name):
+			mark = iconTasks
+		case ch.Kind == "memory":
 			mark = iconMem
 			hint = th.Style(th.Dim).Render("  ⏎ new memory")
 		}

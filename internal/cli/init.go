@@ -3,6 +3,7 @@ package cli
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -325,8 +326,8 @@ func hasHookCommand(entry any, cmd string) bool {
 }
 
 // repo writes the repository's identity file, creates the repository's own
-// chat and memory channels (<identity> and <identity>-memory) on the bus and
-// in the persistent channel list, makes sure .local/ is git-ignored, then
+// channels (general/, memory/, and tasks/<identity>) on the bus and in the
+// persistent channel list, makes sure .local/ is git-ignored, then
 // prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
@@ -357,8 +358,10 @@ func (in *initer) repo(root string) error {
 	return identity(in.Cwd, in.out, os.Stderr)
 }
 
-// projectChannels creates <identity> (ordinary) and <identity>-memory
-// (memory) on the bus and adds them to the persistent channel list.
+// projectChannels creates general/<identity>, memory/<identity>, and
+// tasks/<identity> on the bus and adds them to the persistent channel list.
+// A pre-ADR-0007 project channel (<identity>, <identity>-memory) is renamed
+// to its prefixed name, history included, and dropped from the list.
 func (in *initer) projectChannels(root string) error {
 	f, err := repoconfig.Load(root)
 	if err != nil {
@@ -369,11 +372,25 @@ func (in *initer) projectChannels(root string) error {
 		return err
 	}
 	defer func() { _ = b.Close() }()
-	for _, c := range []bus.Channel{{Name: f.Identity, Kind: "ordinary"}, {Name: f.Identity + "-memory", Kind: "memory"}} {
-		if err := b.EnsureChannel(c.Name, c.Kind); err != nil {
+	for _, m := range []struct{ old, name string }{{f.Identity, "general/" + f.Identity}, {f.Identity + "-memory", "memory/" + f.Identity}, {"", bus.TaskPrefix + f.Identity}} {
+		if m.old != "" {
+			var be *bus.Error
+			switch err := b.RenameChannel(m.old, m.name); {
+			case err == nil:
+				in.say("renamed channel %s to %s", m.old, m.name)
+			case errors.As(err, &be) && (be.Code == "not_found" || be.Code == "conflict"):
+				// nothing to migrate, or already migrated
+			default:
+				return err
+			}
+			if _, err := f.RemoveChannel(m.old); err != nil {
+				return err
+			}
+		}
+		if err := b.EnsureChannel(m.name, ""); err != nil {
 			return err
 		}
-		if _, err := f.AddChannel(c.Name); err != nil {
+		if _, err := f.AddChannel(m.name); err != nil {
 			return err
 		}
 	}

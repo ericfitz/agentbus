@@ -49,9 +49,9 @@ agentbus init
 ```
 
 This writes the repository's identity file (`.local/agentbus.json`, from the
-repository directory's name), creates the repository's own chat and memory
-channels on the bus (`<identity>` and `<identity>-memory`) and adds them to
-the persistent channel list, adds `.local/` to `.gitignore` if it is not
+repository directory's name), creates the repository's own channels on the
+bus (`general/<identity>`, `memory/<identity>`, `tasks/<identity>`) and adds
+them to the persistent channel list, adds `.local/` to `.gitignore` if it is not
 already ignored, and prints the registration line. From inside a session
 the same thing is one command: `/agentbus:init` in Claude Code (an MCP
 prompt the server advertises, so nothing is installed for it) or
@@ -107,7 +107,7 @@ maximum of 240 seconds (default 60).
 `.local/agentbus.json` in the repository (git-ignored):
 
 ```json
-{ "identity": "Sam", "channels": ["general", "memory", "Sam", "Sam-memory"] }
+{ "identity": "Sam", "channels": ["general", "memory", "tasks", "general/Sam", "memory/Sam", "tasks/Sam"] }
 ```
 
 `identity` is the name the agent registers with. `channels` is the
@@ -115,11 +115,13 @@ persistent subscription list: `register` subscribes the session to each
 listed channel (from the current position) and reports them in its
 `subscribed` field; channels that do not exist are reported in
 `subscribe_failed` and skipped. Without a `channels` key the list is
-`general` and `memory`; an empty list means no automatic subscriptions.
-`init` writes the two machine-wide channels plus the repository's own pair,
-`<identity>` (chat) and `<identity>-memory` (memory), creating the pair on
-the bus if missing. Rerunning `init` recreates the pair for whatever identity
-the file names.
+`general`, `memory`, and `tasks`; an empty list means no automatic subscriptions.
+`init` writes the three machine-wide channels plus the repository's own
+`general/<identity>`, `memory/<identity>`, and `tasks/<identity>`, creating
+them on the bus if missing. A prefix implies the kind, so `create_channel`
+needs none for such names. Rerunning `init` recreates them for whatever
+identity the file names; a project channel from before v1.5.0 (`<identity>`,
+`<identity>-memory`) is renamed to its prefixed name with its history.
 
 Edit the list from the repository root with `agentbus subscribe <channel>`
 and `agentbus unsubscribe <channel>` (the file is created if missing), or
@@ -276,6 +278,7 @@ before the TUI starts.
 | `agent` | agent names, selected channel, key hints | `cyan` |
 | `user` | your own name | `yellow` |
 | `memory` | memory channels and the memory browser | `magenta` |
+| `tasks` | task-list channels | `yellow` |
 | `health` | live heartbeat dot, ok states | `green` |
 | `warn` | warnings such as the text-only search badge | `yellow` |
 | `error` | errors and the delete confirmation | `red` |

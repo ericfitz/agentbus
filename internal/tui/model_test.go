@@ -368,8 +368,8 @@ func TestStatusMsgTracksSessionsAndNewChannels(t *testing.T) {
 	f.run(f.m.statusCmd())
 	// m.channels never holds DM inboxes (setChannels routes them to m.dms), so
 	// the count is exactly the ordinary/memory channels: dev, dev-notes,
-	// general, memory, late.
-	if len(f.m.channels) != 5 || !f.c.subscribed["late"] {
+	// general, memory, tasks, late.
+	if len(f.m.channels) != 6 || !f.c.subscribed["late"] {
 		t.Fatalf("new channel not picked up: %v %v", f.m.channels, f.c.subscribed)
 	}
 	if _, ok := f.m.sessionsSeen["Sam"]; !ok {
@@ -612,7 +612,7 @@ func TestSessionSweepReturnsToChannelsWhenNoSessionsRemain(t *testing.T) {
 	if len(f.m.sessionNames()) != 0 {
 		t.Fatalf("every session must have aged out: %v", f.m.sessionNames())
 	}
-	if f.m.sessSel != -1 || f.m.pane() != paneChannels || f.m.selName() != "memory" { // the last channel, where the walk down the rail left the list
+	if f.m.sessSel != -1 || f.m.pane() != paneChannels || f.m.selName() != "tasks" { // the last channel, where the walk down the rail left the list
 		t.Fatalf("losing every session must return to the channel list: sessSel=%d pane=%v sel=%q", f.m.sessSel, f.m.pane(), f.m.selName())
 	}
 }

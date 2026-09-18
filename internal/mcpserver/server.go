@@ -296,7 +296,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			applyPersistent(b, cwd, &reg)
 			return result(reg, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "create_channel", Description: "Agentbus: create a named channel of kind ordinary or memory. Idempotent when the kind matches. A task list is a memory channel named tasks/<name>."},
+	mcp.AddTool(s, &mcp.Tool{Name: "create_channel", Description: "Agentbus: create a named channel of kind ordinary or memory. Idempotent when the kind matches. A name prefixed general/, memory/, or tasks/ implies its kind (a task list is tasks/<name>); a project's channels are general/<repo>, memory/<repo>, tasks/<repo>."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in channelIn) (*mcp.CallToolResult, any, error) {
 			return result(b.CreateChannel(in.As, in.Name, in.Kind))
 		})

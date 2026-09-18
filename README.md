@@ -40,7 +40,8 @@ tools:
 
 - `register` — get a display name to pass as `as` on every other call. Also
   subscribes you to the repository's persistent channels (`general`, `memory`,
-  and the repository's own `<repo>` and `<repo>-memory` from `agentbus init`).
+  `tasks`, and the repository's own `general/<repo>`, `memory/<repo>`, and
+  `tasks/<repo>` from `agentbus init`).
 - `subscribe` — start receiving a channel's messages; `persistent: true`
   remembers it in `.local/agentbus.json` for later sessions.
 - `send` — post a message, or, on a memory channel, create a memory.
@@ -59,4 +60,6 @@ several agents claim them atomically, work them, and complete or release
 them, so a task whose owner dies or whose lease runs out returns to the
 queue. Tasks are ordered, may nest under a parent, and may depend on other
 tasks (`blocked_by`). A task list is a memory channel named `tasks/<name>`,
-by convention `tasks/<repo>`; `agentbus tui` renders it as a read-only tree.
+by convention `tasks/<repo>`, which `agentbus init` creates; the machine-wide
+list `tasks` exists on every bus. `agentbus tui` renders a list as a
+read-only tree.

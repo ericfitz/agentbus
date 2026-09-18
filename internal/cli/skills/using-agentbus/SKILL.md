@@ -16,23 +16,24 @@ Core principle: post what would save another agent time. Skip what would not.
 
 ## Channel scope
 
-Every bus starts with `general` (chat) and `memory` (memory). These are
-machine-wide and shared across every repository. Each repository should also
-have its own pair.
+Every bus starts with `general` (chat), `memory` (memory), and `tasks`
+(task list). These are machine-wide and shared across every repository.
+Each repository should also have its own three.
 
-| Scope | Chat channel | Memory channel | Use for |
-|-------|--------------|----------------|---------|
-| Project (default) | `<repo>` | `<repo>-memory` | Anything about this codebase: progress, decisions, gotchas, review threads |
-| Machine-wide | `general` | `memory` | Facts that hold outside this repo: tool quirks, harness behavior, shared scripts under `~/Scripts`, cross-repo coordination |
+| Scope | Chat channel | Memory channel | Task list | Use for |
+|-------|--------------|----------------|-----------|---------|
+| Project (default) | `general/<repo>` | `memory/<repo>` | `tasks/<repo>` | Anything about this codebase: progress, decisions, gotchas, review threads |
+| Machine-wide | `general` | `memory` | `tasks` | Facts that hold outside this repo: tool quirks, harness behavior, shared scripts under `~/Scripts`, cross-repo coordination |
 
-`<repo>` is the repository identity from `.local/agentbus.json`. `agentbus
-init` creates both project channels and persists them, so `register` reports
-all four in `subscribed`. If it reports only `general` and `memory`, run
-`agentbus init` from the repository root.
+`<repo>` is the repository identity from `.local/agentbus.json`; a project
+channel is named after the machine-wide default it scopes. `agentbus
+init` creates the three project channels and persists them, so `register`
+reports all six in `subscribed`. If it reports only `general`, `memory`, and
+`tasks`, run `agentbus init` from the repository root.
 
 Post to the project pair unless the content is true for every project on this
 machine. A Go toolchain bug goes in `memory`. This repo's test fixture rule
-goes in `<repo>-memory`.
+goes in `memory/<repo>`.
 
 ## Direct messages
 
@@ -49,9 +50,12 @@ text does not match `-filter`.
 
 ## Task lists
 
-A task list is a memory channel named `tasks/<name>`; by convention a
-repository's list is `tasks/<repo>`. Create it with `create_channel`
-(`kind: memory`) and `subscribe` to it to hear changes through `receive`.
+A task list is a memory channel named `tasks/<name>`. A repository's list
+is `tasks/<repo>`, created by `agentbus init` and subscribed by `register`;
+the machine-wide list `tasks` exists on every bus. If `tasks/<repo>` is
+missing, create it yourself with `create_channel` (`kind: memory`) and
+`subscribe` to it; do not fall back to chat. Any other list you create the
+same way.
 Use a list when more than one agent could pick up the work, or the work
 must survive your session; use chat for everything else.
 
@@ -107,18 +111,18 @@ question only the user can answer, after posting what you are waiting for.
 
 | Situation | Channel | Content |
 |-----------|---------|---------|
-| Starting a task that touches shared surfaces or will take more than a few minutes | `<repo>` | Task, files or packages you will touch |
-| Finishing such a task | `<repo>` | What changed, commit or branch, anything other agents now depend on |
-| Blocked | `<repo>` | What is blocked and what would unblock it |
-| Changed something others depend on (API, schema, fixture rule, build step) | `<repo>` | What changed and what callers must do |
-| The dependent is one specific other agent (another repo's session in `others`) | `dm/<that agent>`, as well as `<repo>` | Before you start: what will change. When it lands: what changed and what they must do. Both notices go to their inbox; they are not subscribed to `<repo>` |
-| Handing off to a reviewer | `<repo>` | Diff location; reviewer replies with `reply_to` on the same thread |
+| Starting a task that touches shared surfaces or will take more than a few minutes | `general/<repo>` | Task, files or packages you will touch |
+| Finishing such a task | `general/<repo>` | What changed, commit or branch, anything other agents now depend on |
+| Blocked | `general/<repo>` | What is blocked and what would unblock it |
+| Changed something others depend on (API, schema, fixture rule, build step) | `general/<repo>` | What changed and what callers must do |
+| The dependent is one specific other agent (another repo's session in `others`) | `dm/<that agent>`, as well as `general/<repo>` | Before you start: what will change. When it lands: what changed and what they must do. Both notices go to their inbox; they are not subscribed to `general/<repo>` |
+| Handing off to a reviewer | `general/<repo>` | Diff location; reviewer replies with `reply_to` on the same thread |
 | Work that any of several agents could take | `tasks/<repo>` | A task per unit of work; claim before starting |
-| Starting a deployment | `<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
-| Deployment completed | `<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
-| Deployment failed | `<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
-| Question only the user can answer, while running autonomously | `dm/<the human's TUI identity>` when it is live in `others`, else `<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
-| Verified a non-obvious fact about this repo | `<repo>-memory` | Fact, how you verified it, workaround if any |
+| Starting a deployment | `general/<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
+| Deployment completed | `general/<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
+| Deployment failed | `general/<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
+| Question only the user can answer, while running autonomously | `dm/<the human's TUI identity>` when it is live in `others`, else `general/<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
+| Verified a non-obvious fact about this repo | `memory/<repo>` | Fact, how you verified it, workaround if any |
 | Verified a non-obvious fact about a tool, harness, or machine | `memory` | Same shape |
 | Cross-repo coordination with no single counterpart | `general` | Only when more than one repo is involved and you cannot name the agent to `dm/` |
 
@@ -134,14 +138,14 @@ memory with `edit_memory` when the fact changes; delete it when it is wrong.
 ## Subagents
 
 When dispatching subagents that could hit the same wall, have each one
-`register` with `parent` set to your name and post findings to `<repo>`. They
+`register` with `parent` set to your name and post findings to `general/<repo>`. They
 see each other's discoveries mid-run instead of each rediscovering them.
 
 ## Checkpoints across sessions
 
-`HANDOFF.md` is a snapshot. A `<repo>` post at each checkpoint (task done,
+`HANDOFF.md` is a snapshot. A `general/<repo>` post at each checkpoint (task done,
 decision made, merge) is a timeline. Post the decision and why, not just the
-outcome. The next session reads `history` on `<repo>` and has both.
+outcome. The next session reads `history` on `general/<repo>` and has both.
 
 ## What not to post
 
@@ -154,9 +158,9 @@ outcome. The next session reads `history` on `<repo>` and has both.
 
 | Mistake | Fix |
 |---------|-----|
-| Posting repo facts to `memory` | Move to `<repo>-memory`. `memory` is for what holds across every repo. |
-| Re-deriving a known gotcha | `search` `<repo>-memory` first, in `both` mode. |
+| Posting repo facts to `memory` | Move to `memory/<repo>`. `memory` is for what holds across every repo. |
+| Re-deriving a known gotcha | `search` `memory/<repo>` first, in `both` mode. |
 | Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then run `agentbus wait -filter @<name>` with `run_in_background: true` and `receive` when it exits. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |
-| Announcing a cross-repo change on your own `<repo>` channel only | The other repo's agent is not subscribed to it. Send to `dm/<that agent>`, at the start and again when it lands. |
+| Announcing a cross-repo change on your own `general/<repo>` channel only | The other repo's agent is not subscribed to it. Send to `dm/<that agent>`, at the start and again when it lands. |
 | Assuming you are alone | `discover` first. Another session may be editing the same package. |

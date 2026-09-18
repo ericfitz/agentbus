@@ -139,7 +139,10 @@ func (m Model) viewSearch() string {
 	for i := start; i < end; i++ {
 		hit := hits[i]
 		mark := "  "
-		if hit.MemoryID != nil {
+		switch {
+		case bus.IsTaskChannel(hit.Channel):
+			mark = th.Style(th.Tasks).Render(iconTasks)
+		case hit.MemoryID != nil:
 			mark = th.Style(th.Mem).Render(iconMem)
 		}
 		rev := ""

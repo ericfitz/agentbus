@@ -10,12 +10,13 @@ import (
 	"unicode"
 )
 
-// TaskPrefix starts the name of every task-list channel: tasks/<name>.
+// TaskPrefix starts the name of every task-list channel: tasks/<name>. The
+// bare name "tasks" is the machine-wide default list (ADR 0007).
 const TaskPrefix = "tasks/"
 
 // IsTaskChannel reports whether channel is a task list.
 func IsTaskChannel(channel string) bool {
-	return strings.HasPrefix(channel, TaskPrefix)
+	return channel == "tasks" || strings.HasPrefix(channel, TaskPrefix)
 }
 
 // Task is a task as returned to callers. The stored JSON document is the

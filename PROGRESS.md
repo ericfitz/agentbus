@@ -189,6 +189,9 @@ Pushed to `main`:
   on every batch and does not scroll a growing tree while following;
   `before=x` with equal neighbor ranks (corrupt writes only) lands after `x`.
 - Not yet done: a TTY walkthrough of the rail/tab fix and the task tree.
+- **v1.3.0 released** (57d7cf2, tag v1.3.0):
+  [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v1.3.0);
+  `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (92ed09a).
 
 ## 2026-09-17 (later): direct messages, v1.2.0 release
 

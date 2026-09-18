@@ -12,3 +12,11 @@ this binary supports" until its harness is restarted. Upgrade with
 
 Details: `docs/adr/0006-deferred-minor-rulings.md` item 4 and
 `docs/superpowers/specs/2026-09-17-schema-migration-design.md`.
+
+## Also in this release (ADR 0006)
+
+- `AGENTBUS_DATA_DIR` expands a leading `~/` and resolves a relative path
+  against the working directory once at startup.
+- `send` re-checks the channel and `reply_to` inside its write transaction,
+  so a send racing a channel delete returns `not_found`.
+- `go.mod` declares `go 1.27`.

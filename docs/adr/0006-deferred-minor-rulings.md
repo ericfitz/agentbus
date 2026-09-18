@@ -3,8 +3,7 @@
 Status: Accepted 2026-09-17. The six items below were the last entries of
 `docs/superpowers/plans/2026-09-08-agentbus-v2-deferred-minors.md` still
 needing a human decision. All six were decided by the user at the end of the
-v1.3.0 session on 2026-09-17. Items 1, 2, 3, 5, and 6 shipped in v1.3.1;
-item 4 is a schema change and shipped on its own in v1.4.0.
+v1.3.0 session on 2026-09-17. All six shipped in v1.4.0.
 
 ## Human decisions
 

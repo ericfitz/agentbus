@@ -401,7 +401,7 @@ Pushed to `main`:
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.2);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (1485943).
 
-## 2026-09-17 (late): deferred-minor rulings, v1.3.1 release
+## 2026-09-17 (late): deferred-minor rulings
 
 Pushed to `main`:
 
@@ -412,9 +412,7 @@ Pushed to `main`:
   ruling 16), item 5 (`Send` re-runs the channel and `reply_to` lookups in
   the write transaction, so a send racing a channel delete is `not_found`),
   item 6 (`result()` comment). Item 4 (drop `messages.bytes`, first schema
-  migration) is deferred to v1.4.0 as its own release.
-- **v1.3.1 released** (tag v1.3.1): build, sign, notarize, GitHub release,
-  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`.
+  migration) follows in the next entry. Shipped together in v1.4.0.
 
 ## 2026-09-17 (late): schema version 2, v1.4.0 release
 
@@ -428,5 +426,6 @@ Pushed to `main`:
   and carries the `AUTOINCREMENT` counter over. Tested against a real
   version 1 file. `release/release.sh` now uses `release/notes-<tag>.md`
   for the GitHub release notes when present.
-- **v1.4.0 released** (tag v1.4.0). Every running old-binary session must be
+- **v1.4.0 released** (tag v1.4.0): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. Every running old-binary session must be
   restarted after `brew upgrade agentbus`; the release notes say so.

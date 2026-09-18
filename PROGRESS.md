@@ -400,3 +400,18 @@ Pushed to `main`:
 - **v0.9.2 released** (9861f4a, tag v0.9.2):
   [GitHub release](https://github.com/ericfitz/agentbus/releases/tag/v0.9.2);
   `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap` (1485943).
+
+## 2026-09-17 (late): deferred-minor rulings, v1.3.1 release
+
+Pushed to `main`:
+
+- **ADR 0006** (`docs/adr/0006-deferred-minor-rulings.md`) records the
+  user's rulings on the six older deferred minors. Shipped here: item 1
+  (`AGENTBUS_DATA_DIR` resolves `~/` and relative paths once at config
+  load), item 2 (`go 1.27`), item 3 (owner token stays 12 bytes; ADR 0003
+  ruling 16), item 5 (`Send` re-runs the channel and `reply_to` lookups in
+  the write transaction, so a send racing a channel delete is `not_found`),
+  item 6 (`result()` comment). Item 4 (drop `messages.bytes`, first schema
+  migration) is deferred to v1.4.0 as its own release.
+- **v1.3.1 released** (tag v1.3.1): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`.

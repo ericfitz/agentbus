@@ -11,7 +11,7 @@ import (
 	"github.com/ericfitz/agentbus/internal/config"
 )
 
-// schemaV1 is the messages DDL as shipped through v1.3.1, with the bytes
+// schemaV1 is the messages DDL as shipped through v1.3.0, with the bytes
 // column that schema version 2 drops. Kept here verbatim so the migration
 // is tested against a real v1 file, not a simulated one.
 const schemaV1Messages = `

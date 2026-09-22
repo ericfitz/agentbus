@@ -25,8 +25,9 @@ const InitPrompt = `Set up Agentbus for this repository:
    "Agentbus: call the register tool now with the name parameter set to ...".
 2. Call the Agentbus register tool with that name, then pass the returned
    "as" value on every later Agentbus call. Register subscribes you to the
-   repository's persistent channels (default: general for chat, memory for
-   memories).
+   repository's persistent chat channels and task lists (default: general
+   and tasks); memory channels are returned in memory_channels for you to
+   search, not pushed.
 ` + protocol + `If the command reports that the MCP server is not configured yet, tell the
 user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
 

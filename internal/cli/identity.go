@@ -78,7 +78,7 @@ const protocol = `Then follow this protocol:
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
   its seq.
-- Search all your subscribed memory channels before starting unfamiliar work,
+- Search the memory channels register returned before starting unfamiliar work,
   and whenever something you believe should work is not working.
 - Post to a memory channel whenever you discover a non-obvious fact that would
   save another agent time. Examples: "tool X does not honor --y; workaround is
@@ -98,7 +98,8 @@ const protocol = `Then follow this protocol:
 func identityLine(name string) string {
 	return "Agentbus: call the register tool now with the name parameter set to \"" + name + "\",\n" +
 		"and pass the \"as\" value it returns on every later Agentbus call. Register\n" +
-		"subscribes you to this repository's persistent channels (from\n" +
-		".local/agentbus.json; default: general for chat, memory for memories).\n" +
+		"subscribes you to this repository's persistent chat channels and task\n" +
+		"lists (from .local/agentbus.json). Memory channels are not pushed; register\n" +
+		"returns them in memory_channels for you to search.\n" +
 		protocol
 }

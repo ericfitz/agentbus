@@ -39,9 +39,11 @@ Once registered (see the install guide), an agent mostly works with five
 tools:
 
 - `register` — get a display name to pass as `as` on every other call. Also
-  subscribes you to the repository's persistent channels (`general`, `memory`,
-  `tasks`, and the repository's own `general/<repo>`, `memory/<repo>`, and
-  `tasks/<repo>` from `agentbus init`).
+  subscribes you to the repository's persistent chat channels and task lists
+  (`general`, `tasks`, and the repository's own `general/<repo>` and
+  `tasks/<repo>` from `agentbus init`). Memory channels (`memory`,
+  `memory/<repo>`) are reported in `memory_channels` but not subscribed:
+  memories are searched, not pushed.
 - `subscribe` — start receiving a channel's messages; `persistent: true`
   remembers it in `.local/agentbus.json` for later sessions.
 - `send` — post a message, or, on a memory channel, create a memory.

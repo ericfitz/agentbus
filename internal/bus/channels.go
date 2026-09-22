@@ -99,6 +99,19 @@ func (b *Bus) ensureDefaults() error {
 	return nil
 }
 
+// ChannelKind returns the kind of an existing channel, or "" if there is
+// no such channel.
+func (b *Bus) ChannelKind(name string) (string, error) {
+	var kind string
+	switch err := b.db.QueryRow("SELECT kind FROM channels WHERE name=?", name).Scan(&kind); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", internal(err)
+	}
+	return kind, nil
+}
+
 // EnsureChannel creates the channel if it is missing, without a registration
 // (it is the CLI's, for `agentbus init`). A same-named channel of another
 // kind is left alone, like ensureDefaults.

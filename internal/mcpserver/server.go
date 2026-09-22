@@ -161,6 +161,7 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 // ".local/agentbus.json".
 func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	reg.Subscribed = []string{}
+	reg.MemoryChannels = []string{}
 	channels := repoconfig.DefaultChannels
 	f, err := repoconfig.Find(cwd)
 	if err != nil {
@@ -181,6 +182,15 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		// than failing until someone reruns agentbus init.
 		if _, ok := bus.PrefixKind(c); ok {
 			_ = b.EnsureChannel(c, "")
+		}
+		// Memory channels are searched, not pushed (ADR 0008): report them
+		// and drop any subscription an earlier register left behind, so a
+		// resumed identity stops receiving memories too. Task lists are
+		// memory-kind but event-driven, so they stay subscribed.
+		if kind, _ := b.ChannelKind(c); kind == "memory" && !bus.IsTaskChannel(c) {
+			_ = b.Unsubscribe(reg.Sender, c)
+			reg.MemoryChannels = append(reg.MemoryChannels, c)
+			continue
 		}
 		if err := b.Subscribe(reg.Sender, c, "now"); err != nil {
 			if reg.SubscribeFailed == nil {
@@ -288,7 +298,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent channels (.local/agentbus.json; default general for chat and memory for memories) and reports them in subscribed. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels and task lists (.local/agentbus.json; default general and tasks) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {

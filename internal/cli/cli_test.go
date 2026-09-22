@@ -127,7 +127,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Call receive right after registering",
 		"- Post when you start, finish, or get blocked",
 		"Use general only when you have no\n  project channel",
-		"- Search all your subscribed memory channels",
+		"- Search the memory channels register returned",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
 		"- For work shared between agents, use a task list",
 		"- Register returns the other live agents in \"others\"; call discover only to",

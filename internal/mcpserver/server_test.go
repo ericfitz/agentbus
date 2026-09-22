@@ -405,7 +405,7 @@ func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
 		t.Fatal(reg)
 	}
 	if _, ok := reg["subscribe_failed"]; ok {
@@ -426,7 +426,7 @@ func TestRegisterSubscribesDefaultsWhenChannelsKeyAbsent(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam"}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
 		t.Fatal(reg)
 	}
 }
@@ -437,7 +437,7 @@ func TestRegisterMalformedRepoFileReportsFailureUnderPath(t *testing.T) {
 	writeRepoFile(t, dir, `{not json`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" || got[1] != "memory" || got[2] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
 		t.Fatal(reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)
@@ -467,8 +467,11 @@ func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam","channels":["memory","reviews"]}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "memory" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 0 {
 		t.Fatal(reg)
+	}
+	if got := stringsOf(reg["memory_channels"]); len(got) != 1 || got[0] != "memory" {
+		t.Fatal("memory channels are reported, not subscribed:", reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)
 	if msg, _ := failed["reviews"].(string); !strings.Contains(msg, "does not exist") {
@@ -477,7 +480,7 @@ func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 	// Once the channel exists, the next register picks it up; general stays out.
 	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "reviews", "kind": "ordinary"})
 	reg, _ = call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[1] != "reviews" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "reviews" {
 		t.Fatal(reg)
 	}
 	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
@@ -485,6 +488,30 @@ func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
 	if msgs, _ := got["messages"].([]any); len(msgs) != 0 {
 		t.Fatal("Sam must not be subscribed to general:", got)
+	}
+}
+
+// ADR 0008: register never pushes memories. A memory subscription left by
+// an older register is dropped on the next one, and memory posts are not
+// received; task lists, though memory-kind, stay subscribed.
+func TestRegisterDropsMemorySubscription(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "memory"})
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["memory_channels"]); len(got) != 1 || got[0] != "memory" {
+		t.Fatal(reg)
+	}
+	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "memory", "content": "a fact"})
+	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
+	if msgs, _ := got["messages"].([]any); len(msgs) != 0 {
+		t.Fatal("memories must not be pushed:", got)
+	}
+	if hits, _ := call(t, cs, "search", map[string]any{"as": "Sam", "query": "fact"}); len(hits["hits"].([]any)) != 1 {
+		t.Fatal("memory must still be searchable:", hits)
 	}
 }
 
@@ -505,12 +532,12 @@ func TestRegisterPersistentAppliesToSubagentsAndNoResume(t *testing.T) {
 	cs := testSessionIn(t, dir)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
 	sub, _ := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam"})
-	if got := stringsOf(sub["subscribed"]); len(got) != 3 {
+	if got := stringsOf(sub["subscribed"]); len(got) != 2 {
 		t.Fatal(sub)
 	}
 	call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "channel": "general"})
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam", "resume": false})
-	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 }
@@ -620,7 +647,7 @@ func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general/Sam","memory/Sam","tasks/Sam","reviews"]}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 3 || got[0] != "general/Sam" || got[1] != "memory/Sam" || got[2] != "tasks/Sam" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general/Sam" || got[1] != "tasks/Sam" {
 		t.Fatal(reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)

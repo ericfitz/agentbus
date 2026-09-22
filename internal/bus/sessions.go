@@ -18,6 +18,10 @@ type Registration struct {
 	// bus itself never sets them.
 	Subscribed      []string          `json:"subscribed"`
 	SubscribeFailed map[string]string `json:"subscribe_failed,omitempty"`
+	// MemoryChannels lists the persistent memory channels (task lists
+	// excepted), which register does not subscribe: memories are searched,
+	// not pushed (ADR 0008).
+	MemoryChannels []string `json:"memory_channels"`
 	// Others lists the other live identities (what discover returns, minus
 	// this one), so a session need not call discover to learn it is not alone.
 	// Omitted when discovery is disabled.

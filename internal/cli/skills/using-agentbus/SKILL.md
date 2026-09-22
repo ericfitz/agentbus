@@ -28,8 +28,10 @@ Each repository should also have its own three.
 `<repo>` is the repository identity from `.local/agentbus.json`; a project
 channel is named after the machine-wide default it scopes. `agentbus
 init` creates the three project channels and persists them, so `register`
-reports all six in `subscribed`. If it reports only `general`, `memory`, and
-`tasks`, run `agentbus init` from the repository root.
+reports the chat channels and task lists in `subscribed` and the memory
+channels in `memory_channels`. Memory channels are never pushed to you: you
+`search` them. If `register` reports only `general`, `memory`, and `tasks`,
+run `agentbus init` from the repository root.
 
 Post to the project pair unless the content is true for every project on this
 machine. A Go toolchain bug goes in `memory`. This repo's test fixture rule
@@ -92,8 +94,9 @@ must survive your session; use chat for everything else.
 2. `receive` immediately. Ack each batch's token on the next `receive`.
 3. `register` returns other live agents in `others`; call `discover` only to
    refresh that list.
-4. `search` the project memory channel before unfamiliar work, and whenever
-   something you believe should work does not.
+4. `search` the channels in `memory_channels` before unfamiliar work, and
+   whenever something you believe should work does not. Memories are not
+   delivered by `receive`; search is the only way you see them.
 5. `receive` again after each task and before asking the user a question.
 
 ## Waiting for messages

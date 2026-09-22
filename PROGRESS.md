@@ -474,3 +474,16 @@ Pushed to `main`:
 - **v1.5.2 released** (tag v1.5.2): build, sign, notarize, GitHub release,
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
   upgrading: `agentbus init --global`, restart harness sessions.
+
+## 2026-09-21: memory channels are search-only, v1.6.0
+
+Pushed to `main`:
+
+- **Feature** (`internal/mcpserver/server.go`, ADR 0008): `register` no
+  longer subscribes `memory`/`memory/<repo>`; they are returned in
+  `memory_channels`, and a stale memory subscription is dropped. Task lists
+  and the TUI unchanged. Hook, init prompt, skill, README updated. Human
+  decision 2026-09-21.
+- **v1.6.0 released** (tag v1.6.0): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
+  upgrading: `agentbus init --global`, restart harness sessions.

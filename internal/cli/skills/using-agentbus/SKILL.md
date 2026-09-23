@@ -145,7 +145,9 @@ through `receive` with `matched_tags`, from now on; `agentbus wait` wakes
 on them. Tag subscriptions never cover inboxes, memory channels, or task
 lists. `persistent: true` records the set in `.local/agentbus.json`
 (`tag_subscriptions: [["release"], ["agentbus","bug"]]`), which `register`
-applies each session; `unsubscribe` with the same `tags` drops it.
+applies each session; `unsubscribe` with the same `tags` drops it. `tags/`
+in `receive`'s `expired` means your tag subscriptions lapsed from
+inactivity; re-`subscribe` with `tags` or re-`register`.
 
 ## Session protocol
 

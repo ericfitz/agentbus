@@ -292,6 +292,9 @@ before the TUI starts.
 On the selected message row, dim text (timestamp, thread summary) switches
 to the `text` color so it stays readable on `selection`.
 
+Tag chip text is always bright white (ANSI 15), so pick a dark background
+for `tag`; a light `tag` color makes the chip text hard to read.
+
 The health overlay (`h`) shows the log file path, the theme in use with
 each resolved value, and the loaded config. `o` opens the config file in
 `$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with

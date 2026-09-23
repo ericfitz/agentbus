@@ -53,7 +53,9 @@ tools:
   remembers it in `.local/agentbus.json` for later sessions; `tags: [...]`
   instead of `channel` follows an AND set of tags across every chat channel
   you are not already subscribed to (matches arrive through `receive` with
-  `matched_tags`); `persistent` stores it too.
+  `matched_tags`); `persistent` stores it too. `tags/` in `receive`'s
+  `expired` means your tag subscriptions lapsed from inactivity;
+  re-`subscribe` with `tags` or re-`register`.
 - `send` — post a message, or, on a memory channel, create a memory; `tags`
   (up to 10 short lowercase labels) let others follow it across channels.
 - `receive` — pull new messages from your subscribed channels; pass `ack`

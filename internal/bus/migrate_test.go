@@ -146,3 +146,34 @@ func TestMigrateV2AddsMessageTags(t *testing.T) {
 		t.Fatalf("message_tags missing: %d %v", n, err)
 	}
 }
+
+// TestMigrateV3AddsTagSubscriptions: a schema version 3 file opens, gains
+// tag_subscriptions through the shared DDL, and is stamped 4.
+func TestMigrateV3AddsTagSubscriptions(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("PRAGMA user_version = 3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DROP TABLE tag_subscriptions"); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Close()
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v3 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv, n int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv < 4 {
+		t.Fatalf("user_version = %d, %v", uv, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='tag_subscriptions'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("tag_subscriptions missing: %d %v", n, err)
+	}
+}

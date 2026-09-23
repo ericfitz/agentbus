@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `
 CREATE TABLE IF NOT EXISTS channels (
@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS message_tags (
   PRIMARY KEY (seq, tag)
 );
 CREATE INDEX IF NOT EXISTS message_tags_tag ON message_tags(tag);
+CREATE TABLE IF NOT EXISTS tag_subscriptions (
+  sender TEXT NOT NULL,
+  tags_key TEXT NOT NULL,
+  created_seq INTEGER NOT NULL,
+  PRIMARY KEY (sender, tags_key)
+);
 CREATE TABLE IF NOT EXISTS receipts (
   sender TEXT NOT NULL,
   key TEXT NOT NULL,

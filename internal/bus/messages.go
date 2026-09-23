@@ -44,6 +44,9 @@ type Message struct {
 	// Tags is the message's lowercase tag set, sorted; empty until tags
 	// are stored (#5).
 	Tags []string `json:"tags,omitempty"`
+	// MatchedTags is set on a message delivered through a tag subscription:
+	// the tags of the sets it satisfied. Absent on channel deliveries.
+	MatchedTags []string `json:"matched_tags,omitempty"`
 }
 
 // messageCols lists the message columns qualified by alias, plus the

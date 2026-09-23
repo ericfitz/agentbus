@@ -18,6 +18,7 @@ import (
 var migrations = map[int]func(tx *sql.Tx) error{
 	1: dropMessagesBytes,
 	2: addTables, // message_tags (ADR 0009)
+	3: addTables, // tag_subscriptions (ADR 0009)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL

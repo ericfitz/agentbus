@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -152,6 +153,7 @@ type subRow struct {
 	cursor       int64
 	pendingToken string
 	pendingEnd   int64
+	tags         bool // the tags/ pseudo row (tagSource)
 }
 
 // A batch token carries the include_own flag it was created with (":o1"/":o0"
@@ -265,6 +267,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			_ = rows.Close()
 			return res, internal(err)
 		}
+		s.tags = s.channel == tagSource
 		// A row left over from when this identity was the TUI observer (or
 		// from before it lost that role) is not something as can read now:
 		// treat it as not subscribed rather than as expired, and leave it
@@ -298,6 +301,14 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	for _, ch := range res.Expired {
 		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND channel=?", as, ch); err != nil {
 			return res, internal(err)
+		}
+		// The tag sets ride the tags/ row's cursor; without it they would
+		// never deliver again, so they go with it (the agent sees tags/ in
+		// expired and resubscribes).
+		if ch == tagSource {
+			if _, err := tx.Exec("DELETE FROM tag_subscriptions WHERE sender=?", as); err != nil {
+				return res, internal(err)
+			}
 		}
 	}
 	for _, s := range subs {
@@ -334,6 +345,10 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	// meaningless: delete it here rather than fail every receive forever.
 	kept := subs[:0]
 	for _, s := range subs {
+		if s.tags {
+			kept = append(kept, s)
+			continue
+		}
 		var n int
 		if err := tx.QueryRow("SELECT count(*) FROM channels WHERE name=?", s.channel).Scan(&n); err != nil {
 			return res, internal(err)
@@ -351,6 +366,9 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	// IN-list lookup; fine while a sender's subscription count is small
 	// (typical: a handful of channels), batch it if that ever changes.
 	for i := range subs {
+		if subs[i].tags {
+			continue
+		}
 		var evicted int64
 		if err := tx.QueryRow("SELECT evicted_before_seq FROM channels WHERE name=?", subs[i].channel).Scan(&evicted); err != nil {
 			return res, internal(err)
@@ -382,6 +400,40 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 	}
 
+	// The tag source's sets. A tags/ row with no sets left (a partial
+	// cleanup) is inert this round.
+	var sets []tagSet
+	if slices.ContainsFunc(subs, func(s subRow) bool { return s.tags }) {
+		if sets, err = b.tagSets(tx, as); err != nil {
+			return res, err
+		}
+		if len(sets) == 0 {
+			subs = slices.DeleteFunc(subs, func(s subRow) bool { return s.tags })
+		}
+	}
+	// srcOf attributes a delivered message to its source row: its channel
+	// when directly subscribed, else the tags/ row. Pending/ack bookkeeping
+	// and matched_tags both key on it.
+	direct := map[string]bool{}
+	for _, s := range subs {
+		if !s.tags {
+			direct[s.channel] = true
+		}
+	}
+	srcOf := func(m Message) string {
+		if direct[m.Channel] {
+			return m.Channel
+		}
+		return tagSource
+	}
+	attribute := func(msgs []Message) {
+		for i := range msgs {
+			if srcOf(msgs[i]) == tagSource {
+				msgs[i].MatchedTags = matchedTags(sets, msgs[i])
+			}
+		}
+	}
+
 	// The notice must be known before the reserve computation below (C2), so
 	// it's read here rather than after message selection as before.
 	if err := tx.QueryRow("SELECT message FROM notices WHERE kind='capacity'").Scan(&res.Notice); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -404,39 +456,39 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 		return " AND sender<>?"
 	}
-	// buildBounded reproduces "the same batch": the seq range fixed at
-	// creation, with no count re-filtering from the current call (in.Count
-	// can differ between the original delivery and this redelivery), and the
-	// own filter the caller passes here (its meaning depends on which of
-	// creation's or the current call's include_own the caller decodes).
-	buildBounded := func(set []subRow, own string) (string, []any) {
+	// srcCond is one source's clause: a channel row selects its channel
+	// past its cursor; the tag row selects tag matches (tagCond) past the
+	// shared cursor. bounded adds the pending batch's end.
+	srcCond := func(s subRow, bounded bool) (string, []any) {
+		q, a := "(channel=? AND seq>?", []any{s.channel, s.cursor}
+		if s.tags {
+			tq, ta := tagCond(as, sets)
+			q, a = "(messages.seq>? AND "+tq, append([]any{s.cursor}, ta...)
+		}
+		if bounded {
+			return q + " AND seq<=?)", append(a, s.pendingEnd)
+		}
+		return q + ")", a
+	}
+	build := func(set []subRow, bounded bool, own string, limit bool) (string, []any) {
 		var conds []string
 		var a []any
 		for _, s := range set {
-			conds = append(conds, "(channel=? AND seq>? AND seq<=?)")
-			a = append(a, s.channel, s.cursor, s.pendingEnd)
+			c, ca := srcCond(s, bounded)
+			conds = append(conds, c)
+			a = append(a, ca...)
 		}
 		q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq"
 		if own != "" {
 			a = append(a, as)
 		}
+		if limit {
+			q += " LIMIT ?"
+			a = append(a, in.Count)
+		}
 		return q, a
 	}
 	ownNew := ownClause(in.IncludeOwn)
-	buildNew := func(set []subRow) (string, []any) {
-		var conds []string
-		var a []any
-		for _, s := range set {
-			conds = append(conds, "(channel=? AND seq>?)")
-			a = append(a, s.channel, s.cursor)
-		}
-		q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + ownNew + " ORDER BY seq LIMIT ?"
-		if ownNew != "" {
-			a = append(a, as)
-		}
-		a = append(a, in.Count)
-		return q, a
-	}
 
 	// reserve returns the exact serialized size of the result this branch
 	// will return, with Messages cleared, so message selection can be
@@ -475,12 +527,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		// from the shared token (all channels in one pending batch always
 		// share one token), not whatever this call's in.IncludeOwn happens to
 		// be: the caller cannot change what a batch already means.
-		q, a := buildBounded(pending, ownClause(tokenIncludesOwn(batch)))
+		q, a := build(pending, true, ownClause(tokenIncludesOwn(batch)), false)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
 		}
 		res.Messages = trimToBytes(msgs, envelopeBytes, limit)
+		attribute(res.Messages)
 		res.Batch = batch
 		res.Redelivered = true
 		res.Instruction = instruction
@@ -492,7 +545,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		// tombstoned (superseded) since the original delivery.
 		shown := map[string]int64{}
 		for _, m := range res.Messages {
-			shown[m.Channel] = m.Seq
+			shown[srcOf(m)] = m.Seq
 		}
 		for _, s := range pending {
 			newEnd := shown[s.channel]
@@ -516,12 +569,13 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			// C2: as above, return metadata only rather than fail.
 			break
 		}
-		q, a := buildNew(inScope)
+		q, a := build(inScope, false, ownNew, true)
 		msgs, err := queryMessages(tx, q, a)
 		if err != nil {
 			return res, err
 		}
 		res.Messages = trimToBytes(msgs, envelopeBytes, limit)
+		attribute(res.Messages)
 		if len(res.Messages) > 0 {
 			tok, err := makeBatchToken(in.IncludeOwn)
 			if err != nil {
@@ -530,7 +584,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			res.Batch = tok
 			ends := map[string]int64{}
 			for _, m := range res.Messages {
-				ends[m.Channel] = m.Seq
+				ends[srcOf(m)] = m.Seq
 			}
 			for ch, end := range ends {
 				if _, err := tx.Exec("UPDATE subscriptions SET pending_token=?, pending_end_seq=? WHERE sender=? AND channel=?", res.Batch, end, as, ch); err != nil {

@@ -3,6 +3,7 @@ package bus
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestNormalizeTags(t *testing.T) {
@@ -126,5 +127,187 @@ func TestSendTagsAreIdempotentAndCascadeOnDelete(t *testing.T) {
 	var n int
 	if err := b.db.QueryRow("SELECT count(*) FROM message_tags WHERE seq=?", a.Seq).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("message_tags must cascade: %d %v", n, err)
+	}
+}
+
+// tagSetup: Sam posts, Kim follows tags only (no channel subscription
+// besides the inbox register mints).
+func tagSetup(t *testing.T) (*Bus, string, string) {
+	t.Helper()
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	kim := reg(t, b, "Kim")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	return b, sam, kim
+}
+
+func sendTagged(t *testing.T, b *Bus, as, ch, content string, tags ...string) SendResult {
+	t.Helper()
+	r, err := b.Send(as, SendInput{Channel: ch, Content: content, Tags: tags})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestTagSubscriptionAndMatching(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	wantCode(t, b.SubscribeTags(kim, nil), "validation")
+	wantCode(t, b.SubscribeTags(kim, []string{"bad tag"}), "validation")
+	sendTagged(t, b, sam, "dev", "before", "release")
+	if err := b.SubscribeTags(kim, []string{"Release"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"bug", "agentbus"}); err != nil {
+		t.Fatal(err)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 2 || sets[0][0] != "agentbus" || sets[1][0] != "release" {
+		t.Fatalf("sets: %v", sets)
+	}
+	sendTagged(t, b, sam, "dev", "one tag only", "bug")
+	sendTagged(t, b, sam, "dev", "and set", "agentbus", "bug", "extra")
+	sendTagged(t, b, sam, "general", "both sets", "release", "bug", "agentbus")
+	sendTagged(t, b, sam, "dev", "untagged")
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || len(r.Messages) != 2 {
+		t.Fatalf("AND sets, created_seq, once per message: %+v %v", r.Messages, err)
+	}
+	if !slices.Equal(r.Messages[0].MatchedTags, []string{"agentbus", "bug"}) || !slices.Equal(r.Messages[1].MatchedTags, []string{"agentbus", "bug", "release"}) {
+		t.Fatalf("matched_tags: %+v", r.Messages)
+	}
+	// Ack advances the shared tag cursor; an unacked batch redelivers.
+	r2, _ := b.Receive(kim, ReceiveInput{})
+	if !r2.Redelivered || len(r2.Messages) != 2 {
+		t.Fatalf("redeliver: %+v", r2)
+	}
+	sendTagged(t, b, sam, "dev", "later", "release")
+	r3, _ := b.Receive(kim, ReceiveInput{Ack: r.Batch})
+	if len(r3.Messages) != 1 || r3.Messages[0].Content != "later" || r3.Redelivered {
+		t.Fatalf("ack advances: %+v", r3)
+	}
+	if err := b.UnsubscribeTags(kim, []string{"release"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "gone", "release")
+	if r4, _ := b.Receive(kim, ReceiveInput{Ack: r3.Batch}); len(r4.Messages) != 0 {
+		t.Fatalf("unsubscribed set no longer matches: %+v", r4.Messages)
+	}
+	_ = b.UnsubscribeTags(kim, []string{"bug", "agentbus"})
+	var n int
+	_ = b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=? AND channel=?", kim, tagSource).Scan(&n)
+	if n != 0 {
+		t.Fatal("last unsubscribe drops the tags/ row")
+	}
+}
+
+func TestTagSourceExcludesDirectDMTaskAndMemory(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if _, err := b.CreateChannel(sam, "memory/x", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe(kim, "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "direct", "t")
+	sendTagged(t, b, sam, "dm/Kim", "dm", "t")
+	sendTagged(t, b, sam, "dm/Sam", "other dm", "t")
+	sendTagged(t, b, sam, "memory", "mem", "t")
+	sendTagged(t, b, sam, "memory/x", "mem2", "t")
+	sendTagged(t, b, sam, "general", "via tag", "t")
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range r.Messages {
+		got = append(got, m.Content)
+		if m.Channel == "dev" && m.MatchedTags != nil {
+			t.Fatalf("a directly subscribed channel is not a tag delivery: %+v", m)
+		}
+	}
+	if !slices.Equal(got, []string{"direct", "dm", "via tag"}) {
+		t.Fatalf("delivered %v", got)
+	}
+}
+
+func TestTagSubscriptionsResumeFalseAndExpiry(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "old", "t")
+	if _, err := b.Register("Kim", "", "r", false); err != nil {
+		t.Fatal(err)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 0 {
+		t.Fatalf("resume=false drops tag sets: %v", sets)
+	}
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "new", "t")
+	if r, _ := b.Receive(kim, ReceiveInput{}); len(r.Messages) != 1 || r.Messages[0].Content != "new" {
+		t.Fatalf("future-only after resume=false: %+v", r.Messages)
+	}
+	// Idle expiry drops the row and its sets and reports tags/.
+	idle := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
+	if _, err := b.db.Exec("UPDATE subscriptions SET last_activity=last_activity-? WHERE sender=? AND channel=?", idle, kim, tagSource); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := b.Receive(kim, ReceiveInput{})
+	if !slices.Contains(r.Expired, tagSource) {
+		t.Fatalf("expired must name tags/: %+v", r)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 0 {
+		t.Fatalf("expiry drops the sets: %v", sets)
+	}
+}
+
+func TestTagRowSurvivesSweeps(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.reapEmptyChannels(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Receive(kim, ReceiveInput{}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender=? AND channel=?", kim, tagSource).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("tags/ row swept: %d %v", n, err)
+	}
+	// general, not dev: dev is empty with no live subscriber, so the reap
+	// above legitimately dropped it.
+	sendTagged(t, b, sam, "general", "still", "t")
+	if r, _ := b.Receive(kim, ReceiveInput{}); len(r.Messages) != 1 {
+		t.Fatalf("still delivering: %+v", r.Messages)
+	}
+	reg, err := b.Register("Kim", "", "r", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reg.Pending {
+		if p.Channel == tagSource {
+			t.Fatalf("pending must not list the pseudo row: %+v", reg.Pending)
+		}
+	}
+}
+
+func TestWaitWakesOnTagMatch(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "no mention", "t")
+	msgs, err := b.Wait(kim, nil, false, nil, time.Second)
+	if err != nil || len(msgs) != 1 || !slices.Equal(msgs[0].MatchedTags, []string{"t"}) {
+		t.Fatalf("wait peeks the tag source with matched_tags: %+v %v", msgs, err)
 	}
 }

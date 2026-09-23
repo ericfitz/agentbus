@@ -26,6 +26,8 @@ type Registration struct {
 	// this one), so a session need not call discover to learn it is not alone.
 	// Omitted when discovery is disabled.
 	Others []Session `json:"others,omitempty"`
+	// TagSubscriptions reports the persistent tag sets register applied (.local/agentbus.json).
+	TagSubscriptions [][]string `json:"tag_subscriptions,omitempty"`
 }
 
 type PendingChannel struct {
@@ -160,6 +162,9 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=?", display); err != nil {
 			return Registration{}, internal(err)
 		}
+		if _, err := tx.Exec("DELETE FROM tag_subscriptions WHERE sender=?", display); err != nil {
+			return Registration{}, internal(err)
+		}
 	} else {
 		// The tick no longer reaps idle subscriptions itself (that would erase
 		// the evidence Receive needs to report them as expired), so a resuming
@@ -169,6 +174,11 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		if _, err := tx.Exec("DELETE FROM subscriptions WHERE sender=? AND last_activity < ? AND channel<>?", display, now-idle, DMChannel(display)); err != nil {
 			return Registration{}, internal(err)
 		}
+	}
+	// Sets without their tags/ row (idle-swept above) are dead; drop them so a
+	// persistent re-apply starts them fresh.
+	if _, err := tx.Exec("DELETE FROM tag_subscriptions WHERE sender=? AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE sender=? AND channel=?)", display, display, tagSource); err != nil {
+		return Registration{}, internal(err)
 	}
 	// Count subscriptions before ensureInbox mints this call's own inbox
 	// subscription, so a brand-new identity's first register still reports
@@ -205,8 +215,9 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 			return Registration{}, internal(err)
 		}
 		// A subscription row this identity cannot currently read (e.g. left
-		// over from a past observer session) must not surface as pending.
-		if !b.dmReadable(display, p.Channel) {
+		// over from a past observer session) must not surface as pending. The
+		// tags/ pseudo row is not a channel either.
+		if !b.dmReadable(display, p.Channel) || p.Channel == tagSource {
 			continue
 		}
 		reg.Pending = append(reg.Pending, p)

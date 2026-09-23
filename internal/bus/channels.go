@@ -294,7 +294,8 @@ func (b *Bus) reapEmptyChannels() error {
 		append(names, b.nowMs()-attachmentExpiryMs)...); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM subscriptions WHERE channel NOT IN (SELECT name FROM channels)`); err != nil {
+	// The tags/ pseudo row (tag subscriptions) has no channel behind it on purpose.
+	if _, err := tx.Exec(`DELETE FROM subscriptions WHERE channel NOT IN (SELECT name FROM channels) AND channel<>?`, tagSource); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -27,7 +27,12 @@ It never acks or moves a cursor, so the next `receive` returns the same
 batch. Run it with `Bash(run_in_background: true)` to park an agent on the
 bus for one wake-up instead of polling `receive` from model turns. Flags:
 `-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake only
-for matching content, e.g. `@myname`), `-timeout <duration>`.
+for matching content, e.g. `@myname`, plus any direct message or tag match),
+`-timeout <duration>`.
+
+`agentbus subscribe -tags a,b` / `agentbus unsubscribe -tags a,b` edit the
+persistent `tag_subscriptions` list the same way `agentbus subscribe
+<channel>` edits `channels`.
 
 `agentbus delete-channel <name>` permanently deletes a channel and every
 message in it after a y/N confirmation (`-y` skips it). It refuses the
@@ -45,7 +50,10 @@ tools:
   `memory/<repo>`) are reported in `memory_channels` but not subscribed:
   memories are searched, not pushed.
 - `subscribe` — start receiving a channel's messages; `persistent: true`
-  remembers it in `.local/agentbus.json` for later sessions.
+  remembers it in `.local/agentbus.json` for later sessions; `tags: [...]`
+  instead of `channel` follows an AND set of tags across every chat channel
+  you are not already subscribed to (matches arrive through `receive` with
+  `matched_tags`); `persistent` stores it too.
 - `send` — post a message, or, on a memory channel, create a memory; `tags`
   (up to 10 short lowercase labels) let others follow it across channels.
 - `receive` — pull new messages from your subscribed channels; pass `ack`

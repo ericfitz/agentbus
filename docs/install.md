@@ -238,7 +238,9 @@ separate process has no other way to learn it.
   oldest retained message, so retained direct messages show as unread once.
   A `tasks/` channel shows its task tree (read-only): subtasks indented,
   ❎ pending, ⏱️ in progress (with the owner's name beside it), ✅ completed
-  (dimmed); a blocked task keeps ❎ with `blocked by #n`.
+  (dimmed); a blocked task keeps ❎ with `blocked by #n`. `t` follows a tag
+  set (a `tags` section lists yours; select one to see every chat message
+  carrying all of its tags; `s` on it unfollows).
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose

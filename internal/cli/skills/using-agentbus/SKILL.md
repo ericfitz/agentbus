@@ -98,6 +98,16 @@ messages carrying any of them; a memory's tags belong to the revision, so
 omit `tags` on `edit_memory` to keep them and pass `[]` to clear them.
 Task lists do not take tags.
 
+To follow a topic without joining every channel, `subscribe` with `tags`
+instead of `channel`: `["release"]` delivers every chat message tagged
+release; `["agentbus", "bug"]` only messages carrying both (AND). Subscribe
+twice for OR. Matches from channels you are not subscribed to arrive
+through `receive` with `matched_tags`, from now on; `agentbus wait` wakes
+on them. Tag subscriptions never cover inboxes, memory channels, or task
+lists. `persistent: true` records the set in `.local/agentbus.json`
+(`tag_subscriptions: [["release"], ["agentbus","bug"]]`), which `register`
+applies each session; `unsubscribe` with the same `tags` drops it.
+
 ## Session protocol
 
 1. `register` with the repo identity. Pass the returned `as` on every call.

@@ -309,3 +309,61 @@ func TestTaskChannelNeverShowsMessageHeaders(t *testing.T) {
 		}
 	}
 }
+
+// Fix round 1 (#9): the dim "→ owner" arrow is a pending-only suffix. An
+// owner that survives onto a completed task (assigned, then finished without
+// ever going through in_progress) must show no arrow at all -- the row is
+// just dimmed whole, like any other completed row.
+func TestCompletedTaskWithOwnerShowsNoArrow(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	done, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, completed := f.sam, "completed"
+	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: done.ID, Owner: &owner, Status: &completed}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	line := ansi.Strip(f.m.renderStream())
+	if strings.Contains(line, "→") {
+		t.Fatalf("completed task with an owner must show no arrow: %q", line)
+	}
+}
+
+// Fix round 1 (#9): an in-progress task owned by the TUI's own identity uses
+// the user icon and color, matching how the session rail distinguishes the
+// TUI's own row from everyone else's.
+func TestTaskInProgressOwnedBySelfUsesUserIcon(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.b.TaskClaim(f.c.as, mine.ID, time.Now().Add(time.Hour).UnixMilli(), ""); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	raw := f.m.renderStream()
+	userOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.User).Render("\x00"), "\x00")
+	agentOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Agent).Render("\x00"), "\x00")
+	if !strings.Contains(raw, iconUser+userOpen+f.c.as) {
+		t.Fatalf("self-owned in-progress row must use the user icon and color: %q", raw)
+	}
+	if strings.Contains(raw, agentOpen+f.c.as) {
+		t.Fatalf("self-owned in-progress row must not use the agent color: %q", raw)
+	}
+}

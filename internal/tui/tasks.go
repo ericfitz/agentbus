@@ -53,7 +53,7 @@ func (m Model) renderTasks(ch string) string {
 				icon, style = iconUser, th.Style(th.User)
 			}
 			line += "  " + icon + style.Render(t.Owner)
-		case t.Owner != "":
+		case t.Status == "pending" && t.Owner != "":
 			suffix += " → " + t.Owner
 		}
 		if len(t.OpenBlockers) > 0 {

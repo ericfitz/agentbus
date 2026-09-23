@@ -66,7 +66,7 @@ const (
 	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
 	iconUser  = "\U0001F9D1\uFE0F "           // adult
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
-	iconTasks = "\x1b[2X\u2611\uFE0F\x1b[1C " // ballot box with check; Neutral width, same treatment as the gear
+	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
 )
 
 func (m Model) View() string {

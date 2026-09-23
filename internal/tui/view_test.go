@@ -202,6 +202,18 @@ func TestIconAgentWidth(t *testing.T) {
 	}
 }
 
+// The task-list icon is a Wide emoji like chat and memory, so it needs no
+// CSI erase/cursor trick: rail, compose, search, and the task pane title all
+// line up on the same column.
+func TestIconTasksIsWideEmojiWithoutEscapes(t *testing.T) {
+	if w := lipgloss.Width(iconTasks); w != lipgloss.Width(iconChat) {
+		t.Fatalf("iconTasks width %d, want %d", w, lipgloss.Width(iconChat))
+	}
+	if strings.Contains(iconTasks, "\x1b[") {
+		t.Fatalf("iconTasks must not need the CSI erase trick: %q", iconTasks)
+	}
+}
+
 // The channel name carries its kind's color (agent for chat, memory for
 // memory) in the rail and the stream header, as it does in the compose row.
 func TestChannelNameColoredInRailAndHeader(t *testing.T) {

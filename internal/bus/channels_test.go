@@ -85,6 +85,6 @@ func TestPrefixedNamesImplyKindAndRenameCarriesHistory(t *testing.T) {
 		t.Fatalf("old name must be gone: %d %v", n, err)
 	}
 	wantCode(t, b.RenameChannel("widgets", "general/widgets"), "not_found")
-	wantCode(t, b.RenameChannel("memory/w", "general/w"), "validation") // kind mismatch
+	wantCode(t, b.RenameChannel("memory/w", "general/w"), "validation")       // kind mismatch
 	wantCode(t, b.RenameChannel("memory/w", "general/widgets"), "validation") // still a kind mismatch, checked before the exists check
 }

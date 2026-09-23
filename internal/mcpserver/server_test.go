@@ -665,3 +665,22 @@ func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 		t.Fatal(kinds)
 	}
 }
+
+func TestSendTagsRoundTripOverMCP(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "tagged", "tags": []string{"Release", "bug"}})
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "plain"})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "history", Arguments: map[string]any{"as": "Sam", "channel": "general", "tags": []string{"bug"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"tags":["bug","release"]`) || strings.Contains(text, "plain") {
+		t.Fatalf("history tags filter and tags field: %s", text)
+	}
+	_, bad := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "x", "tags": []string{"no spaces"}})
+	if !bad.IsError {
+		t.Fatal("invalid tag must be rejected")
+	}
+}

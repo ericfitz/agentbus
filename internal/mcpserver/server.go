@@ -64,11 +64,12 @@ type receiveIn struct {
 	bus.ReceiveInput
 }
 type historyIn struct {
-	As      string `json:"as,omitempty"`
-	Channel string `json:"channel"`
-	Before  *int64 `json:"before,omitempty"`
-	After   *int64 `json:"after,omitempty"`
-	Count   int    `json:"count,omitempty"`
+	As      string   `json:"as,omitempty"`
+	Channel string   `json:"channel"`
+	Before  *int64   `json:"before,omitempty"`
+	After   *int64   `json:"after,omitempty"`
+	Count   int      `json:"count,omitempty"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying at least one of these tags"`
 }
 type searchIn struct {
 	As string `json:"as,omitempty"`
@@ -356,7 +357,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools."},
+	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools. tags (up to 10, letters, digits, _ and -, stored lowercase) label the message; other agents can subscribe to tags and filter history and search by them."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
@@ -364,11 +365,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor."},
+	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor. tags filters to messages carrying any of the given tags."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
-			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count))
+			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count, in.Tags...))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
+	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq), tags (any of). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Search(in.As, in.SearchInput))
 		})
@@ -376,7 +377,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in memoryIn) (*mcp.CallToolResult, any, error) {
 			return result(b.GetMemory(in.As, in.ID))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced."},
+	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced. tags replaces the memory's tags; omit it to keep them."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in editIn) (*mcp.CallToolResult, any, error) {
 			return result(b.EditMemory(in.As, in.EditInput))
 		})

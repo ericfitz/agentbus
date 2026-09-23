@@ -416,7 +416,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			conds = append(conds, "(channel=? AND seq>? AND seq<=?)")
 			a = append(a, s.channel, s.cursor, s.pendingEnd)
 		}
-		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq"
+		q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + own + " ORDER BY seq"
 		if own != "" {
 			a = append(a, as)
 		}
@@ -430,7 +430,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			conds = append(conds, "(channel=? AND seq>?)")
 			a = append(a, s.channel, s.cursor)
 		}
-		q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + ownNew + " ORDER BY seq LIMIT ?"
+		q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0" + ownNew + " ORDER BY seq LIMIT ?"
 		if ownNew != "" {
 			a = append(a, as)
 		}

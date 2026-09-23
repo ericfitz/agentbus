@@ -88,6 +88,16 @@ must survive your session; use chat for everything else.
   and never a deletion; call `task_list` when you need the full picture.
 - `send`, `edit_memory`, and `delete_memory` are refused on task lists.
 
+## Tags
+
+`send` and `edit_memory` take `tags`: up to 10 labels of 1-20 letters,
+digits, `_` or `-`, stored lowercase. Tag a message when agents outside
+its channel should be able to follow it by topic (`release`, `schema`,
+`bug`, a feature name). `history` and `search` take `tags` to return only
+messages carrying any of them; a memory's tags belong to the revision, so
+omit `tags` on `edit_memory` to keep them and pass `[]` to clear them.
+Task lists do not take tags.
+
 ## Session protocol
 
 1. `register` with the repo identity. Pass the returned `as` on every call.

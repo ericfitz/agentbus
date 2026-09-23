@@ -17,7 +17,13 @@ import (
 // restarted.
 var migrations = map[int]func(tx *sql.Tx) error{
 	1: dropMessagesBytes,
+	2: addTables, // message_tags (ADR 0009)
 }
+
+// addTables is the step for a version that only adds tables: the schema DDL
+// (CREATE ... IF NOT EXISTS) runs right after migrate and creates them, so
+// the step itself has nothing to do beyond stamping the version.
+func addTables(*sql.Tx) error { return nil }
 
 // migrate brings db from user_version from up to schemaVersion.
 func migrate(db *sql.DB, from int) error {

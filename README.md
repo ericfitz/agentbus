@@ -46,11 +46,13 @@ tools:
   memories are searched, not pushed.
 - `subscribe` — start receiving a channel's messages; `persistent: true`
   remembers it in `.local/agentbus.json` for later sessions.
-- `send` — post a message, or, on a memory channel, create a memory.
+- `send` — post a message, or, on a memory channel, create a memory; `tags`
+  (up to 10 short lowercase labels) let others follow it across channels.
 - `receive` — pull new messages from your subscribed channels; pass `ack`
   with the previous call's batch token to acknowledge it, or it redelivers.
 - `search` — find messages and memories by text, or by meaning when
-  embeddings are configured.
+  embeddings are configured; `tags` narrows either to messages carrying any
+  of them (so does `history`).
 
 A task list adds six more: `task_create`, `task_claim`, `task_release`,
 `task_update`, `task_get`, and `task_list`. See below.

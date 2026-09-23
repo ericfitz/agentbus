@@ -9,15 +9,16 @@ import (
 )
 
 type SearchInput struct {
-	Query   string `json:"query"`
-	Mode    string `json:"mode,omitempty"`
-	Channel string `json:"channel,omitempty"`
-	Sender  string `json:"sender,omitempty"`
-	Since   *int64 `json:"since,omitempty"`
-	Until   *int64 `json:"until,omitempty"`
-	Thread  *int64 `json:"thread,omitempty"`
-	Count   int    `json:"count,omitempty"`
-	Cursor  string `json:"cursor,omitempty"`
+	Query   string   `json:"query"`
+	Mode    string   `json:"mode,omitempty"`
+	Channel string   `json:"channel,omitempty"`
+	Sender  string   `json:"sender,omitempty"`
+	Since   *int64   `json:"since,omitempty"`
+	Until   *int64   `json:"until,omitempty"`
+	Thread  *int64   `json:"thread,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Count   int      `json:"count,omitempty"`
+	Cursor  string   `json:"cursor,omitempty"`
 }
 
 type SearchHit struct {
@@ -44,16 +45,6 @@ const (
 	searchPageDefault = 100
 	searchPageMax     = 1000
 )
-
-// qualifiedColumns prefixes every message column with an alias, for joins
-// where messages_fts also has a column named content.
-func qualifiedColumns(alias string) string {
-	cols := strings.Split(messageColumns, ", ")
-	for i, c := range cols {
-		cols[i] = alias + "." + c
-	}
-	return strings.Join(cols, ", ")
-}
 
 // ftsQuery turns free text into an FTS5 query of quoted terms (implicit AND),
 // so user punctuation cannot produce a syntax error.
@@ -96,6 +87,10 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 		sb.WriteString(" AND (m.seq=? OR m.reply_to=?)")
 		args = append(args, *in.Thread, *in.Thread)
 	}
+	if f, a := tagsFilter("m", in.Tags); f != "" {
+		sb.WriteString(f)
+		args = append(args, a...)
+	}
 	return sb.String(), args
 }
 
@@ -109,7 +104,7 @@ func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, err
 	// ORDER BY rank is FTS5's own alias for bm25(messages_fts) with default
 	// weights; used here instead of repeating the bm25() call so the sort
 	// and the scored column read the same value by construction.
-	q := "SELECT " + qualifiedColumns("m") + ", bm25(messages_fts) FROM messages_fts JOIN messages m ON m.seq=messages_fts.rowid WHERE messages_fts MATCH ? AND m.tombstone=0" + filters + " ORDER BY rank LIMIT ?"
+	q := "SELECT " + messageCols("m") + ", bm25(messages_fts) FROM messages_fts JOIN messages m ON m.seq=messages_fts.rowid WHERE messages_fts MATCH ? AND m.tombstone=0" + filters + " ORDER BY rank LIMIT ?"
 	args := append([]any{fq}, fargs...)
 	args = append(args, limit)
 	rows, err := b.db.Query(q, args...)
@@ -120,9 +115,9 @@ func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, err
 	hits := []SearchHit{}
 	for rows.Next() {
 		var h SearchHit
-		var meta, refs *string
+		var meta, refs, tags *string
 		var rank float64
-		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Content, &h.ReplyTo, &meta, &refs, &h.MemoryID, &h.Revision, &rank); err != nil {
+		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Content, &h.ReplyTo, &meta, &refs, &h.MemoryID, &h.Revision, &tags, &rank); err != nil {
 			return nil, internal(err)
 		}
 		m, err := decodeJSONFields(h.Message, meta, refs)
@@ -130,6 +125,9 @@ func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, err
 			return nil, internal(err)
 		}
 		h.Message = m
+		if tags != nil {
+			h.Tags = strings.Fields(*tags)
+		}
 		h.Score = -rank
 		hits = append(hits, h)
 	}
@@ -164,6 +162,10 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 		}
 		offset = o
 	}
+	var err error
+	if in.Tags, err = NormalizeTags(in.Tags); err != nil {
+		return SearchResult{}, err
+	}
 	if in.Mode == "" {
 		in.Mode = "text"
 		if b.embedder != nil {
@@ -172,7 +174,6 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	}
 	res := SearchResult{}
 	var ranked []SearchHit
-	var err error
 	switch in.Mode {
 	case "text":
 		// ponytail: every page re-runs and re-decodes the full top-1000-candidate
@@ -273,7 +274,7 @@ func (b *Bus) semanticSearch(ctx context.Context, as string, in SearchInput) ([]
 	}
 	_ = vecRows.Close()
 
-	rows, err := b.db.Query("SELECT "+qualifiedColumns("m")+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
+	rows, err := b.db.Query("SELECT "+messageCols("m")+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
 	if err != nil {
 		return nil, internal(err)
 	}

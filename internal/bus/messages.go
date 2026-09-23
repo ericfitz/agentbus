@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type Ref struct {
@@ -18,6 +19,7 @@ type SendInput struct {
 	ReplyTo        *int64            `json:"reply_to,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	Refs           []Ref             `json:"refs,omitempty"`
+	Tags           []string          `json:"tags,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 }
 
@@ -44,7 +46,17 @@ type Message struct {
 	Tags []string `json:"tags,omitempty"`
 }
 
-const messageColumns = "seq, channel, sender, context, created_at, type, content, reply_to, metadata, refs, memory_id, revision"
+// messageCols lists the message columns qualified by alias, plus the
+// message's tags as one space-separated string. message_tags rows are keyed
+// (seq, tag), so the ordered subquery walks the primary key and the string
+// comes back sorted; scanMessages splits it on spaces.
+func messageCols(alias string) string {
+	cols := strings.Split("seq, channel, sender, context, created_at, type, content, reply_to, metadata, refs, memory_id, revision", ", ")
+	for i, c := range cols {
+		cols[i] = alias + "." + c
+	}
+	return strings.Join(cols, ", ") + ", (SELECT group_concat(tag, ' ') FROM (SELECT tag FROM message_tags WHERE seq=" + alias + ".seq ORDER BY tag))"
+}
 
 // decodeJSONFields unmarshals the metadata/refs JSON columns (NULL as nil)
 // into m, shared by scanMessages and search's dedicated row scan.
@@ -66,13 +78,16 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		var meta, refs *string
-		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision); err != nil {
+		var meta, refs, tags *string
+		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision, &tags); err != nil {
 			return nil, err
 		}
 		m, err := decodeJSONFields(m, meta, refs)
 		if err != nil {
 			return nil, err
+		}
+		if tags != nil {
+			m.Tags = strings.Fields(*tags)
 		}
 		out = append(out, m)
 	}
@@ -163,6 +178,7 @@ func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) i
 		ReplyTo:  in.ReplyTo,
 		Metadata: in.Metadata,
 		Refs:     in.Refs,
+		Tags:     in.Tags,
 	}
 	size := envelopeBytes(m)
 	// Seq and CreatedAt are always-present int fields; the zero value above
@@ -210,6 +226,9 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		if _, err := tx.Exec("UPDATE messages SET memory_id=seq, revision=1 WHERE seq=?", seq); err != nil {
 			return 0, err
 		}
+	}
+	if err := insertTags(tx, seq, in.Tags); err != nil {
+		return 0, err
 	}
 	return seq, nil
 }
@@ -277,6 +296,12 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	}
 	if IsTaskChannel(in.Channel) {
 		return SendResult{}, errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", in.Channel)
+	}
+	// Normalize before the receipt lookup so a keyed retry with the same
+	// tags in another case or order fingerprints identically.
+	var err error
+	if in.Tags, err = NormalizeTags(in.Tags); err != nil {
+		return SendResult{}, err
 	}
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
@@ -382,7 +407,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	return res, nil
 }
 
-func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Message, error) {
+func (b *Bus) History(as, channel string, before, after *int64, count int, tags ...string) ([]Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
@@ -399,8 +424,16 @@ func (b *Bus) History(as, channel string, before, after *int64, count int) ([]Me
 	if count > b.cfg.ReceiveMaxCount {
 		count = b.cfg.ReceiveMaxCount
 	}
-	q := "SELECT " + messageColumns + " FROM messages WHERE channel=? AND tombstone=0"
+	tags, err := NormalizeTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	q := "SELECT " + messageCols("messages") + " FROM messages WHERE channel=? AND tombstone=0"
 	args := []any{channel}
+	if f, a := tagsFilter("messages", tags); f != "" {
+		q += f
+		args = append(args, a...)
+	}
 	if before != nil {
 		q += " AND seq<?"
 		args = append(args, *before)

@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `
 CREATE TABLE IF NOT EXISTS channels (
@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS embeddings (
   model TEXT NOT NULL,
   vector BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS message_tags (
+  seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (seq, tag)
+);
+CREATE INDEX IF NOT EXISTS message_tags_tag ON message_tags(tag);
 CREATE TABLE IF NOT EXISTS receipts (
   sender TEXT NOT NULL,
   key TEXT NOT NULL,

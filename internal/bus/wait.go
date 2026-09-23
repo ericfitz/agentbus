@@ -80,7 +80,7 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 	if len(conds) == 0 {
 		return nil, errf("not_found", false, "%q has no matching subscriptions; register first", as)
 	}
-	q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0"
+	q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0"
 	if !includeOwn {
 		q += " AND sender<>?"
 		args = append(args, as)

@@ -21,7 +21,7 @@ func NormalizeTags(tags []string) ([]string, error) {
 	}
 	out := make([]string, 0, len(tags))
 	for _, t := range tags {
-		t = strings.ToLower(strings.TrimSpace(t))
+		t = strings.ToLower(t)
 		if !tagRe.MatchString(t) {
 			return nil, errf("validation", false, "tag %q must be 1-20 characters of a-z, 0-9, _ or -", t)
 		}
@@ -121,7 +121,11 @@ func (b *Bus) SubscribeTags(as string, tags []string) error {
 	if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscriptions(sender,tags_key,created_seq) VALUES(?,?,?)", as, tagsKey(tags), head); err != nil {
 		return internal(err)
 	}
-	if _, err := tx.Exec("INSERT OR IGNORE INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,?,?)", as, tagSource, head, b.nowMs()); err != nil {
+	// Upsert, not INSERT OR IGNORE: a tags/ row can be older than
+	// cursor_idle_hours (its owner has other live subscriptions keeping the
+	// identity around), and adding a set must count as activity or the row
+	// expires on the next receive and takes the just-added set with it.
+	if _, err := tx.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES(?,?,?,?) ON CONFLICT(sender,channel) DO UPDATE SET last_activity=excluded.last_activity", as, tagSource, head, b.nowMs()); err != nil {
 		return internal(err)
 	}
 	return internal(tx.Commit())
@@ -196,7 +200,10 @@ func (b *Bus) tagSets(q querier, as string) ([]tagSet, error) {
 // channels only (dm/ inboxes are ordinary-kind and excluded by name;
 // memory channels and task lists are memory-kind), skipping channels the
 // sender is directly subscribed to (those arrive through the channel), and
-// carrying every tag of at least one set added before the message.
+// carrying every tag of at least one set added before the message. Once a
+// direct channel subscription ends, that channel's messages above the tag
+// cursor become tag-deliverable again (ADR 0009 item 7 applies to current
+// direct subscriptions, not past ones).
 func tagCond(as string, sets []tagSet) (string, []any) {
 	args := []any{as}
 	ors := make([]string, len(sets))

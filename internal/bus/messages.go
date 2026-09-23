@@ -41,8 +41,8 @@ type Message struct {
 	Refs      []Ref             `json:"refs,omitempty"`
 	MemoryID  *int64            `json:"memory_id,omitempty"`
 	Revision  *int64            `json:"revision,omitempty"`
-	// Tags is the message's lowercase tag set, sorted; empty until tags
-	// are stored (#5).
+	// Tags is the message's lowercase tag set, sorted; empty when the
+	// message carries none.
 	Tags []string `json:"tags,omitempty"`
 	// MatchedTags is set on a message delivered through a tag subscription:
 	// the tags of the sets it satisfied. Absent on channel deliveries.

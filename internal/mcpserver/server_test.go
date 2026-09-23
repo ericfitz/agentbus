@@ -694,8 +694,12 @@ func TestTagSubscriptionOverMCP(t *testing.T) {
 	// tag source and carries matched_tags.
 	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"})
 	call(t, cs, "register", map[string]any{"name": "Kim"})
-	if out, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}}); res.IsError || out["subscribed_tags"] == nil {
+	out, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release", "Release"}})
+	if res.IsError {
 		t.Fatalf("%v %+v", out, res)
+	}
+	if got, ok := out["subscribed_tags"].([]any); !ok || len(got) != 1 || got[0] != "release" {
+		t.Fatalf("subscribed_tags must echo the normalized set: %+v", out)
 	}
 	if _, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "channel": "general", "tags": []string{"x"}}); !res.IsError {
 		t.Fatal("channel and tags together must be rejected")
@@ -708,7 +712,11 @@ func TestTagSubscriptionOverMCP(t *testing.T) {
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"matched_tags":["release"]`) {
 		t.Fatalf("receive: %s", text)
 	}
-	if _, res := call(t, cs, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"release"}}); res.IsError {
+	uout, ures := call(t, cs, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}})
+	if ures.IsError {
 		t.Fatal("unsubscribe tags")
+	}
+	if got, ok := uout["unsubscribed_tags"].([]any); !ok || len(got) != 1 || got[0] != "release" {
+		t.Fatalf("unsubscribed_tags must echo the normalized set: %+v", uout)
 	}
 }

@@ -352,7 +352,8 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				if err := b.SubscribeTags(in.As, in.Tags); err != nil {
 					return nil, nil, err
 				}
-				out := map[string]any{"subscribed_tags": in.Tags}
+				norm, _ := bus.NormalizeTags(in.Tags)
+				out := map[string]any{"subscribed_tags": norm}
 				if in.Persistent {
 					f, err := persistFile(cwd)
 					if err != nil {
@@ -390,7 +391,8 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				if err := b.UnsubscribeTags(in.As, in.Tags); err != nil {
 					return nil, nil, err
 				}
-				out := map[string]any{"unsubscribed_tags": in.Tags}
+				norm, _ := bus.NormalizeTags(in.Tags)
+				out := map[string]any{"unsubscribed_tags": norm}
 				if in.Persistent {
 					f, err := persistFile(cwd)
 					if err != nil {
@@ -423,7 +425,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds (up to receive_max_wait_seconds) waits for messages when none are available; a larger value is rejected, and three consecutive empty waited receives return a polling error. To wait longer, run `agentbus wait` in a background shell instead of calling receive again. Messages delivered through a tag subscription carry matched_tags."},
+	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds (up to receive_max_wait_seconds) waits for messages when none are available; a larger value is rejected, and three consecutive empty waited receives return a polling error. To wait longer, run `agentbus wait` in a background shell instead of calling receive again. Messages delivered through a tag subscription carry matched_tags. tags/ in expired means your tag subscriptions lapsed from inactivity; re-subscribe with tags or re-register."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})

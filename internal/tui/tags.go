@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 
@@ -40,8 +41,19 @@ func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 			}
 		}
 	}
-	slices.SortFunc(out, func(a, b bus.Message) int { return int(a.Seq - b.Seq) })
+	slices.SortFunc(out, func(a, b bus.Message) int { return cmp.Compare(a.Seq, b.Seq) })
 	return out
+}
+
+// splitTags splits a comma-separated tag list, trimming space around each
+// tag so typing "a, b" (the natural style) does not fail NormalizeTags,
+// which rejects a tag carrying its own leading/trailing space (ADR 0009).
+func splitTags(v string) []string {
+	parts := strings.Split(v, ",")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
 }
 
 // tagPrompt asks for a comma-separated tag set and subscribes to it; the
@@ -49,7 +61,7 @@ func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 func (m *Model) tagPrompt() tea.Cmd {
 	return m.openPrompt("tags <tag>[,<tag>...]", func(m *Model, v string) tea.Cmd {
 		c := m.c
-		tags := strings.Split(v, ",")
+		tags := splitTags(v)
 		return func() tea.Msg { return subscribedMsg{channel: tagPanePrefix + v, err: c.b.SubscribeTags(c.as, tags)} }
 	})
 }

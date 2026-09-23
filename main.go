@@ -14,6 +14,17 @@ import (
 	"github.com/ericfitz/agentbus/internal/tui"
 )
 
+// splitTags splits a comma-separated tag list, trimming space around each
+// tag so "-tags a, b" (the natural style) does not fail NormalizeTags,
+// which rejects a tag carrying its own leading/trailing space (ADR 0009).
+func splitTags(v string) []string {
+	parts := strings.Split(v, ",")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|version> [flags]")
@@ -192,9 +203,9 @@ func run(cmd string, args []string) int {
 		}
 		switch {
 		case *tags != "" && cmd == "subscribe":
-			err = cli.SubscribeTags(cwd, strings.Split(*tags, ","), os.Stdout)
+			err = cli.SubscribeTags(cwd, splitTags(*tags), os.Stdout)
 		case *tags != "":
-			err = cli.UnsubscribeTags(cwd, strings.Split(*tags, ","), os.Stdout)
+			err = cli.UnsubscribeTags(cwd, splitTags(*tags), os.Stdout)
 		case cmd == "subscribe":
 			err = cli.Subscribe(cwd, fs.Arg(0), os.Stdout)
 		default:

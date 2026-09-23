@@ -133,6 +133,9 @@ func (b *Bus) Unsubscribe(as, channel string) error {
 	if _, ok := dmOwner(channel); ok && !b.isObserver(as) {
 		return errf("validation", false, "direct-message channels cannot be unsubscribed from")
 	}
+	if channel == tagSource {
+		return errf("validation", false, "unsubscribe from tag sets with tags, not channel=%q", tagSource)
+	}
 	tx, err := b.db.Begin()
 	if err != nil {
 		return internal(err)
@@ -303,8 +306,10 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 			return res, internal(err)
 		}
 		// The tag sets ride the tags/ row's cursor; without it they would
-		// never deliver again, so they go with it (the agent sees tags/ in
-		// expired and resubscribes).
+		// never deliver again, so they go with it. tags/ in Expired means
+		// the tag subscriptions lapsed from inactivity, not that any one
+		// set expired; the agent must re-subscribe with tags (or
+		// re-register) to get them back.
 		if ch == tagSource {
 			if _, err := tx.Exec("DELETE FROM tag_subscriptions WHERE sender=?", as); err != nil {
 				return res, internal(err)

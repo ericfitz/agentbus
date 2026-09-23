@@ -14,7 +14,7 @@ func TestNormalizeTags(t *testing.T) {
 	if got, err := NormalizeTags(nil); err != nil || got != nil {
 		t.Fatalf("no tags: %v %v", got, err)
 	}
-	for _, bad := range [][]string{{""}, {"has space"}, {"x/y"}, {"ünïcode"}, {"123456789012345678901"}} {
+	for _, bad := range [][]string{{""}, {"has space"}, {"x/y"}, {"ünïcode"}, {"123456789012345678901"}, {" bug "}} {
 		if _, err := NormalizeTags(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -202,6 +202,17 @@ func TestTagSubscriptionAndMatching(t *testing.T) {
 	}
 }
 
+func TestUnsubscribeRejectsTagSource(t *testing.T) {
+	b, _, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, b.Unsubscribe(kim, tagSource), "validation")
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 1 {
+		t.Fatalf("rejected unsubscribe must not touch the set: %v", sets)
+	}
+}
+
 func TestTagSourceExcludesDirectDMTaskAndMemory(t *testing.T) {
 	b, sam, kim := tagSetup(t)
 	if _, err := b.CreateChannel(sam, "memory/x", ""); err != nil {
@@ -265,6 +276,36 @@ func TestTagSubscriptionsResumeFalseAndExpiry(t *testing.T) {
 	}
 	if sets, _ := b.TagSubscriptions(kim); len(sets) != 0 {
 		t.Fatalf("expiry drops the sets: %v", sets)
+	}
+}
+
+func TestSubscribeTagsRefreshesStaleRow(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"old"}); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate the shared tags/ row past idle, as if kim's other
+	// subscriptions (not tags) had kept the identity alive for a while.
+	idle := int64(b.cfg.CursorIdleHours)*3_600_000 + 1
+	if _, err := b.db.Exec("UPDATE subscriptions SET last_activity=last_activity-? WHERE sender=? AND channel=?", idle, kim, tagSource); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"new"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "for new", "new")
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(r.Expired, tagSource) {
+		t.Fatalf("SubscribeTags must refresh last_activity so the row is not stale: %+v", r)
+	}
+	if len(r.Messages) != 1 || r.Messages[0].Content != "for new" {
+		t.Fatalf("the just-added set must survive: %+v", r.Messages)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 2 {
+		t.Fatalf("both sets must survive: %v", sets)
 	}
 }
 

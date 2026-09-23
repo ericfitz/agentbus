@@ -39,6 +39,9 @@ type Message struct {
 	Refs      []Ref             `json:"refs,omitempty"`
 	MemoryID  *int64            `json:"memory_id,omitempty"`
 	Revision  *int64            `json:"revision,omitempty"`
+	// Tags is the message's lowercase tag set, sorted; empty until tags
+	// are stored (#5).
+	Tags []string `json:"tags,omitempty"`
 }
 
 const messageColumns = "seq, channel, sender, context, created_at, type, content, reply_to, metadata, refs, memory_id, revision"

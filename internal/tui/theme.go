@@ -17,7 +17,7 @@ import (
 // terminal default are representable in v1, on purpose (see
 // config.ColorIndex).
 type Theme struct {
-	BG, Text, Dim, Agent, User, Mem, Tasks, Health, Warn, Error, Sel lipgloss.TerminalColor
+	BG, Text, Dim, Stamp, Tag, Agent, User, Mem, Tasks, Health, Warn, Error, Sel lipgloss.TerminalColor
 	// Name is the config theme applied and Sources the resolved value per
 	// color key ("cyan", "default", ...), for the Health overlay.
 	Name    string
@@ -75,6 +75,10 @@ func (t *Theme) set(key string, c lipgloss.TerminalColor) {
 		t.Text = c
 	case "dim":
 		t.Dim = c
+	case "timestamp":
+		t.Stamp = c
+	case "tag":
+		t.Tag = c
 	case "agent":
 		t.Agent = c
 	case "user":

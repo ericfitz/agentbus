@@ -304,3 +304,140 @@ func TestSessionRowColorsMatchIdentity(t *testing.T) {
 		t.Fatalf("the TUI's own session row must use the user color: %q", ericRow)
 	}
 }
+
+// msgAt injects one already-loaded message so a header test controls every
+// field (sender, channel, time, tags) without a bus round trip.
+func (f *fixture) msgAt(ch, sender string, seq, createdAt int64, content string, tags ...string) {
+	f.m.addMessages(ch, []bus.Message{{Seq: seq, Channel: ch, Sender: sender, CreatedAt: createdAt, Content: content, Tags: tags}})
+	f.m.refreshStream()
+}
+
+func TestStampTodayAndPast(t *testing.T) {
+	if got := stamp(time.Now().UnixMilli()); !strings.HasPrefix(got, "(today)    ") || len([]rune(got)) != 19 {
+		t.Fatalf("today: %q", got)
+	}
+	past := time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local).UnixMilli()
+	if got := stamp(past); got != "2026-01-02 03:04:05" {
+		t.Fatalf("past: %q", got)
+	}
+}
+
+func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello")
+	f.receive(t)
+	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	want := ansi.Strip(iconAgent) + "Sam --> " + iconChat + "dev"
+	if !strings.Contains(first, want) || !strings.Contains(first, "(today)") {
+		t.Fatalf("channel header %q lacks %q", first, want)
+	}
+	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "hello") || strings.Contains(lines[0], "hello") {
+		t.Fatalf("body must start on the next line: %q", lines)
+	}
+
+	f.run(f.m.statusCmd())
+	f.key("esc")
+	f.toSessions()
+	// Select the DM session before the message arrives, same as "dev" above
+	// (already selected by default): onBatch marks an already-selected
+	// channel seen on arrival, so no "new" divider is inserted ahead of the
+	// header this assertion reads as the first line.
+	for i, n := range f.m.sessionNames() {
+		if n == f.c.as {
+			f.run(f.m.selectSession(i))
+		}
+	}
+	f.agentSend(t, "dm/"+f.c.as, "psst")
+	f.receive(t)
+	first = ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	want = ansi.Strip(iconAgent) + "Sam --> " + iconUser + f.c.as
+	if !strings.Contains(first, want) {
+		t.Fatalf("DM header %q lacks %q", first, want)
+	}
+}
+
+func TestHeaderBusSender(t *testing.T) {
+	f := newFixture(t)
+	f.msgAt("dev", "", 9001, time.Now().UnixMilli(), "reclaimed")
+	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus --> ") {
+		t.Fatalf("empty sender renders as bus: %q", first)
+	}
+}
+
+func TestSelectedRowSwapsDimToText(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.m.theme.Text = lipgloss.Color("7")
+	f.agentSend(t, "dev", "one")
+	f.agentSend(t, "dev", "two")
+	f.receive(t)
+	f.key("shift+tab") // cursor on "two"
+	lines := strings.Split(f.m.renderStream(), "\n")
+	stampOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Stamp).Render("\x00"), "\x00")
+	textOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Text).Render("\x00"), "\x00")
+	if !strings.Contains(lines[0], stampOpen+"(today)") {
+		t.Fatalf("unselected row keeps the timestamp color: %q", lines[0])
+	}
+	if !strings.Contains(lines[2], textOpen+"(today)") || strings.Contains(lines[2], stampOpen+"(today)") {
+		t.Fatalf("selected row swaps dim text to the text color: %q", lines[2])
+	}
+	if f.m.cursorLine != 2 {
+		t.Fatalf("cursorLine=%d, want 2 (header + body of the first row)", f.m.cursorLine)
+	}
+}
+
+func TestTagChipsAndFallback(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.msgAt("dev", "Sam", 9001, time.Now().UnixMilli(), "tagged", "release", "bug")
+	chip := lipgloss.NewStyle().Background(f.m.theme.Tag).Foreground(lipgloss.Color("15"))
+	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
+	if !strings.Contains(first, chip.Render(" release ")+" "+chip.Render(" bug ")) {
+		t.Fatalf("chips missing: %q", first)
+	}
+	f.key("shift+tab") // selected row keeps the chip background
+	if first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]; !strings.Contains(first, chip.Render(" release ")) {
+		t.Fatalf("selected row lost chip background: %q", first)
+	}
+	f.m.theme.Tag = lipgloss.NoColor{}
+	if first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0]); !strings.Contains(first, "#release #bug") {
+		t.Fatalf("fallback: %q", first)
+	}
+}
+
+func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
+	f := newFixture(t)
+	long := strings.Repeat("x", 40)
+	if _, err := f.ab.CreateChannel(f.sam, long, "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.m.width = 60
+	f.m.layout()
+	// Select the channel before the message arrives (same reason as the DM
+	// case above): msgAt calls addMessages directly, and a first select on
+	// an empty channel leaves divider at -1, so injecting afterward never
+	// inserts a "new" divider ahead of the header line this test measures.
+	for i, c := range f.m.channels {
+		if c.Name == long {
+			f.run(f.m.selectChannel(i))
+		}
+	}
+	f.msgAt(long, "Sam", 9001, time.Now().UnixMilli(), "body", "a", "b", "c")
+	lines := strings.Split(f.m.renderStream(), "\n")
+	if w := lipgloss.Width(lines[0]); w > f.m.stream.Width {
+		t.Fatalf("header wrapped or overflowed: width %d > %d: %q", w, f.m.stream.Width, lines[0])
+	}
+	if s := ansi.Strip(lines[0]); !strings.Contains(s, "…") || strings.Contains(s, " a ") {
+		t.Fatalf("tags go first, then the recipient is cut with …: %q", s)
+	}
+	if !strings.Contains(ansi.Strip(lines[1]), "body") {
+		t.Fatalf("body still on line 2: %q", lines)
+	}
+}

@@ -275,7 +275,9 @@ before the TUI starts.
 |-----------|----------|---------|
 | `background` | screen background | `default` |
 | `text` | message content | `default` |
-| `dim` | timestamps, dividers, help | `brightblack` |
+| `dim` | dividers, help, summaries | `brightblack` |
+| `timestamp` | message timestamps (unselected rows) | `brightblack` |
+| `tag` | tag chip background (`default` falls back to dim `#tag` words) | `brightblack` |
 | `agent` | agent names, selected channel, key hints | `cyan` |
 | `user` | your own name | `yellow` |
 | `memory` | memory channels and the memory browser | `magenta` |
@@ -284,6 +286,9 @@ before the TUI starts.
 | `warn` | warnings such as the text-only search badge | `yellow` |
 | `error` | errors and the delete confirmation | `red` |
 | `selection` | selected row background | `blue` |
+
+On the selected message row, dim text (timestamp, thread summary) switches
+to the `text` color so it stays readable on `selection`.
 
 The health overlay (`h`) shows the log file path, the theme in use with
 each resolved value, and the loaded config. `o` opens the config file in

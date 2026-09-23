@@ -84,6 +84,8 @@ type Theme struct {
 	Background string `json:"background"`
 	Text       string `json:"text"`
 	Dim        string `json:"dim"`
+	Timestamp  string `json:"timestamp"`
+	Tag        string `json:"tag"`
 	Agent      string `json:"agent"`
 	User       string `json:"user"`
 	Memory     string `json:"memory"`
@@ -96,7 +98,7 @@ type Theme struct {
 
 // DefaultTheme is the built-in "default" theme and the per-value fallback.
 func DefaultTheme() Theme {
-	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
 }
 
 // Colors lists the theme's values as (key, value) pairs in a fixed order,
@@ -106,6 +108,8 @@ func (t Theme) Colors() [][2]string {
 		{"background", t.Background},
 		{"text", t.Text},
 		{"dim", t.Dim},
+		{"timestamp", t.Timestamp},
+		{"tag", t.Tag},
 		{"agent", t.Agent},
 		{"user", t.User},
 		{"memory", t.Memory},

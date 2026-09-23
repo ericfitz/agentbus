@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -41,6 +42,90 @@ func clock(ms int64) string {
 		return t.Format("15:04")
 	}
 	return t.Format("Jan 2")
+}
+
+// stamp renders a message time as "YYYY-MM-DD HH:MM:SS"; today's date is
+// replaced by "(today)" padded to the same ten columns so times line up.
+func stamp(ms int64) string {
+	t := time.UnixMilli(ms).Local()
+	date := t.Format("2006-01-02")
+	if now := time.Now(); t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		date = "(today)   "
+	}
+	return date + " " + t.Format("15:04:05")
+}
+
+// agentLabel is an identity with its rail icon and color: the TUI's own
+// name in the user color, everyone else (and the empty tick sender, shown
+// as bus) in the agent color.
+func (m Model) agentLabel(name string) string {
+	if name == m.c.as {
+		return iconUser + m.theme.Style(m.theme.User).Render(name)
+	}
+	return iconAgent + m.theme.Style(m.theme.Agent).Render(senderName(name))
+}
+
+// channelLabel is a message's recipient: the agent for a dm/ inbox, else
+// the full channel name with its kind icon in chanStyle's color. A channel
+// not (yet) in the rail is drawn as chat.
+func (m Model) channelLabel(name string) string {
+	if owner, ok := strings.CutPrefix(name, bus.DMPrefix); ok {
+		return m.agentLabel(owner)
+	}
+	ch := bus.Channel{Name: name, Kind: "ordinary"}
+	for _, c := range m.channels {
+		if c.Name == name {
+			ch = c
+		}
+	}
+	icon := iconChat
+	switch {
+	case bus.IsTaskChannel(name):
+		icon = iconTasks
+	case ch.Kind == "memory":
+		icon = iconMem
+	}
+	return m.chanStyle(ch).Render(icon + name)
+}
+
+// tagChips renders tags as " tag " chips on the tag color, one space apart.
+// When the background alone emits no escape (tag is "default", or lipgloss
+// is on its no-color profile) a chip would be invisible, so they fall back
+// to dim "#tag" words.
+func (m Model) tagChips(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	chip := lipgloss.NewStyle().Background(m.theme.Tag).Foreground(lipgloss.Color("15"))
+	parts := make([]string, len(tags))
+	if lipgloss.NewStyle().Background(m.theme.Tag).Render("x") == "x" {
+		for i, t := range tags {
+			parts[i] = "#" + t
+		}
+		return m.theme.Style(m.theme.Dim).Render(strings.Join(parts, " "))
+	}
+	for i, t := range tags {
+		parts[i] = chip.Render(" " + t + " ")
+	}
+	return strings.Join(parts, " ")
+}
+
+// header is a message's first line: timestamp, sender --> recipient, tag
+// chips. It never wraps: past avail columns the chips are cut first (dropped
+// under four columns), then the whole line is cut with an ellipsis.
+func (m Model) header(x bus.Message, stampStyle lipgloss.Style, avail int) string {
+	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender) + " --> " + m.channelLabel(x.Channel)
+	if chips := m.tagChips(x.Tags); chips != "" {
+		if room := avail - lipgloss.Width(head) - 2; room >= lipgloss.Width(chips) {
+			head += "  " + chips
+		} else if room >= 4 {
+			head += "  " + ansi.Truncate(chips, room, "…")
+		}
+	}
+	if lipgloss.Width(head) > avail {
+		head = ansi.Truncate(head, avail, "…")
+	}
+	return head
 }
 
 func (m Model) showLeft() bool { return m.width >= 60 }
@@ -240,7 +325,9 @@ func shortDur(d time.Duration) string {
 
 // renderStream draws the selected channel's messages, oldest first, with the
 // "new" divider after the last seen message, "n evicted" dividers where the
-// bus reported gaps, and the normal-mode cursor row highlighted.
+// bus reported gaps, and the normal-mode cursor row highlighted. Each message
+// is a header line (timestamp, sender --> recipient, tag chips) followed by
+// its body at the row's depth.
 func (m *Model) renderStream() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
@@ -279,27 +366,27 @@ func (m *Model) renderStream() string {
 			lineNum++
 			newShown = true
 		}
-		disp := senderName(x.Sender)
-		name := th.Style(th.Agent).Render(disp)
-		if x.Sender == m.c.as {
-			name = th.Style(th.User).Render(disp)
+		selected := i == m.cursor && m.mode == modeNormal
+		// On the selected row every dim segment (timestamp, marker, summary)
+		// takes the text color so it stays readable on the selection
+		// background; chips keep their own background.
+		rowDim, stampStyle := dim, th.Style(th.Stamp)
+		if selected {
+			rowDim, stampStyle = th.Style(th.Text), th.Style(th.Text)
 		}
 		// The tree prefix (indent plus expand/collapse marker) is applied
 		// after wrapping so every wrapped line sits at the row's depth.
 		prefix := strings.Repeat("  ", r.depth)
 		switch {
 		case r.hidden > 0:
-			prefix += dim.Render(markSel + " ")
+			prefix += rowDim.Render(markSel + " ")
 		case r.open:
-			prefix += dim.Render(markOpen + " ")
+			prefix += rowDim.Render(markOpen + " ")
 		default:
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		head := dim.Render(clock(x.CreatedAt)) + " " + name + " "
-		indent := strings.Repeat(" ", lipgloss.Width(head))
-		body := strings.ReplaceAll(x.Content, "\n", "\n"+indent)
-		line := head + body
+		line := m.header(x, stampStyle, w-pw) + "\n" + x.Content
 		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
 			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
 		}
@@ -309,13 +396,13 @@ func (m *Model) renderStream() string {
 				summary = "1 reply"
 			}
 			if r.depth == 0 {
-				summary += " · " + clock(r.latest)
+				summary += " \u00b7 " + clock(r.latest)
 			}
-			line += "\n" + indent + dim.Render(summary)
+			line += "\n" + rowDim.Render(summary)
 		}
 		line = lipgloss.NewStyle().Width(w - pw).Render(line)
 		line = prefix + strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", pw))
-		if i == m.cursor && m.mode == modeNormal {
+		if selected {
 			line = th.Highlight(line, w)
 		}
 		if i == m.cursor {

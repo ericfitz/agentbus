@@ -69,6 +69,16 @@ const (
 	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
 )
 
+// Task status marks. The stopwatch U+23F1 is text-presentation by default
+// (like the gear) and carries U+FE0F for the color glyph; if a terminal
+// font draws its own half-width stopwatch, give it the gear's CSI 2X/1C
+// treatment.
+const (
+	taskPending    = "\u274E "       // negative squared cross mark
+	taskInProgress = "\u23F1\uFE0F " // stopwatch
+	taskCompleted  = "\u2705 "       // white heavy check mark
+)
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return ""

@@ -237,7 +237,8 @@ separate process has no other way to learn it.
   TUI launch after upgrading subscribes to every existing inbox from its
   oldest retained message, so retained direct messages show as unread once.
   A `tasks/` channel shows its task tree (read-only): subtasks indented,
-  `○ ◐ ● ⊘` for pending, in progress, completed, blocked.
+  ❎ pending, ⏱️ in progress (with the owner's name beside it), ✅ completed
+  (dimmed); a blocked task keeps ❎ with `blocked by #n`.
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose

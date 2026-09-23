@@ -24,9 +24,12 @@ func (m *Model) loadTasks(ch string) tea.Cmd {
 
 // renderTasks draws ch's task tree in place of the revision stream: one row
 // per task in the tree order TaskList returns, indented by depth (capped at
-// six levels), with a status mark and dim owner/blocker/lease suffixes.
+// six levels), a status mark, then the row's suffixes: an in-progress task's
+// owner with the rail icon and color, a pending task's assignee as a dim
+// arrow, blockers, and the lease. Completed rows are dimmed whole.
 func (m Model) renderTasks(ch string) string {
-	dim := m.theme.Style(m.theme.Dim)
+	th := m.theme
+	dim := th.Style(th.Dim)
 	ts := m.tasks[ch]
 	if len(ts) == 0 {
 		return dim.Render("no tasks yet in " + ch)
@@ -34,28 +37,31 @@ func (m Model) renderTasks(ch string) string {
 	w := max(m.stream.Width, 20)
 	lines := make([]string, len(ts))
 	for i, t := range ts {
-		mark := "○"
+		mark := taskPending
 		switch t.Status {
 		case "in_progress":
-			mark = "◐"
+			mark = taskInProgress
 		case "completed":
-			mark = "●"
-		default: // pending
-			if len(t.OpenBlockers) > 0 {
-				mark = "⊘"
-			}
+			mark = taskCompleted
 		}
-		line := strings.Repeat("  ", min(t.Depth, 6)) + mark + " #" + itoa(t.ID) + " " + t.Subject
+		line := strings.Repeat("  ", min(t.Depth, 6)) + mark + "#" + itoa(t.ID) + " " + t.Subject
 		var suffix string
-		if t.Owner != "" {
-			suffix += " @" + t.Owner
+		switch {
+		case t.Status == "in_progress" && t.Owner != "":
+			icon, style := iconAgent, th.Style(th.Agent)
+			if t.Owner == m.c.as {
+				icon, style = iconUser, th.Style(th.User)
+			}
+			line += "  " + icon + style.Render(t.Owner)
+		case t.Owner != "":
+			suffix += " → " + t.Owner
 		}
 		if len(t.OpenBlockers) > 0 {
 			ids := make([]string, len(t.OpenBlockers))
 			for j, id := range t.OpenBlockers {
 				ids[j] = "#" + itoa(id)
 			}
-			suffix += " ⊘ " + strings.Join(ids, " ")
+			suffix += " blocked by " + strings.Join(ids, " ")
 		}
 		if t.LeasedUntil != 0 {
 			if left := time.Until(time.UnixMilli(t.LeasedUntil)); left > 0 {

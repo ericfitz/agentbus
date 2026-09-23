@@ -2,9 +2,35 @@ package tui
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 )
+
+// paneMsgs returns the messages a pane shows. A dm/X pane merges X's
+// inbox with every loaded direct message X sent (DMs are one-way, so a
+// conversation alternates between two inboxes); everything else shows its
+// own channel. Unread counts and the divider stay on m.msgs[ch] (the
+// inbox), see unread and dividerFor.
+func (m *Model) paneMsgs(ch string) []bus.Message {
+	owner, ok := strings.CutPrefix(ch, bus.DMPrefix)
+	if !ok {
+		return m.msgs[ch]
+	}
+	out := append([]bus.Message{}, m.msgs[ch]...)
+	for name, ms := range m.msgs {
+		if name == ch || !strings.HasPrefix(name, bus.DMPrefix) {
+			continue
+		}
+		for _, x := range ms {
+			if x.Sender == owner {
+				out = append(out, x)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
+}
 
 // row is one visible message in the stream's display order.
 type row struct {
@@ -24,7 +50,7 @@ type row struct {
 // shown only under a parent the user expanded, or along the path to the
 // thread's peeked reply (the newest one received while collapsed).
 func (m *Model) rows(ch string) []row {
-	ms := m.msgs[ch]
+	ms := m.paneMsgs(ch)
 	if len(ms) == 0 {
 		return nil
 	}
@@ -105,7 +131,7 @@ func nextParent(bySeq map[int64]bus.Message, seq int64) (int64, bool) {
 // rootSeq returns the thread root of seq among ch's loaded messages.
 func (m *Model) rootSeq(ch string, seq int64) int64 {
 	bySeq := map[int64]bus.Message{}
-	for _, x := range m.msgs[ch] {
+	for _, x := range m.paneMsgs(ch) {
 		bySeq[x.Seq] = x
 	}
 	for {
@@ -159,7 +185,7 @@ func (m *Model) collapseCursor() {
 		return
 	}
 	under := map[int64]bool{r.msg.Seq: true}
-	for _, x := range m.msgs[m.selName()] { // seq order: a parent precedes its replies
+	for _, x := range m.paneMsgs(m.selName()) { // seq order: a parent precedes its replies
 		if x.ReplyTo != nil && under[*x.ReplyTo] {
 			under[x.Seq] = true
 			delete(m.expanded, x.Seq)

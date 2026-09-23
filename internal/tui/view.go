@@ -332,7 +332,6 @@ func (m *Model) renderStream() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
 	ch := m.selName()
-	ms := m.msgs[ch]
 	m.cursorLine = -1
 	if ch == "" {
 		return ""
@@ -340,7 +339,9 @@ func (m *Model) renderStream() string {
 	if bus.IsTaskChannel(ch) {
 		return m.renderTasks(ch)
 	}
-	if len(ms) == 0 {
+	// A dm/X pane also shows X's outgoing messages (#4), so emptiness is
+	// judged on the merged rows, not the inbox alone.
+	if len(m.rows(ch)) == 0 {
 		return dim.Render("no messages yet in " + ch + " · type below to send the first")
 	}
 	w := max(m.stream.Width, 20)

@@ -518,7 +518,7 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && len(m.msgs[m.selName()]) > 0 && !bus.IsTaskChannel(m.selName()):
+		case p == paneStream && len(m.rows(m.selName())) > 0 && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
 		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
@@ -751,14 +751,22 @@ func (m *Model) selectChannel(i int) tea.Cmd {
 }
 
 // selectSession moves the sessions-pane selection (clamped) and applies
-// showSelected's reset.
+// showSelected's reset. A no-op when i is already selected -- otherwise
+// re-visiting the same pane (e.g. the sessions rail landing on it while
+// navigating down, then a caller selecting it again) would recompute the
+// divider against seen as the first visit already advanced it, erasing a
+// divider that visit legitimately set.
 func (m *Model) selectSession(i int) tea.Cmd {
 	names := m.sessionNames()
 	if len(names) == 0 {
 		m.sessSel = -1
 		return nil
 	}
-	m.sessSel = min(max(i, 0), len(names)-1)
+	i = min(max(i, 0), len(names)-1)
+	if i == m.sessSel {
+		return nil
+	}
+	m.sessSel = i
 	return m.showSelected()
 }
 
@@ -780,10 +788,21 @@ func (m *Model) showSelected() tea.Cmd {
 	if bus.IsTaskChannel(ch) {
 		return m.loadTasks(ch)
 	}
+	var cmds []tea.Cmd
 	if ch != "" && !m.loaded[ch] {
-		return m.loadHistory(ch, nil)
+		cmds = append(cmds, m.loadHistory(ch, nil))
 	}
-	return nil
+	// A DM pane merges what its owner sent to every other inbox, so those
+	// inboxes need their latest page too. ponytail: one page per inbox on
+	// first DM visit; a bus-side conversation query is out of scope (#4).
+	if strings.HasPrefix(ch, bus.DMPrefix) {
+		for _, d := range m.dms {
+			if d.Name != ch && !m.loaded[d.Name] {
+				cmds = append(cmds, m.loadHistory(d.Name, nil))
+			}
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // addMessages merges in into the channel buffer, ascending by seq, dropping

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -155,5 +156,127 @@ func TestCrossChannelReplyRendersTopLevel(t *testing.T) {
 	rs := f.m.rows("dm/" + f.c.as)
 	if len(rs) != 1 || rs[0].depth != 0 || rs[0].msg.Content != "child elsewhere" {
 		t.Fatalf("%+v", rs)
+	}
+}
+
+// dmSetup registers a second agent and returns a sender for each identity:
+// the TUI ("eric"), Sam, and Kim, all on the same bus file.
+func (f *fixture) selectSessionNamed(t *testing.T, name string) {
+	t.Helper()
+	f.key("esc")
+	f.toSessions()
+	for i, n := range f.m.sessionNames() {
+		if n == name {
+			f.run(f.m.selectSession(i))
+			return
+		}
+	}
+	t.Fatalf("no session %q in %v", name, f.m.sessionNames())
+}
+
+func (f *fixture) sendAs(t *testing.T, b *bus.Bus, as, ch string, replyTo *int64, content string) bus.SendResult {
+	t.Helper()
+	r, err := b.Send(as, bus.SendInput{Channel: ch, Content: content, ReplyTo: replyTo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// A two-agent back-and-forth is one thread in both panes even though every
+// other message lives in the other inbox.
+func TestDMPaneThreadsConversationAcrossInboxes(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd())
+	q1 := f.sendAs(t, f.c.b, f.c.as, "dm/Sam", nil, "q1")
+	a1 := f.sendAs(t, f.ab, f.sam, "dm/"+f.c.as, &q1.Seq, "a1")
+	q2 := f.sendAs(t, f.c.b, f.c.as, "dm/Sam", &a1.Seq, "q2")
+	f.sendAs(t, f.ab, f.sam, "dm/"+f.c.as, &q2.Seq, "a2")
+	f.receive(t)
+	for _, seq := range []int64{q1.Seq, a1.Seq, q2.Seq} {
+		f.m.expanded[seq] = true
+	}
+	want := []string{"q1", ">a1", ">>q2", ">>>a2"}
+	if got := contents(f.m.rows("dm/Sam")); !eq(got, want) {
+		t.Fatalf("Sam's pane: %v", got)
+	}
+	if got := contents(f.m.rows("dm/" + f.c.as)); !eq(got, want) {
+		t.Fatalf("eric's pane: %v", got)
+	}
+	f.selectSessionNamed(t, "Sam")
+	// This is Sam's pane's first-ever visit with content already loaded, so
+	// (per Task 3) a "new" divider sits ahead of the header; find the header
+	// by content rather than assuming it is line 0.
+	var first string
+	for _, l := range strings.Split(ansi.Strip(f.m.renderStream()), "\n") {
+		if strings.Contains(l, "-->") {
+			first = l
+			break
+		}
+	}
+	if !strings.Contains(first, f.c.as+" --> ") || !strings.Contains(first, "Sam") {
+		t.Fatalf("header shows the real direction: %q", first)
+	}
+}
+
+// A pane that mixes two partners lists each conversation; unread counts and
+// the divider come from the inbox alone.
+func TestDMPaneMixesPartnersAndCountsInboxOnly(t *testing.T) {
+	f := newFixture(t)
+	kb, kim := agent(t, f.c.cfg, "Kim")
+	f.run(f.m.statusCmd())
+	f.sendAs(t, f.ab, f.sam, "dm/"+f.c.as, nil, "from sam")
+	f.sendAs(t, kb, kim, "dm/"+f.c.as, nil, "from kim")
+	f.sendAs(t, f.c.b, f.c.as, "dm/Kim", nil, "to kim")
+	f.receive(t)
+	if got := contents(f.m.rows("dm/" + f.c.as)); !eq(got, []string{"from sam", "from kim", "to kim"}) {
+		t.Fatalf("eric's pane: %v", got)
+	}
+	if got := contents(f.m.rows("dm/Kim")); !eq(got, []string{"from kim", "to kim"}) {
+		t.Fatalf("Kim's pane: %v", got)
+	}
+	if got := contents(f.m.rows("dm/Sam")); !eq(got, []string{"from sam"}) {
+		t.Fatalf("Sam's pane: %v", got)
+	}
+	if f.m.unread("dm/Kim") != 1 || f.m.unread("dm/"+f.c.as) != 2 {
+		t.Fatalf("unread counts inbox only: kim=%d eric=%d", f.m.unread("dm/Kim"), f.m.unread("dm/"+f.c.as))
+	}
+	f.selectSessionNamed(t, "Kim")
+	s := ansi.Strip(f.m.renderStream())
+	// "from kim" is Kim's own outgoing message (not unread); the divider
+	// sits after it and before "to kim", the first unread inbox message.
+	if strings.Count(s, " new ") != 1 || strings.Index(s, " new ") < strings.Index(s, "from kim") || strings.Index(s, " new ") > strings.Index(s, "to kim") {
+		t.Fatalf("divider sits before the first unread inbox message:\n%s", s)
+	}
+}
+
+// Selecting a DM pane loads history for every inbox, so outgoing messages
+// sent before the TUI started still show.
+func TestDMPaneLoadsOtherInboxHistory(t *testing.T) {
+	f := newFixture(t)
+	f.sendAs(t, f.c.b, f.c.as, "dm/Sam", nil, "earlier")
+	f.drainAndAck(t)
+	f.run(f.m.statusCmd())
+	f.selectSessionNamed(t, f.c.as)
+	if got := contents(f.m.rows("dm/" + f.c.as)); !eq(got, []string{"earlier"}) {
+		t.Fatalf("own pane after history: %v", got)
+	}
+}
+
+// r on the TUI's own outgoing row replies to the partner, not to dm/self.
+func TestReplyFromOwnOutgoingRowTargetsPartner(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd())
+	f.sendAs(t, f.c.b, f.c.as, "dm/Sam", nil, "ping")
+	f.receive(t)
+	f.selectSessionNamed(t, f.c.as)
+	f.key("r") // no cursor: replies to the last row, our own "ping"
+	for _, r := range "pong" {
+		f.key(string(r))
+	}
+	f.key("enter")
+	ms, _ := f.ab.History(f.sam, "dm/Sam", nil, nil, 10)
+	if len(ms) != 2 || ms[1].Content != "pong" || ms[1].ReplyTo == nil || *ms[1].ReplyTo != ms[0].Seq {
+		t.Fatalf("reply must land in Sam's inbox threaded on ping: %+v", ms)
 	}
 }

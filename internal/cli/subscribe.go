@@ -66,3 +66,43 @@ func printChannels(out io.Writer, identity string, list []string) error {
 	_, err := fmt.Fprintf(out, "Agentbus: persistent channels for %s: %s\nApplied at the next register in this repository.\n", identity, shown)
 	return err
 }
+
+// SubscribeTags adds a tag set to the persistent list in
+// cwd/.local/agentbus.json ("tag_subscriptions"), creating the file when absent.
+func SubscribeTags(cwd string, tags []string, out io.Writer) error {
+	f, err := openRepoFile(cwd, true)
+	if err != nil {
+		return err
+	}
+	sets, err := f.AddTagSet(tags)
+	if err != nil {
+		return err
+	}
+	return printTagSets(out, f.Identity, sets)
+}
+
+// UnsubscribeTags removes a tag set from the persistent list.
+func UnsubscribeTags(cwd string, tags []string, out io.Writer) error {
+	f, err := openRepoFile(cwd, false)
+	if err != nil {
+		return err
+	}
+	sets, err := f.RemoveTagSet(tags)
+	if err != nil {
+		return err
+	}
+	return printTagSets(out, f.Identity, sets)
+}
+
+func printTagSets(out io.Writer, identity string, sets [][]string) error {
+	shown := make([]string, len(sets))
+	for i, s := range sets {
+		shown[i] = strings.Join(s, ",")
+	}
+	list := strings.Join(shown, " ")
+	if list == "" {
+		list = "(none)"
+	}
+	_, err := fmt.Fprintf(out, "Agentbus: persistent tag subscriptions for %s: %s\nApplied at the next register in this repository.\n", identity, list)
+	return err
+}

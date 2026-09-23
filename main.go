@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -175,8 +176,13 @@ func run(cmd string, args []string) int {
 		}
 		return 0
 	case "subscribe", "unsubscribe":
-		if len(args) != 1 {
-			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel>\n", cmd)
+		fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
+		tags := fs.String("tags", "", "comma-separated tag set to follow instead of a channel")
+		if err := fs.Parse(args); err != nil {
+			return 2
+		}
+		if (fs.NArg() != 1) == (*tags == "") {
+			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel> | agentbus %s -tags <tag>[,<tag>...]\n", cmd, cmd)
 			return 2
 		}
 		cwd, err := os.Getwd()
@@ -184,10 +190,15 @@ func run(cmd string, args []string) int {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}
-		if cmd == "subscribe" {
-			err = cli.Subscribe(cwd, args[0], os.Stdout)
-		} else {
-			err = cli.Unsubscribe(cwd, args[0], os.Stdout)
+		switch {
+		case *tags != "" && cmd == "subscribe":
+			err = cli.SubscribeTags(cwd, strings.Split(*tags, ","), os.Stdout)
+		case *tags != "":
+			err = cli.UnsubscribeTags(cwd, strings.Split(*tags, ","), os.Stdout)
+		case cmd == "subscribe":
+			err = cli.Subscribe(cwd, fs.Arg(0), os.Stdout)
+		default:
+			err = cli.Unsubscribe(cwd, fs.Arg(0), os.Stdout)
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)

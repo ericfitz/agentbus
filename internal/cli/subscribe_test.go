@@ -106,3 +106,25 @@ func TestUnsubscribe(t *testing.T) {
 		t.Fatalf("%q", out.String())
 	}
 }
+
+func TestSubscribeTagsWritesTagSets(t *testing.T) {
+	root := repoRoot(t, "myrepo")
+	var out bytes.Buffer
+	if err := SubscribeTags(root, []string{"Bug", "agentbus"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "Agentbus: persistent tag subscriptions for myrepo: agentbus,bug\n") {
+		t.Fatalf("%q", out.String())
+	}
+	f, err := repoconfig.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sets, _ := f.TagSubscriptions(); len(sets) != 1 {
+		t.Fatalf("%v", sets)
+	}
+	out.Reset()
+	if err := UnsubscribeTags(root, []string{"agentbus", "bug"}, &out); err != nil || !strings.Contains(out.String(), "(none)") {
+		t.Fatalf("%v %q", err, out.String())
+	}
+}

@@ -684,3 +684,31 @@ func TestSendTagsRoundTripOverMCP(t *testing.T) {
 		t.Fatal("invalid tag must be rejected")
 	}
 }
+
+func TestTagSubscriptionOverMCP(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	// Kim is registered without ever subscribing to "dev" directly (unlike
+	// "general", which register's persistent default channel list already
+	// subscribes her to), so a message there can only reach her through the
+	// tag source and carries matched_tags.
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"})
+	call(t, cs, "register", map[string]any{"name": "Kim"})
+	if out, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}}); res.IsError || out["subscribed_tags"] == nil {
+		t.Fatalf("%v %+v", out, res)
+	}
+	if _, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "channel": "general", "tags": []string{"x"}}); !res.IsError {
+		t.Fatal("channel and tags together must be rejected")
+	}
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "dev", "content": "ship it", "tags": []string{"release"}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "receive", Arguments: map[string]any{"as": "Kim"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"matched_tags":["release"]`) {
+		t.Fatalf("receive: %s", text)
+	}
+	if _, res := call(t, cs, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"release"}}); res.IsError {
+		t.Fatal("unsubscribe tags")
+	}
+}

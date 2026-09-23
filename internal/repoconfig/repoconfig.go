@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -158,6 +159,69 @@ func (f *File) setChannels(list []string) error {
 		arr[i] = c
 	}
 	f.Raw["channels"] = arr
+	return f.write()
+}
+
+// TagSubscriptions returns the persistent tag sets under "tag_subscriptions"
+// (a list of tag lists), each normalized; entries that are not a list of
+// valid tags are returned in bad and omitted. Absent key: none.
+func (f *File) TagSubscriptions() (sets [][]string, bad []string) {
+	list, _ := f.Raw["tag_subscriptions"].([]any)
+	for _, e := range list {
+		raw, ok := e.([]any)
+		tags := make([]string, 0, len(raw))
+		for _, v := range raw {
+			s, isStr := v.(string)
+			ok = ok && isStr
+			tags = append(tags, s)
+		}
+		norm, err := bus.NormalizeTags(tags)
+		if !ok || err != nil || len(norm) == 0 {
+			bad = append(bad, fmt.Sprint(e))
+			continue
+		}
+		sets = append(sets, norm)
+	}
+	return sets, bad
+}
+
+// AddTagSet appends a normalized set (idempotent), writes, and returns the list.
+func (f *File) AddTagSet(tags []string) ([][]string, error) {
+	norm, err := bus.NormalizeTags(tags)
+	if err != nil || len(norm) == 0 {
+		return nil, fmt.Errorf("tags %q: must be 1-10 tags of 1-20 characters a-z, 0-9, _ or -", tags)
+	}
+	sets, _ := f.TagSubscriptions()
+	if !slices.ContainsFunc(sets, func(s []string) bool { return slices.Equal(s, norm) }) {
+		sets = append(sets, norm)
+	}
+	return sets, f.setTagSets(sets)
+}
+
+// RemoveTagSet removes a set (a no-op that still writes when absent).
+func (f *File) RemoveTagSet(tags []string) ([][]string, error) {
+	norm, err := bus.NormalizeTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	sets, _ := f.TagSubscriptions()
+	sets = slices.DeleteFunc(sets, func(s []string) bool { return slices.Equal(s, norm) })
+	if sets == nil {
+		sets = [][]string{}
+	}
+	return sets, f.setTagSets(sets)
+}
+
+func (f *File) setTagSets(sets [][]string) error {
+	arr := make([]any, len(sets))
+	for i, s := range sets {
+		inner := make([]any, len(s))
+		for j, t := range s {
+			inner[j] = t
+		}
+		arr[i] = inner
+	}
+	f.Raw["tag_subscriptions"] = arr
 	return f.write()
 }
 

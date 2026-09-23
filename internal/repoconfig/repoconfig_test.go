@@ -236,3 +236,38 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 		t.Fatalf("unexpected entries: %v", entries)
 	}
 }
+
+func TestTagSubscriptionsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	f, err := Create(dir, "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sets, bad := f.TagSubscriptions(); len(sets) != 0 || len(bad) != 0 {
+		t.Fatalf("absent key: %v %v", sets, bad)
+	}
+	if _, err := f.AddTagSet([]string{"Bug", "agentbus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AddTagSet([]string{"agentbus", "bug"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AddTagSet([]string{"bad tag"}); err == nil {
+		t.Fatal("invalid tag must be rejected")
+	}
+	g, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sets, bad := g.TagSubscriptions()
+	if len(sets) != 1 || sets[0][0] != "agentbus" || sets[0][1] != "bug" || len(bad) != 0 {
+		t.Fatalf("%v %v", sets, bad)
+	}
+	g.Raw["tag_subscriptions"] = []any{[]any{"ok"}, "not a list", []any{"no spaces"}}
+	if sets, bad := g.TagSubscriptions(); len(sets) != 1 || len(bad) != 2 {
+		t.Fatalf("bad entries reported: %v %v", sets, bad)
+	}
+	if sets, err := f.RemoveTagSet([]string{"bug", "agentbus"}); err != nil || len(sets) != 0 {
+		t.Fatalf("%v %v", sets, err)
+	}
+}

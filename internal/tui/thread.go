@@ -13,6 +13,9 @@ import (
 // own channel. Unread counts and the divider stay on m.msgs[ch] (the
 // inbox), see unread and dividerFor.
 func (m *Model) paneMsgs(ch string) []bus.Message {
+	if isTagPane(ch) {
+		return m.tagPaneMsgs(ch)
+	}
 	owner, ok := strings.CutPrefix(ch, bus.DMPrefix)
 	if !ok {
 		return m.msgs[ch]

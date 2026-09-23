@@ -222,9 +222,13 @@ func (m Model) renderHeader() string {
 		return m.theme.Style(m.theme.Dim).Render("no channels yet · c to create one")
 	}
 	var s string
-	if owner, ok := strings.CutPrefix(ch.Name, bus.DMPrefix); ok {
+	switch {
+	case isTagPane(ch.Name):
+		s = m.tagChips(tagPaneSet(ch.Name)) + fmt.Sprintf(" · %d messages", len(m.rows(ch.Name)))
+	case strings.HasPrefix(ch.Name, bus.DMPrefix):
+		owner, _ := strings.CutPrefix(ch.Name, bus.DMPrefix)
 		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
-	} else {
+	default:
 		s = fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
 	}
 	if m.status.Notice != "" {
@@ -248,20 +252,33 @@ func (m Model) renderRails() string {
 	trunc := lipgloss.NewStyle().MaxWidth(rail)
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
+	// tagsShown tracks whether the "tags" section header has been written
+	// yet: tag panes sort after every real channel (their names start
+	// "tags:"), so the header goes up once, right before the first one.
+	tagsShown := false
 	for i, c := range m.channels {
-		mark := iconChat
-		switch {
-		case bus.IsTaskChannel(c.Name):
-			mark = iconTasks
-		case c.Kind == "memory":
-			mark = iconMem
-		}
-		line := m.chanStyle(c).Render(mark + c.Name)
-		if n := m.unread(c.Name); n > 0 {
-			line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
-		}
-		if !m.c.isSubscribed(c.Name) {
-			line += dim.Render(" (off)")
+		var line string
+		if isTagPane(c.Name) {
+			if !tagsShown {
+				l.WriteString(dim.Render("tags") + "\n")
+				tagsShown = true
+			}
+			line = m.tagChips(tagPaneSet(c.Name))
+		} else {
+			mark := iconChat
+			switch {
+			case bus.IsTaskChannel(c.Name):
+				mark = iconTasks
+			case c.Kind == "memory":
+				mark = iconMem
+			}
+			line = m.chanStyle(c).Render(mark + c.Name)
+			if n := m.unread(c.Name); n > 0 {
+				line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
+			}
+			if !isTagPane(c.Name) && !m.c.isSubscribed(c.Name) {
+				line += dim.Render(" (off)")
+			}
 		}
 		// While a session is selected, the channel list draws no highlighted
 		// row; the sessions list below highlights instead.
@@ -308,8 +325,12 @@ func (m Model) renderRails() string {
 	}
 	// Channels take what they need up to half the column; sessions get the
 	// rest, and a blank row separates the two lists.
+	extra := 0
+	if tagsShown {
+		extra = 1
+	}
 	total := m.stream.Height + 1
-	chanRows := min(len(m.channels)+1, max(total/2, total-len(names)-2))
+	chanRows := min(len(m.channels)+1+extra, max(total/2, total-len(names)-2))
 	channels := lipgloss.NewStyle().MaxHeight(chanRows).Render(l.String())
 	sessions := lipgloss.NewStyle().MaxHeight(max(total-chanRows-1, 1)).Render(r.String())
 	col := lipgloss.JoinVertical(lipgloss.Left, channels, "", sessions)
@@ -443,7 +464,11 @@ func (m Model) renderCompose() string {
 	ch := m.selected()
 	label := ""
 	hint := ""
-	if ch != nil {
+	switch {
+	case ch == nil:
+	case isTagPane(ch.Name):
+		label = m.tagChips(tagPaneSet(ch.Name))
+	default:
 		mark, text := iconChat, ch.Name
 		switch {
 		case bus.IsTaskChannel(ch.Name):

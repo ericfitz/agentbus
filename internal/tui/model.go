@@ -334,6 +334,9 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
 		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
+		}
 		return m.submitCompose()
 	case "alt+enter":
 		m.compose.InsertString("\n")
@@ -368,6 +371,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
 		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
+		}
 		m.mode = modeInsert
 		return m.compose.Focus()
 	// enter performs the pane's action: reply to the cursor message in the
@@ -375,6 +381,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
+		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
 		}
 		if r, ok := m.cursorRow(); ok {
 			if !m.replyAllowed() {
@@ -438,6 +447,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
 		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
+		}
 		if !m.replyAllowed() {
 			return m.showToast(replyRefusedToast)
 		}
@@ -458,8 +470,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		return m.toggleSubscribe()
+	case "t":
+		return m.tagPrompt()
 	case "d":
-		if m.sessSel < 0 && m.selected() != nil {
+		if m.sessSel < 0 && m.selected() != nil && !isTagPane(m.selName()) {
 			m.mode = modeConfirmChannel
 		}
 	case "/":
@@ -467,6 +481,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "m":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
+		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
 		}
 		return m.openMemories()
 	case "h":
@@ -520,7 +537,7 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 			return m.focusPane(p)
 		case p == paneStream && len(m.rows(m.selName())) > 0 && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
-		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()):
+		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)
 		}
 	}
@@ -789,7 +806,7 @@ func (m *Model) showSelected() tea.Cmd {
 		return m.loadTasks(ch)
 	}
 	var cmds []tea.Cmd
-	if ch != "" && !m.loaded[ch] {
+	if ch != "" && !m.loaded[ch] && !isTagPane(ch) {
 		cmds = append(cmds, m.loadHistory(ch, nil))
 	}
 	// A DM pane merges what its owner sent to every other inbox, so those
@@ -799,6 +816,15 @@ func (m *Model) showSelected() tea.Cmd {
 		for _, d := range m.dms {
 			if d.Name != ch && !m.loaded[d.Name] {
 				cmds = append(cmds, m.loadHistory(d.Name, nil))
+			}
+		}
+	}
+	// A tag pane is drawn from the chat channels' loaded messages, so it
+	// needs their latest pages; one page per chat channel on first visit.
+	if isTagPane(ch) {
+		for _, c := range m.channels {
+			if c.Kind == "ordinary" && !m.loaded[c.Name] {
+				cmds = append(cmds, m.loadHistory(c.Name, nil))
 			}
 		}
 	}
@@ -892,7 +918,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 			delete(m.sessionsSeen, name)
 		}
 	}
-	cmds := []tea.Cmd{m.setChannels(msg.st.Channels, "oldest")}
+	cmds := []tea.Cmd{m.setChannels(msg.st.Channels, msg.tags, "oldest")}
 	if hadSel {
 		names := m.sessionNames()
 		switch i := slices.Index(names, selName); {
@@ -916,7 +942,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 // selection by name, and subscribes to any channel not yet subscribed. DM
 // inboxes (dm/*) are split out into m.dms: they show in the sessions rail,
 // never the channel list, and are never selectable.
-func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
+func (m *Model) setChannels(chans []bus.Channel, tags [][]string, from string) tea.Cmd {
 	// cur comes from the channel list itself, not selName(): while the
 	// sessions pane holds the selection, selName() names a DM inbox that
 	// would never match a channel, silently losing the channel list's
@@ -942,6 +968,12 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	}
 	m.dms = dms
 	m.channels = channels
+	// Tag sets are rail entries too (a "tags" section under the channels):
+	// synthetic, never subscribed on the bus, drawn as chips, rendered from
+	// the messages already loaded for the chat channels.
+	for _, set := range tags {
+		m.channels = append(m.channels, bus.Channel{Name: tagPanePrefix + strings.Join(set, ","), Kind: "tags"})
+	}
 	m.sel = -1
 	for i, c := range m.channels {
 		if c.Name == cur {
@@ -972,7 +1004,11 @@ func (m *Model) statusCmd() tea.Cmd {
 	c := m.c
 	return func() tea.Msg {
 		st, err := c.b.StatusReport()
-		return statusMsg{st: st, err: err}
+		if err != nil {
+			return statusMsg{st: st, err: err}
+		}
+		tags, err := c.b.TagSubscriptions(c.as)
+		return statusMsg{st: st, tags: tags, err: err}
 	}
 }
 

@@ -10,8 +10,9 @@ type (
 	receiveErrMsg struct{ err error }
 	statusTickMsg struct{}
 	statusMsg     struct {
-		st  bus.Status
-		err error
+		st   bus.Status
+		tags [][]string
+		err  error
 	}
 	historyMsg struct {
 		channel string

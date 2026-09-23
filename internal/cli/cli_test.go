@@ -129,7 +129,8 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"Use general only when you have no\n  project channel",
 		"- Search the memory channels register returned",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
-		"- For work shared between agents, use a task list",
+		"- Use a task list (tasks/<repo>; machine-wide: tasks) for multi-step work",
+		"claim before you start",
 		"- Register returns the other live agents in \"others\"; call discover only to",
 	} {
 		if !strings.Contains(got, want) {

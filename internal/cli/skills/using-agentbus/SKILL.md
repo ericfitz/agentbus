@@ -63,30 +63,69 @@ text does not match `-filter`.
 
 A task list is a memory channel named `tasks/<name>`. A repository's list
 is `tasks/<repo>`, created by `agentbus init` and subscribed by `register`;
-the machine-wide list `tasks` exists on every bus. If `tasks/<repo>` is
-missing, create it yourself with `create_channel` (`kind: memory`) and
-`subscribe` to it; do not fall back to chat. Any other list you create the
-same way.
-Use a list when more than one agent could pick up the work, or the work
-must survive your session; use chat for everything else.
+the machine-wide list `tasks` exists on every bus for work that is not
+about one repository. If `tasks/<repo>` is missing, create it yourself with
+`create_channel` (`kind: memory`) and `subscribe` to it; do not fall back
+to chat.
 
-- `task_create` adds a task. `parent` nests it; `before` / `after` place it
-  among its siblings; `blocked_by` names tasks that must complete first.
-- `task_claim` before you start. `conflict` means someone else owns it or
-  it is blocked: pick another task, do not force.
-- When you stop: `task_update` with `status: completed`, or `task_release`.
-  Never leave a task claimed that you are not working on.
-- If your session ends, your tasks return to `pending` on their own. Set
-  `leased_until` only on a task you will keep renewing; an expired lease
-  hands your task to the next claimer.
+### When to use a list, when to use chat
+
+Use a list for multi-step work, for work another agent or a later session
+could pick up, and for a plan that should survive your context window.
+Use chat for announcements, questions, and one-off status. A task is the
+unit of handoff: if you would otherwise write "remaining: X, Y, Z" in
+`HANDOFF.md`, create three tasks.
+
+### How to structure tasks
+
+- One deliverable per task, with an imperative subject ("Add tags column",
+  not "tags"). Put acceptance details in `description`.
+- `parent` breaks a task down; subtasks are ordered under it.
+- `blocked_by` only for a real ordering dependency (the blocked task cannot
+  start until the blocker is complete). For priority, use sibling order:
+  `before` / `after` a sibling id on create or update.
+- Keep `metadata` for machine-readable hints (branch, issue number).
+
+### Lifecycle
+
+1. `task_list` before starting work: see what is claimed and what is
+   blocked.
+2. `task_claim` before you start. `conflict` means someone else owns it or
+   it is blocked: pick another task, do not force. A claimed task is
+   `in_progress`; a task must have an owner to be `in_progress` (the bus
+   refuses otherwise, and clearing the owner of an in-progress task is
+   refused too).
+3. When you stop: `task_update` with `status: completed`, or `task_release`
+   to hand it back. Never leave a task claimed that you are not working on.
+4. Long-running work: claim with `leased_until` and renew it with
+   `task_claim` again before it passes; an expired lease hands the task to
+   the next claimer, and a `task_update` after expiry changes nothing.
+5. When your session ends, tasks you own return to `pending` on their own,
+   so a crash never strands work; anything half-done should be described
+   in the task before you stop.
+
+### Coordinating through a list
+
 - `force: true` overrides another owner and is recorded. Use it only when
-  the user tells you to.
-- To renew a lease, call `task_claim` again; calling `task_update` after it
-  has already expired does nothing, since the task is already back to
-  pending.
+  the user tells you to, never over a live agent's task.
+- Post to the project chat when you claim or finish something others are
+  waiting on (a blocker, a handoff); the list itself is quiet.
 - `receive` delivers a task's latest revision, not every intermediate one,
-  and never a deletion; call `task_list` when you need the full picture.
+  and never a deletion; `task_list` is the full picture.
 - `send`, `edit_memory`, and `delete_memory` are refused on task lists.
+
+### Worked example
+
+```
+task_list channel=tasks/<repo>                       # nothing claimed
+task_create channel=tasks/<repo> subject="Add message tags"
+task_create ... subject="Schema migration" parent=1
+task_create ... subject="Send/receive tags" parent=1 blocked_by=[2]
+task_claim task_id=2                                 # in_progress, owner=you
+... work, then post "schema 3 landed on main" to general/<repo> ...
+task_update task_id=2 status=completed               # 3 is now unblocked
+task_claim task_id=3
+```
 
 ## Tags
 

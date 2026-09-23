@@ -451,11 +451,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Discover(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_create", Description: "Agentbus: add a task to a task list (a memory channel named tasks/<name>; create one with create_channel kind=memory). New tasks are pending and unowned. parent nests it under an existing task in the same list; before or after (a sibling task id) places it, default last. blocked_by lists task ids in the same list that must complete first."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_create", Description: "Agentbus: add a task to a task list (a memory channel named tasks/<name>; create one with create_channel kind=memory). New tasks are pending and unowned. parent nests it under an existing task in the same list; before or after (a sibling task id) places it, default last. blocked_by lists task ids in the same list that must complete first. One deliverable per task with an imperative subject; blocked_by only for real ordering dependencies, sibling order for priority."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskCreateIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskCreate(in.As, in.TaskCreateInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_claim", Description: "Agentbus: claim a task: if it has no owner you become its owner and it becomes in_progress. Fails with conflict if someone else owns it or it is blocked. A task whose owner's session has ended, or whose lease ran out, counts as unowned. leased_until (unix ms UTC, optional) sets a lease; renew it by calling task_claim again with a later leased_until before it passes."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_claim", Description: "Agentbus: claim a task: if it has no owner you become its owner and it becomes in_progress. Fails with conflict if someone else owns it or it is blocked. A task whose owner's session has ended, or whose lease ran out, counts as unowned. leased_until (unix ms UTC, optional) sets a lease; renew it by calling task_claim again with a later leased_until before it passes. Call task_list first; claim before starting work."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskClaimIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskClaim(in.As, in.TaskID, in.LeasedUntil, in.IdempotencyKey))
 		})
@@ -463,7 +463,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskReleaseIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskRelease(in.As, in.TaskID, in.IdempotencyKey))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_update", Description: "Agentbus: change a task by id; only the fields you pass change. status is pending, in_progress, or completed. While a task is in_progress only its owner may change or delete it; force=true overrides that for anyone and is recorded. owner=\"\" clears the owner, parent=0 moves the task to the top level, leased_until=0 clears the lease (any other value must be in the future). before/after reorder among siblings. delete=true deletes a task that has no subtasks. To renew a lease use task_claim again: renewing through task_update after the lease has expired finds the task already returned to pending and changes nothing."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_update", Description: "Agentbus: change a task by id; only the fields you pass change. status is pending, in_progress, or completed. While a task is in_progress only its owner may change or delete it; force=true overrides that for anyone and is recorded. owner=\"\" clears the owner, parent=0 moves the task to the top level, leased_until=0 clears the lease (any other value must be in the future). before/after reorder among siblings. delete=true deletes a task that has no subtasks. To renew a lease use task_claim again: renewing through task_update after the lease has expired finds the task already returned to pending and changes nothing. An in_progress task always has an owner."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskUpdateIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskUpdate(in.As, in.TaskPatch))
 		})
@@ -471,7 +471,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskGetIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskGet(in.As, in.TaskID))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive: you get each task's latest revision, not every intermediate one, and deletions are not delivered."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive: you get each task's latest revision, not every intermediate one, and deletions are not delivered. Check it before starting work to see what is claimed or blocked."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskListIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskList(in.As, in.TaskListInput))
 		})

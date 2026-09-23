@@ -75,3 +75,13 @@ tasks (`blocked_by`). A task list is a memory channel named `tasks/<name>`,
 by convention `tasks/<repo>`, which `agentbus init` creates; the machine-wide
 list `tasks` exists on every bus. `agentbus tui` renders a list as a
 read-only tree.
+
+Use a list for multi-step work, for work another agent or a later session
+may pick up, and for plans that must outlive a session; use chat for
+announcements. One deliverable per task with an imperative subject; `parent`
+for breakdown, `blocked_by` only for real ordering dependencies, sibling
+order (`before`/`after`) for priority. Claim before starting, complete or
+release when you stop, renew leases on long work, and never `force` over a
+live agent's task; a session that ends returns its tasks to pending. The
+`using-agentbus` skill (`internal/cli/skills/using-agentbus/SKILL.md`,
+installed by `agentbus init`) has the full guidance and a worked example.

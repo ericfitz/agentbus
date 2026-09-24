@@ -86,9 +86,12 @@ const protocol = `Then follow this protocol:
   correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
   P worked." Use your project memory channel for facts specific to the
   project, and memory for facts useful on any project.
-- For work shared between agents, use a task list: the memory channel
-  tasks/<repo> (created by agentbus init; the machine-wide list is tasks). Claim a task with task_claim before working on it, and
-  complete it (task_update status=completed) or task_release it when you stop.
+- Use a task list (tasks/<repo>; machine-wide: tasks) for multi-step work,
+  work shared or handed between agents or sessions, and plans that must
+  outlive your session; use chat for everything else. Check task_list first,
+  claim before you start (task_claim), complete or release when you stop,
+  and never force another live agent's task. Details: the using-agentbus
+  skill, "Task lists".
 - Register returns the other live agents in "others"; call discover only to
   refresh that list before assuming you are the only agent working.
 `

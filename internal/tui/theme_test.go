@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -67,5 +68,18 @@ func TestLoadThemeByNameWithDefaultsForMissingBadAndUnknown(t *testing.T) {
 	th = LoadTheme(cfg, &warn)
 	if th.Name != "default" || th.Agent != lipgloss.Color("6") || !strings.Contains(warn.String(), `"nope"`) {
 		t.Fatalf("unknown theme name must warn and use the default theme: %+v %q", th, warn.String())
+	}
+}
+
+func TestThemeTimestampAndTagKeys(t *testing.T) {
+	cfg := config.Default()
+	th := LoadTheme(cfg, io.Discard)
+	if th.Stamp != lipgloss.Color("8") || th.Tag != lipgloss.Color("8") {
+		t.Fatalf("defaults: stamp=%v tag=%v", th.Stamp, th.Tag)
+	}
+	cfg.Themes[0].Timestamp, cfg.Themes[0].Tag = "green", "default"
+	th = LoadTheme(cfg, io.Discard)
+	if th.Stamp != lipgloss.Color("2") || th.Tag != (lipgloss.NoColor{}) || th.Sources["tag"] != "default" {
+		t.Fatalf("overrides: %+v", th)
 	}
 }

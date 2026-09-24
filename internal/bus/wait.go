@@ -46,48 +46,81 @@ func (b *Bus) Wait(as string, channels []string, includeOwn bool, match func(Mes
 }
 
 // peek selects, without side effects, the messages Receive would deliver
-// next for as: everything past each subscription's cursor. skipBelow raises
-// the floor per channel for messages a caller has already rejected.
+// next for as: everything past each subscription's cursor, the tag source
+// (receive's tags/ row) included. skipBelow raises the floor per channel
+// for messages a caller has already rejected.
 func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[string]int64) ([]Message, error) {
 	rows, err := b.db.Query("SELECT channel, cursor_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
 	if err != nil {
 		return nil, internal(err)
 	}
-	var conds []string
-	var args []any
+	type sub struct {
+		channel string
+		cursor  int64
+	}
+	var subs []sub
 	for rows.Next() {
-		var ch string
-		var cursor int64
-		if err := rows.Scan(&ch, &cursor); err != nil {
+		var s sub
+		if err := rows.Scan(&s.channel, &s.cursor); err != nil {
 			_ = rows.Close()
 			return nil, internal(err)
 		}
 		// Same guard as receive's delivery loop: a leftover observer-only row
 		// (or a CLI `agentbus wait` process, never an observer) must not peek
 		// another identity's inbox.
-		if !b.dmReadable(as, ch) {
+		if !b.dmReadable(as, s.channel) {
 			continue
 		}
-		if len(channels) > 0 && !contains(channels, ch) {
+		if len(channels) > 0 && !contains(channels, s.channel) {
 			continue
 		}
-		conds = append(conds, "(channel=? AND seq>?)")
-		args = append(args, ch, max(cursor, skipBelow[ch]))
+		subs = append(subs, s)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, internal(err)
 	}
+	var conds []string
+	var args []any
+	var sets []tagSet
+	direct := map[string]bool{}
+	for _, s := range subs {
+		floor := max(s.cursor, skipBelow[s.channel])
+		if s.channel == tagSource {
+			if sets, err = b.tagSets(b.db, as); err != nil {
+				return nil, err
+			}
+			if len(sets) == 0 {
+				continue
+			}
+			tq, ta := tagCond(as, floor)
+			conds = append(conds, "("+tq+")")
+			args = append(args, ta...)
+			continue
+		}
+		direct[s.channel] = true
+		conds = append(conds, "(channel=? AND seq>?)")
+		args = append(args, s.channel, floor)
+	}
 	if len(conds) == 0 {
 		return nil, errf("not_found", false, "%q has no matching subscriptions; register first", as)
 	}
-	q := "SELECT " + messageColumns + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0"
+	q := "SELECT " + messageCols("messages") + " FROM messages WHERE (" + strings.Join(conds, " OR ") + ") AND tombstone=0"
 	if !includeOwn {
 		q += " AND sender<>?"
 		args = append(args, as)
 	}
 	q += " ORDER BY seq LIMIT ?"
 	args = append(args, b.cfg.ReceiveMaxCount)
-	return queryMessages(b.db, q, args)
+	msgs, err := queryMessages(b.db, q, args)
+	if err != nil {
+		return nil, err
+	}
+	for i := range msgs {
+		if !direct[msgs[i].Channel] {
+			msgs[i].MatchedTags = matchedTags(sets, msgs[i])
+		}
+	}
+	return msgs, nil
 }
 
 func contains(list []string, s string) bool {

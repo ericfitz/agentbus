@@ -115,3 +115,189 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 		t.Fatalf("search after rebuild: %v", err)
 	}
 }
+
+// TestMigrateV2AddsMessageTags: a schema version 2 file opens, gains
+// message_tags through the shared DDL, and is stamped 3.
+func TestMigrateV2AddsMessageTags(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DROP TABLE message_tags"); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Close()
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v2 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv, n int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv < 3 {
+		t.Fatalf("user_version = %d, %v", uv, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='message_tags'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("message_tags missing: %d %v", n, err)
+	}
+}
+
+// TestMigrateV3AddsTagSubscriptions: a schema version 3 file opens, gains
+// tag_subscriptions through the shared DDL, and is stamped 4.
+func TestMigrateV3AddsTagSubscriptions(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("PRAGMA user_version = 3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DROP TABLE tag_subscriptions"); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Close()
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v3 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv, n int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv < 4 {
+		t.Fatalf("user_version = %d, %v", uv, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='tag_subscriptions'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("tag_subscriptions missing: %d %v", n, err)
+	}
+}
+
+// TestMigrateV2To5 (#13): a database shaped like 1.6.0 -- user_version 2,
+// missing message_tags, tag_subscriptions, and tag_subscription_tags --
+// opens, walks every migration step up to schemaVersion, passes the FK
+// check each step already runs, and tag subscribe/send/receive works
+// afterward.
+func TestMigrateV2To5(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		"DROP TABLE tag_subscription_tags", // FK'd to tag_subscriptions: drop first
+		"DROP TABLE tag_subscriptions",
+		"DROP TABLE message_tags",
+		"PRAGMA user_version = 2",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v2 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	for _, tbl := range []string{"message_tags", "tag_subscriptions", "tag_subscription_tags"} {
+		var n int
+		if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name=?", tbl).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s missing after migration: %d %v", tbl, n, err)
+		}
+	}
+	sam, kim := reg(t, b, "Sam"), reg(t, b, "Kim")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "hi", Tags: []string{"a"}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Messages) != 1 || r.Messages[0].Content != "hi" {
+		t.Fatalf("tag subscribe/send/receive after migration: %+v %v", r, err)
+	}
+}
+
+// TestMigrateV4SplitsTagSets (#13): a v4 database's tag_subscriptions row
+// backfills into tag_subscription_tags (one row per tag), message_tags_tag
+// is dropped, and message_tags_tag_seq replaces it.
+func TestMigrateV4SplitsTagSets(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shape a v4 database: no tag_subscription_tags, the old tag-only
+	// index, and one AND set already subscribed.
+	for _, s := range []string{
+		"DROP TABLE tag_subscription_tags",
+		"DROP INDEX IF EXISTS message_tags_tag_seq",
+		"CREATE INDEX message_tags_tag ON message_tags(tag)",
+		"INSERT INTO tag_subscriptions(sender, tags_key, created_seq) VALUES('Kim','a,b',7)",
+		"PRAGMA user_version = 4",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v4 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	rows, err := b.db.Query("SELECT sender, tags_key, tag FROM tag_subscription_tags ORDER BY tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [][3]string
+	for rows.Next() {
+		var sender, key, tag string
+		if err := rows.Scan(&sender, &key, &tag); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, [3]string{sender, key, tag})
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := [][3]string{{"Kim", "a,b", "a"}, {"Kim", "a,b", "b"}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("tag_subscription_tags after migration: %v, want %v", got, want)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='message_tags_tag'").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("message_tags_tag must be dropped: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='message_tags_tag_seq'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("message_tags_tag_seq missing: %d %v", n, err)
+	}
+}

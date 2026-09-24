@@ -31,10 +31,14 @@ func (m *Model) submitCompose() tea.Cmd {
 		return nil
 	}
 	// A reply while viewing the TUI's own inbox goes back to the sender, not
-	// into the inbox being viewed; every other send targets the selected
-	// channel as usual.
+	// into the inbox being viewed. The pane also shows the TUI's own outgoing
+	// messages (#4); a reply to one of those stays in the partner's inbox,
+	// the channel it was sent to.
 	if m.replyTo != nil && ch == bus.DMChannel(m.c.as) {
 		ch = bus.DMChannel(m.replyTo.Sender)
+		if m.replyTo.Sender == m.c.as {
+			ch = m.replyTo.Channel
+		}
 	}
 	in := bus.SendInput{Channel: ch, Content: text}
 	if m.replyTo != nil {
@@ -110,6 +114,12 @@ func (m *Model) toggleSubscribe() tea.Cmd {
 	ch := m.selected()
 	if ch == nil {
 		return nil
+	}
+	if isTagPane(ch.Name) {
+		if err := m.c.b.UnsubscribeTags(m.c.as, tagPaneSet(ch.Name)); err != nil {
+			return m.showToast("unsubscribe: " + errText(err))
+		}
+		return tea.Batch(m.showToast("unsubscribed from tags "+strings.TrimPrefix(ch.Name, tagPanePrefix)), m.statusCmd())
 	}
 	c := m.c
 	name := ch.Name

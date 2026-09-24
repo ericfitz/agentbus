@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 	"github.com/muesli/termenv"
 )
 
@@ -16,6 +17,10 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	f.agentSend(t, "dev", "hello from sam")
 	f.receive(t)
 	f.run(f.m.statusCmd())
+	// Wide enough that the version prefix (#15) doesn't truncate the normal-
+	// mode key hints this test checks for below; truncation itself is
+	// TestStatusBarShowsVersion's job.
+	f.m.width = 140
 
 	// Insert mode is the fixture's starting mode: the compose line reads
 	// "dev ›" and the status bar shows the insert-mode key hints.
@@ -49,6 +54,20 @@ func assertStatusBarIsLastLine(t *testing.T, v string, height int) {
 	}
 	if last := lines[len(lines)-1]; !strings.Contains(last, "db ") {
 		t.Fatalf("status bar must be the last line, got %q:\n%s", last, v)
+	}
+}
+
+func TestStatusBarShowsVersion(t *testing.T) {
+	f := newFixture(t)
+	bar := ansi.Strip(f.m.renderStatusBar())
+	if !strings.HasPrefix(bar, "agentbus v"+mcpserver.Version+"  db ") {
+		t.Fatalf("status bar: %q", bar)
+	}
+	for _, w := range []int{60, 40} {
+		f.m.width = w
+		if got := lipgloss.Width(f.m.renderStatusBar()); got > w {
+			t.Fatalf("width %d: status bar is %d cols wide, must stay one row: %q", w, got, f.m.renderStatusBar())
+		}
 	}
 }
 
@@ -202,6 +221,18 @@ func TestIconAgentWidth(t *testing.T) {
 	}
 }
 
+// The task-list icon is a Wide emoji like chat and memory, so it needs no
+// CSI erase/cursor trick: rail, compose, search, and the task pane title all
+// line up on the same column.
+func TestIconTasksIsWideEmojiWithoutEscapes(t *testing.T) {
+	if w := lipgloss.Width(iconTasks); w != lipgloss.Width(iconChat) {
+		t.Fatalf("iconTasks width %d, want %d", w, lipgloss.Width(iconChat))
+	}
+	if strings.Contains(iconTasks, "\x1b[") {
+		t.Fatalf("iconTasks must not need the CSI erase trick: %q", iconTasks)
+	}
+}
+
 // The channel name carries its kind's color (agent for chat, memory for
 // memory) in the rail and the stream header, as it does in the compose row.
 func TestChannelNameColoredInRailAndHeader(t *testing.T) {
@@ -290,5 +321,150 @@ func TestSessionRowColorsMatchIdentity(t *testing.T) {
 	}
 	if !strings.Contains(ericRow, userOpen+"eric") {
 		t.Fatalf("the TUI's own session row must use the user color: %q", ericRow)
+	}
+}
+
+// msgAt injects one already-loaded message so a header test controls every
+// field (sender, channel, time, tags) without a bus round trip.
+func (f *fixture) msgAt(ch, sender string, seq, createdAt int64, content string, tags ...string) {
+	f.m.addMessages(ch, []bus.Message{{Seq: seq, Channel: ch, Sender: sender, CreatedAt: createdAt, Content: content, Tags: tags}})
+	f.m.refreshStream()
+}
+
+func TestStampTodayAndPast(t *testing.T) {
+	if got := stamp(time.Now().UnixMilli()); !strings.HasPrefix(got, "(today)    ") || len([]rune(got)) != 19 {
+		t.Fatalf("today: %q", got)
+	}
+	past := time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local).UnixMilli()
+	if got := stamp(past); got != "2026-01-02 03:04:05" {
+		t.Fatalf("past: %q", got)
+	}
+}
+
+func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello")
+	f.receive(t)
+	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	want := ansi.Strip(iconAgent) + "Sam" + iconArrow + iconChat + "dev"
+	if !strings.Contains(first, want) || !strings.Contains(first, "(today)") {
+		t.Fatalf("channel header %q lacks %q", first, want)
+	}
+	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "hello") || strings.Contains(lines[0], "hello") {
+		t.Fatalf("body must start on the next line: %q", lines)
+	}
+
+	f.run(f.m.statusCmd())
+	f.key("esc")
+	f.toSessions()
+	// Select the DM session before the message arrives, same as "dev" above
+	// (already selected by default): onBatch marks an already-selected
+	// channel seen on arrival, so no "new" divider is inserted ahead of the
+	// header this assertion reads as the first line.
+	for i, n := range f.m.sessionNames() {
+		if n == f.c.as {
+			f.run(f.m.selectSession(i))
+		}
+	}
+	f.agentSend(t, "dm/"+f.c.as, "psst")
+	f.receive(t)
+	first = ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	want = ansi.Strip(iconAgent) + "Sam" + iconArrow + iconUser + f.c.as
+	if !strings.Contains(first, want) {
+		t.Fatalf("DM header %q lacks %q", first, want)
+	}
+}
+
+func TestHeaderBusSender(t *testing.T) {
+	f := newFixture(t)
+	f.msgAt("dev", "", 9001, time.Now().UnixMilli(), "reclaimed")
+	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
+	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus"+iconArrow) {
+		t.Fatalf("empty sender renders as bus: %q", first)
+	}
+}
+
+func TestSelectedRowSwapsDimToText(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.m.theme.Text = lipgloss.Color("7")
+	f.agentSend(t, "dev", "one")
+	f.agentSend(t, "dev", "two")
+	f.receive(t)
+	f.key("shift+tab") // cursor on "two"
+	lines := strings.Split(f.m.renderStream(), "\n")
+	stampOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Stamp).Render("\x00"), "\x00")
+	textOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Text).Render("\x00"), "\x00")
+	if !strings.Contains(lines[0], stampOpen+"(today)") {
+		t.Fatalf("unselected row keeps the timestamp color: %q", lines[0])
+	}
+	if !strings.Contains(lines[2], textOpen+"(today)") || strings.Contains(lines[2], stampOpen+"(today)") {
+		t.Fatalf("selected row swaps dim text to the text color: %q", lines[2])
+	}
+	if f.m.cursorLine != 2 {
+		t.Fatalf("cursorLine=%d, want 2 (header + body of the first row)", f.m.cursorLine)
+	}
+}
+
+func TestTagChipsAndFallback(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.msgAt("dev", "Sam", 9001, time.Now().UnixMilli(), "tagged", "release", "bug")
+	chip := lipgloss.NewStyle().Background(f.m.theme.Tag).Foreground(lipgloss.Color("15"))
+	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
+	if !strings.Contains(first, chip.Render(" release ")+" "+chip.Render(" bug ")) {
+		t.Fatalf("chips missing: %q", first)
+	}
+	f.key("shift+tab") // selected row keeps the chip background
+	if first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]; !strings.Contains(first, chip.Render(" release ")) {
+		t.Fatalf("selected row lost chip background: %q", first)
+	}
+	f.m.theme.Tag = lipgloss.NoColor{}
+	if first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0]); !strings.Contains(first, "#release #bug") {
+		t.Fatalf("fallback: %q", first)
+	}
+}
+
+func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
+	f := newFixture(t)
+	long := strings.Repeat("x", 40)
+	if _, err := f.ab.CreateChannel(f.sam, long, "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.m.width = 60
+	f.m.layout()
+	// Select the channel before the message arrives (same reason as the DM
+	// case above): msgAt calls addMessages directly, and a first select on
+	// an empty channel leaves divider at -1, so injecting afterward never
+	// inserts a "new" divider ahead of the header line this test measures.
+	for i, c := range f.m.channels {
+		if c.Name == long {
+			f.run(f.m.selectChannel(i))
+		}
+	}
+	f.msgAt(long, "Sam", 9001, time.Now().UnixMilli(), "body", "a", "b", "c")
+	lines := strings.Split(f.m.renderStream(), "\n")
+	if w := lipgloss.Width(lines[0]); w > f.m.stream.Width {
+		t.Fatalf("header wrapped or overflowed: width %d > %d: %q", w, f.m.stream.Width, lines[0])
+	}
+	if s := ansi.Strip(lines[0]); !strings.Contains(s, "…") || strings.Contains(s, " a ") {
+		t.Fatalf("tags go first, then the recipient is cut with …: %q", s)
+	}
+	if !strings.Contains(ansi.Strip(lines[1]), "body") {
+		t.Fatalf("body still on line 2: %q", lines)
+	}
+}
+
+func TestChipTextContrastsWithTagColor(t *testing.T) {
+	for bg, want := range map[string]string{"7": "0", "11": "0", "15": "0", "3": "0", "4": "15", "8": "15", "1": "15"} {
+		if got := chipText(lipgloss.Color(bg)); got != lipgloss.Color(want) {
+			t.Errorf("tag %s: chip text %v, want %s", bg, got, want)
+		}
 	}
 }

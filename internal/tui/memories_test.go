@@ -286,3 +286,14 @@ func TestEditorCommandPrecedence(t *testing.T) {
 		t.Fatalf("whitespace-only VISUAL must fall back to vi without panicking, got %q", got)
 	}
 }
+
+// A $VISUAL that names no command makes sh exit 127; the toast says so and
+// shows the setting instead of a bare "exit status 127".
+func TestEditorErrTextExplainsMissingCommand(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no such editor")
+	t.Setenv("VISUAL", missing)
+	err := editorCommand("x.md").Run()
+	if got := editorErrText(err); !strings.Contains(got, "not found") || !strings.Contains(got, missing) || !strings.Contains(got, "$VISUAL") {
+		t.Fatalf("editorErrText(%v) = %q", err, got)
+	}
+}

@@ -665,3 +665,58 @@ func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 		t.Fatal(kinds)
 	}
 }
+
+func TestSendTagsRoundTripOverMCP(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "tagged", "tags": []string{"Release", "bug"}})
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "plain"})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "history", Arguments: map[string]any{"as": "Sam", "channel": "general", "tags": []string{"bug"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, `"tags":["bug","release"]`) || strings.Contains(text, "plain") {
+		t.Fatalf("history tags filter and tags field: %s", text)
+	}
+	_, bad := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "x", "tags": []string{"no spaces"}})
+	if !bad.IsError {
+		t.Fatal("invalid tag must be rejected")
+	}
+}
+
+func TestTagSubscriptionOverMCP(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	// Kim is registered without ever subscribing to "dev" directly (unlike
+	// "general", which register's persistent default channel list already
+	// subscribes her to), so a message there can only reach her through the
+	// tag source and carries matched_tags.
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"})
+	call(t, cs, "register", map[string]any{"name": "Kim"})
+	out, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release", "Release"}})
+	if res.IsError {
+		t.Fatalf("%v %+v", out, res)
+	}
+	if got, ok := out["subscribed_tags"].([]any); !ok || len(got) != 1 || got[0] != "release" {
+		t.Fatalf("subscribed_tags must echo the normalized set: %+v", out)
+	}
+	if _, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "channel": "general", "tags": []string{"x"}}); !res.IsError {
+		t.Fatal("channel and tags together must be rejected")
+	}
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "dev", "content": "ship it", "tags": []string{"release"}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "receive", Arguments: map[string]any{"as": "Kim"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"matched_tags":["release"]`) {
+		t.Fatalf("receive: %s", text)
+	}
+	uout, ures := call(t, cs, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}})
+	if ures.IsError {
+		t.Fatal("unsubscribe tags")
+	}
+	if got, ok := uout["unsubscribed_tags"].([]any); !ok || len(got) != 1 || got[0] != "release" {
+		t.Fatalf("unsubscribed_tags must echo the normalized set: %+v", uout)
+	}
+}

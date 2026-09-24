@@ -193,7 +193,7 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 		}
 	}
 	rows, err := b.db.Query(`SELECT m.seq, m.content FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq
-	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel NOT LIKE 'tasks/%' ORDER BY m.seq LIMIT ?`, embedBatchSize)
+	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel <> 'tasks' AND m.channel NOT LIKE 'tasks/%' ORDER BY m.seq LIMIT ?`, embedBatchSize)
 	if err != nil {
 		return 0, internal(err)
 	}

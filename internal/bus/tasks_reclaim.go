@@ -101,7 +101,7 @@ func (b *Bus) fixUpAbandoned(as, channel string, ids []int64) error {
 // abandoned tasks in every task-list channel, one transaction per channel,
 // stopping early once ctx's deadline has passed.
 func (b *Bus) reclaimAllAbandonedTasks(ctx context.Context) error {
-	rows, err := b.db.Query("SELECT name FROM channels WHERE name LIKE 'tasks/%'")
+	rows, err := b.db.Query("SELECT name FROM channels WHERE name = 'tasks' OR name LIKE 'tasks/%'")
 	if err != nil {
 		return err
 	}

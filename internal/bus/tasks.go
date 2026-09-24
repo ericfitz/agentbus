@@ -52,6 +52,7 @@ type TaskSummary struct {
 	Depth        int     `json:"depth"`
 	OpenBlockers []int64 `json:"open_blockers,omitempty"`
 	LeasedUntil  int64   `json:"leased_until,omitempty"`
+	HasDetails   bool    `json:"has_details,omitempty"`
 }
 
 // TaskCreateInput is task_create's input.
@@ -674,6 +675,7 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 			ID: t.ID, Subject: t.Subject, Status: t.Status, Owner: t.Owner,
 			Parent: t.Parent, Depth: depth[t.ID], OpenBlockers: t.OpenBlockers,
 			LeasedUntil: t.LeasedUntil,
+			HasDetails:  t.Description != "" || len(t.Metadata) > 0 || len(t.BlockedBy) > 0,
 		})
 	}
 	return trimToBytes(sums, taskSummaryBytes, min(b.cfg.ResultDefaultKiB*1024, trimHardCeilingBytes)), nil

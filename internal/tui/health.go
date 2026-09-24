@@ -40,6 +40,12 @@ func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 		maxScroll := max(len(m.healthLines())-1, 0)
 		m.health.scroll = min(m.health.scroll+1, maxScroll)
 	case "o":
+		// A GUI $VISUAL runs off the terminal: the command waits for it in
+		// the background, the TUI stays live, and the config check toasts
+		// when the editor exits (with code --wait, when the tab closes).
+		if cmd, ok := backgroundEditor(m.c.cfg.Path); ok {
+			return func() tea.Msg { return configEditedMsg{err: cmd.Run()} }
+		}
 		return tea.ExecProcess(editorCommand(m.c.cfg.Path), func(err error) tea.Msg { return configEditedMsg{err: err} })
 	}
 	return nil
@@ -49,7 +55,7 @@ func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 // running bus keeps its old settings; the toast says so.
 func (m *Model) onConfigEdited(msg configEditedMsg) tea.Cmd {
 	if msg.err != nil {
-		return m.showToast("editor: " + msg.err.Error())
+		return m.showToast(editorErrText(msg.err))
 	}
 	if _, _, err := config.Load(m.c.cfg.Path); err != nil {
 		return m.showToast("config: " + err.Error())
@@ -66,6 +72,7 @@ func (m Model) healthLines() []string {
 	st := m.status
 	var b strings.Builder
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(&b, format, a...) }
+	p("%s %s\n", dim.Render("version"), "agentbus v"+mcpserver.Version)
 	pct := 0
 	if st.BudgetBytes > 0 {
 		pct = int(st.UsageBytes * 100 / st.BudgetBytes)
@@ -119,6 +126,7 @@ func (m Model) healthLines() []string {
 	for _, kv := range config.DefaultTheme().Colors() {
 		p("  %s %s\n", kv[0], th.Sources[kv[0]])
 	}
+	p("%s %s\n", dim.Render("icons ·"), th.IconSet)
 	p("\n%s %s\n", dim.Render("config ·"), cfg.Path)
 	js, err := json.MarshalIndent(cfg, "  ", "  ")
 	if err != nil {

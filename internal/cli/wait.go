@@ -43,9 +43,12 @@ func Wait(o WaitOptions, out io.Writer) error {
 			return fmt.Errorf("filter: %w", err)
 		}
 		inbox := bus.DMChannel(o.As)
-		// A direct message is addressed to this identity by definition, so
-		// it wakes the waiter even when its text does not match the filter.
-		match = func(m bus.Message) bool { return m.Channel == inbox || re.MatchString(m.Content) }
+		// A direct message is addressed to this identity by definition, and a
+		// tag-subscription match is addressed to this identity too, so both
+		// wake the waiter even when its text does not match the filter.
+		match = func(m bus.Message) bool {
+			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Content)
+		}
 	}
 	b, err := bus.Open(o.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -45,15 +46,17 @@ type channelIn struct {
 	Kind string `json:"kind" jsonschema:"ordinary or memory"`
 }
 type subscribeIn struct {
-	As         string `json:"as,omitempty"`
-	Channel    string `json:"channel"`
-	From       string `json:"from,omitempty" jsonschema:"now (default) or oldest"`
-	Persistent bool   `json:"persistent,omitempty" jsonschema:"also add the channel to this repository's .local/agentbus.json so register subscribes it in later sessions"`
+	As         string   `json:"as,omitempty"`
+	Channel    string   `json:"channel,omitempty"`
+	From       string   `json:"from,omitempty" jsonschema:"now (default) or oldest"`
+	Persistent bool     `json:"persistent,omitempty" jsonschema:"also add the channel to this repository's .local/agentbus.json so register subscribes it in later sessions"`
+	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags that must all be on a message for it to be delivered (an AND set); subscribe again with another set for OR"`
 }
 type unsubscribeIn struct {
-	As         string `json:"as,omitempty"`
-	Channel    string `json:"channel"`
-	Persistent bool   `json:"persistent,omitempty" jsonschema:"also remove the channel from this repository's .local/agentbus.json"`
+	As         string   `json:"as,omitempty"`
+	Channel    string   `json:"channel,omitempty"`
+	Persistent bool     `json:"persistent,omitempty" jsonschema:"also remove the channel from this repository's .local/agentbus.json"`
+	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags that must all be on a message for it to be delivered (an AND set); subscribe again with another set for OR"`
 }
 type sendIn struct {
 	As string `json:"as,omitempty"`
@@ -64,11 +67,12 @@ type receiveIn struct {
 	bus.ReceiveInput
 }
 type historyIn struct {
-	As      string `json:"as,omitempty"`
-	Channel string `json:"channel"`
-	Before  *int64 `json:"before,omitempty"`
-	After   *int64 `json:"after,omitempty"`
-	Count   int    `json:"count,omitempty"`
+	As      string   `json:"as,omitempty"`
+	Channel string   `json:"channel"`
+	Before  *int64   `json:"before,omitempty"`
+	After   *int64   `json:"after,omitempty"`
+	Count   int      `json:"count,omitempty"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying at least one of these tags"`
 }
 type searchIn struct {
 	As string `json:"as,omitempty"`
@@ -206,6 +210,25 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		}
 		reg.Subscribed = append(reg.Subscribed, c)
 	}
+	if f != nil {
+		sets, bad := f.TagSubscriptions()
+		for _, s := range bad {
+			if reg.SubscribeFailed == nil {
+				reg.SubscribeFailed = map[string]string{}
+			}
+			reg.SubscribeFailed["tags "+s] = "invalid tag set in " + f.Path
+		}
+		for _, s := range sets {
+			if err := b.SubscribeTags(reg.Sender, s); err != nil {
+				if reg.SubscribeFailed == nil {
+					reg.SubscribeFailed = map[string]string{}
+				}
+				reg.SubscribeFailed["tags "+strings.Join(s, ",")] = err.Error()
+				continue
+			}
+			reg.TagSubscriptions = append(reg.TagSubscriptions, s)
+		}
+	}
 }
 
 // persistFile returns the repository file for persistent subscribe and
@@ -298,7 +321,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels and task lists (.local/agentbus.json; default general and tasks) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels and task lists (.local/agentbus.json; default general and tasks) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {
@@ -320,8 +343,29 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.ListChannels(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted."},
+	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted. Or pass tags instead of channel: an AND set of 1-10 tags; matching messages from any chat channel you are not already subscribed to arrive through receive with matched_tags, starting from now."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in subscribeIn) (*mcp.CallToolResult, any, error) {
+			if (in.Channel == "") == (len(in.Tags) == 0) {
+				return nil, nil, &bus.Error{Code: "validation", Message: "pass channel or tags, not both"}
+			}
+			if len(in.Tags) > 0 {
+				if err := b.SubscribeTags(in.As, in.Tags); err != nil {
+					return nil, nil, err
+				}
+				norm, _ := bus.NormalizeTags(in.Tags)
+				out := map[string]any{"subscribed_tags": norm}
+				if in.Persistent {
+					f, err := persistFile(cwd)
+					if err != nil {
+						return nil, nil, persistErr(err)
+					}
+					if _, err := f.AddTagSet(in.Tags); err != nil {
+						return nil, nil, persistErr(err)
+					}
+					out["persistent"] = true
+				}
+				return result(out, nil)
+			}
 			if err := b.Subscribe(in.As, in.Channel, in.From); err != nil {
 				return nil, nil, err
 			}
@@ -338,8 +382,29 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json. Direct-message channels (dm/...) are not accepted."},
+	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json. Direct-message channels (dm/...) are not accepted. Or pass tags to drop that tag set."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in unsubscribeIn) (*mcp.CallToolResult, any, error) {
+			if (in.Channel == "") == (len(in.Tags) == 0) {
+				return nil, nil, &bus.Error{Code: "validation", Message: "pass channel or tags, not both"}
+			}
+			if len(in.Tags) > 0 {
+				if err := b.UnsubscribeTags(in.As, in.Tags); err != nil {
+					return nil, nil, err
+				}
+				norm, _ := bus.NormalizeTags(in.Tags)
+				out := map[string]any{"unsubscribed_tags": norm}
+				if in.Persistent {
+					f, err := persistFile(cwd)
+					if err != nil {
+						return nil, nil, persistErr(err)
+					}
+					if _, err := f.RemoveTagSet(in.Tags); err != nil {
+						return nil, nil, persistErr(err)
+					}
+					out["persistent"] = true
+				}
+				return result(out, nil)
+			}
 			if err := b.Unsubscribe(in.As, in.Channel); err != nil {
 				return nil, nil, err
 			}
@@ -356,19 +421,19 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools."},
+	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools. tags (up to 10, letters, digits, _ and -, stored lowercase) label the message; other agents can subscribe to tags and filter history and search by them."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds (up to receive_max_wait_seconds) waits for messages when none are available; a larger value is rejected, and three consecutive empty waited receives return a polling error. To wait longer, run `agentbus wait` in a background shell instead of calling receive again."},
+	mcp.AddTool(s, &mcp.Tool{Name: "receive", Description: "Agentbus: receive new messages on your subscribed channels. Pass ack with the batch token from your previous receive to acknowledge it; an unacknowledged batch is redelivered. wait_seconds (up to receive_max_wait_seconds) waits for messages when none are available; a larger value is rejected, and three consecutive empty waited receives return a polling error. To wait longer, run `agentbus wait` in a background shell instead of calling receive again. Messages delivered through a tag subscription carry matched_tags. tags/ in expired means your tag subscriptions lapsed from inactivity; re-subscribe with tags or re-register."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor."},
+	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor. tags filters to messages carrying any of the given tags."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
-			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count))
+			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count, in.Tags...))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
+	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq), tags (any of). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Search(in.As, in.SearchInput))
 		})
@@ -376,7 +441,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in memoryIn) (*mcp.CallToolResult, any, error) {
 			return result(b.GetMemory(in.As, in.ID))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced."},
+	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced. tags replaces the memory's tags; omit it to keep them."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in editIn) (*mcp.CallToolResult, any, error) {
 			return result(b.EditMemory(in.As, in.EditInput))
 		})
@@ -388,11 +453,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Discover(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_create", Description: "Agentbus: add a task to a task list (a memory channel named tasks/<name>; create one with create_channel kind=memory). New tasks are pending and unowned. parent nests it under an existing task in the same list; before or after (a sibling task id) places it, default last. blocked_by lists task ids in the same list that must complete first."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_create", Description: "Agentbus: add a task to a task list (a memory channel named tasks/<name>; create one with create_channel kind=memory). New tasks are pending and unowned. parent nests it under an existing task in the same list; before or after (a sibling task id) places it, default last. blocked_by lists task ids in the same list that must complete first. One deliverable per task with an imperative subject; blocked_by only for real ordering dependencies, sibling order for priority."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskCreateIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskCreate(in.As, in.TaskCreateInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_claim", Description: "Agentbus: claim a task: if it has no owner you become its owner and it becomes in_progress. Fails with conflict if someone else owns it or it is blocked. A task whose owner's session has ended, or whose lease ran out, counts as unowned. leased_until (unix ms UTC, optional) sets a lease; renew it by calling task_claim again with a later leased_until before it passes."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_claim", Description: "Agentbus: claim a task: if it has no owner you become its owner and it becomes in_progress. Fails with conflict if someone else owns it or it is blocked. A task whose owner's session has ended, or whose lease ran out, counts as unowned. leased_until (unix ms UTC, optional) sets a lease; renew it by calling task_claim again with a later leased_until before it passes. Call task_list first; claim before starting work."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskClaimIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskClaim(in.As, in.TaskID, in.LeasedUntil, in.IdempotencyKey))
 		})
@@ -400,7 +465,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskReleaseIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskRelease(in.As, in.TaskID, in.IdempotencyKey))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_update", Description: "Agentbus: change a task by id; only the fields you pass change. status is pending, in_progress, or completed. While a task is in_progress only its owner may change or delete it; force=true overrides that for anyone and is recorded. owner=\"\" clears the owner, parent=0 moves the task to the top level, leased_until=0 clears the lease (any other value must be in the future). before/after reorder among siblings. delete=true deletes a task that has no subtasks. To renew a lease use task_claim again: renewing through task_update after the lease has expired finds the task already returned to pending and changes nothing."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_update", Description: "Agentbus: change a task by id; only the fields you pass change. status is pending, in_progress, or completed. While a task is in_progress only its owner may change or delete it; force=true overrides that for anyone and is recorded. owner=\"\" clears the owner, parent=0 moves the task to the top level, leased_until=0 clears the lease (any other value must be in the future). before/after reorder among siblings. delete=true deletes a task that has no subtasks. To renew a lease use task_claim again: renewing through task_update after the lease has expired finds the task already returned to pending and changes nothing. An in_progress task always has an owner."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskUpdateIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskUpdate(in.As, in.TaskPatch))
 		})
@@ -408,7 +473,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskGetIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskGet(in.As, in.TaskID))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive: you get each task's latest revision, not every intermediate one, and deletions are not delivered."},
+	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive: you get each task's latest revision, not every intermediate one, and deletions are not delivered. Check it before starting work to see what is claimed or blocked."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskListIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskList(in.As, in.TaskListInput))
 		})

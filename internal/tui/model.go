@@ -72,6 +72,8 @@ type Model struct {
 	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
 	msgs       map[string][]bus.Message
 	tasks      map[string][]bus.TaskSummary // task channel name -> its current tree
+	taskOpen   map[int64]bool               // task id -> its detail block is expanded
+	taskDetail map[int64]bus.Task           // task id -> its full task_get result, once loaded
 	gaps       map[string][]bus.Gap
 	loaded     map[string]bool
 	seen       map[string]int64
@@ -80,8 +82,15 @@ type Model struct {
 	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
 	expanded   map[int64]bool  // message seq -> its direct replies are shown
 	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
-	stream     viewport.Model
-	follow     bool
+
+	// pendingTaskCursorCh/ID: a task_get/task_list jump target picked by
+	// placeCursor before ch's tree had loaded, e.g. a search jump into a
+	// task channel never visited yet. The tasksMsg handler consumes it (and
+	// clears it) once ch's tasks arrive. "" / 0 for none.
+	pendingTaskCursorCh string
+	pendingTaskCursorID int64
+	stream              viewport.Model
+	follow              bool
 
 	compose  textarea.Model
 	replyTo  *bus.Message
@@ -130,6 +139,8 @@ func New(c *client, th Theme) Model {
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
 		tasks:        map[string][]bus.TaskSummary{},
+		taskOpen:     map[int64]bool{},
+		taskDetail:   map[int64]bus.Task{},
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
 		seen:         map[string]int64{},
@@ -192,10 +203,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.loaded[msg.channel] = true
-		// A prepend shifts indices; keep the cursor on the same message.
+		// A prepend, or another inbox's page in a merged DM pane, shifts
+		// indices; keep the cursor on the same message. On a task channel
+		// m.cursor indexes m.tasks(selName()), not rows(selName()) -- tasksMsg
+		// owns that cursor (see placeTaskCursor/pendingTaskCursorID), so it's
+		// left untouched here.
 		var cursorSeq int64
-		if rs := m.rows(msg.channel); msg.channel == m.selName() && m.cursor >= 0 && m.cursor < len(rs) {
-			cursorSeq = rs[m.cursor].msg.Seq
+		if !bus.IsTaskChannel(m.selName()) {
+			if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
+				cursorSeq = rs[m.cursor].msg.Seq
+			}
 		}
 		// A pgup-at-top prepend grows the content above what's on screen;
 		// remember the line count so the offset can grow by the same
@@ -227,10 +244,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tasksMsg:
 		if msg.err != nil {
+			m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 			cmds = append(cmds, m.showToast("tasks: "+errText(msg.err)))
 			break
 		}
+		var cursorID int64
+		if msg.ch == m.selName() {
+			if ts := m.tasks[msg.ch]; m.cursor >= 0 && m.cursor < len(ts) {
+				cursorID = ts[m.cursor].ID
+			}
+		}
+		if msg.ch == m.pendingTaskCursorCh {
+			if msg.ch == m.selName() {
+				cursorID = m.pendingTaskCursorID
+			}
+			m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
+		}
 		m.tasks[msg.ch] = msg.tasks
+		if cursorID != 0 {
+			for i, t := range msg.tasks {
+				if t.ID == cursorID {
+					m.cursor = i
+				}
+			}
+		}
+		if msg.ch == m.selName() && len(msg.tasks) > 0 {
+			m.cursor = min(m.cursor, len(msg.tasks)-1)
+		}
+		for _, t := range msg.tasks {
+			if m.taskOpen[t.ID] {
+				cmds = append(cmds, m.loadTask(t.ID))
+			}
+		}
+		m.refreshStream()
+		if cursorID != 0 {
+			m.scrollCursorIntoView()
+		}
+	case taskMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.showToast("task: "+errText(msg.err)))
+			break
+		}
+		m.taskDetail[msg.task.ID] = msg.task
 		m.refreshStream()
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
@@ -334,6 +389,9 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
 		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
+		}
 		return m.submitCompose()
 	case "alt+enter":
 		m.compose.InsertString("\n")
@@ -368,6 +426,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
 		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
+		}
 		m.mode = modeInsert
 		return m.compose.Focus()
 	// enter performs the pane's action: reply to the cursor message in the
@@ -375,6 +436,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
+		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
 		}
 		if r, ok := m.cursorRow(); ok {
 			if !m.replyAllowed() {
@@ -418,9 +482,16 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return m.selectChannel(m.sel - 1)
 		}
 	case "right":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.expandTask()
+		}
 		m.expandCursor()
 	case "left":
-		m.collapseCursor()
+		if bus.IsTaskChannel(m.selName()) {
+			m.collapseTask()
+		} else {
+			m.collapseCursor()
+		}
 	case "tab", "shift+tab", "home":
 		return m.paneKey(msg)
 	case "pgup", "pgdown":
@@ -437,6 +508,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "r":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
+		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
 		}
 		if !m.replyAllowed() {
 			return m.showToast(replyRefusedToast)
@@ -458,8 +532,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		return m.toggleSubscribe()
+	case "t":
+		return m.tagPrompt()
 	case "d":
-		if m.sessSel < 0 && m.selected() != nil {
+		if m.sessSel < 0 && m.selected() != nil && !isTagPane(m.selName()) {
 			m.mode = modeConfirmChannel
 		}
 	case "/":
@@ -467,6 +543,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "m":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.showToast(tasksReadOnlyToast)
+		}
+		if isTagPane(m.selName()) {
+			return m.showToast(tagReadOnlyToast)
 		}
 		return m.openMemories()
 	case "h":
@@ -518,9 +597,9 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && len(m.msgs[m.selName()]) > 0 && !bus.IsTaskChannel(m.selName()):
+		case p == paneStream && m.paneLen(m.selName()) > 0:
 			return m.focusPane(p)
-		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()):
+		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)
 		}
 	}
@@ -540,7 +619,7 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	if p == paneStream {
 		m.mode = modeNormal
 		m.compose.Blur()
-		if n := len(m.rows(m.selName())); m.cursor < 0 || m.cursor >= n {
+		if n := m.paneLen(m.selName()); m.cursor < 0 || m.cursor >= n {
 			m.cursor = n - 1
 		}
 		return m.moveCursor(0)
@@ -571,17 +650,23 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	return m.showSelected()
 }
 
-// moveCursor moves the normal-mode stream cursor and scrolls to keep it
-// visible (refreshStream renders the cursor row highlighted). A task
-// channel renders the task tree instead of the stream (see renderTasks) and
-// has no cursor: m.msgs still accumulates its raw revisions as they arrive
-// through receive, so without this early return the cursor would walk rows
-// that are never shown.
-func (m *Model) moveCursor(d int) tea.Cmd {
-	if bus.IsTaskChannel(m.selName()) {
-		return nil
+// paneLen is the stream pane's cursor bound for ch: the task count for a
+// task channel (renderTasks draws one row per task, not per raw revision in
+// m.msgs, which has no cursor of its own), else the row count rows(ch)
+// shows (fewer than paneMsgs(ch) when a thread's replies are collapsed).
+func (m *Model) paneLen(ch string) int {
+	if bus.IsTaskChannel(ch) {
+		return len(m.tasks[ch])
 	}
-	n := len(m.rows(m.selName()))
+	return len(m.rows(ch))
+}
+
+// moveCursor moves the normal-mode stream cursor and scrolls to keep it
+// visible (refreshStream renders the cursor row highlighted). paneLen bounds
+// it to the task count on a task channel (renderTasks draws one row per
+// task, not per raw revision in m.msgs) and the visible row count otherwise.
+func (m *Model) moveCursor(d int) tea.Cmd {
+	n := m.paneLen(m.selName())
 	if n == 0 {
 		m.cursor = -1
 		return nil
@@ -594,12 +679,50 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 }
 
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
-// it is not loaded) and scrolls just enough to bring it into view.
+// it is not loaded) and scrolls just enough to bring it into view. On a task
+// channel the cursor indexes m.tasks[ch] (see renderTasks), not rows(ch), so
+// this resolves to the task-channel case instead.
 func (m *Model) placeCursor(seq int64) {
-	for i, r := range m.rows(m.selName()) {
+	ch := m.selName()
+	if bus.IsTaskChannel(ch) {
+		m.placeTaskCursor(ch, seq)
+		return
+	}
+	for i, r := range m.rows(ch) {
 		if r.msg.Seq == seq {
 			m.cursor = i
 		}
+	}
+	m.follow = false
+	m.refreshStream()
+	m.scrollCursorIntoView()
+}
+
+// placeTaskCursor is placeCursor's task-channel case: seq is a raw
+// revision's seq (e.g. a search hit), resolved to its task via that
+// revision's MemoryID (m.msgs[ch] carries it; jumpTo adds the hit there
+// before calling placeCursor), then to that task's index in m.tasks[ch]. If
+// ch's tree hasn't loaded yet, the id is remembered in pendingTaskCursorID
+// for the tasksMsg that follows (every jump into a task channel triggers a
+// loadTasks) to place once it arrives.
+func (m *Model) placeTaskCursor(ch string, seq int64) {
+	var id int64
+	for _, x := range m.msgs[ch] {
+		if x.Seq == seq && x.MemoryID != nil {
+			id = *x.MemoryID
+			break
+		}
+	}
+	m.cursor = -1
+	if id != 0 {
+		for i, t := range m.tasks[ch] {
+			if t.ID == id {
+				m.cursor = i
+			}
+		}
+	}
+	if m.cursor < 0 && id != 0 {
+		m.pendingTaskCursorCh, m.pendingTaskCursorID = ch, id
 	}
 	m.follow = false
 	m.refreshStream()
@@ -751,14 +874,22 @@ func (m *Model) selectChannel(i int) tea.Cmd {
 }
 
 // selectSession moves the sessions-pane selection (clamped) and applies
-// showSelected's reset.
+// showSelected's reset. A no-op when i is already selected -- otherwise
+// re-visiting the same pane (e.g. the sessions rail landing on it while
+// navigating down, then a caller selecting it again) would recompute the
+// divider against seen as the first visit already advanced it, erasing a
+// divider that visit legitimately set.
 func (m *Model) selectSession(i int) tea.Cmd {
 	names := m.sessionNames()
 	if len(names) == 0 {
 		m.sessSel = -1
 		return nil
 	}
-	m.sessSel = min(max(i, 0), len(names)-1)
+	i = min(max(i, 0), len(names)-1)
+	if i == m.sessSel {
+		return nil
+	}
+	m.sessSel = i
 	return m.showSelected()
 }
 
@@ -772,6 +903,7 @@ func (m *Model) showSelected() tea.Cmd {
 	m.cursor = -1
 	m.follow = true
 	m.replyTo = nil
+	m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 	ch := m.selName()
 	m.divider = m.dividerFor(ch)
 	m.markSeen(ch)
@@ -780,10 +912,30 @@ func (m *Model) showSelected() tea.Cmd {
 	if bus.IsTaskChannel(ch) {
 		return m.loadTasks(ch)
 	}
-	if ch != "" && !m.loaded[ch] {
-		return m.loadHistory(ch, nil)
+	var cmds []tea.Cmd
+	if ch != "" && !m.loaded[ch] && !isTagPane(ch) {
+		cmds = append(cmds, m.loadHistory(ch, nil))
 	}
-	return nil
+	// A DM pane merges what its owner sent to every other inbox, so those
+	// inboxes need their latest page too. ponytail: one page per inbox on
+	// first DM visit; a bus-side conversation query is out of scope (#4).
+	if strings.HasPrefix(ch, bus.DMPrefix) {
+		for _, d := range m.dms {
+			if d.Name != ch && !m.loaded[d.Name] {
+				cmds = append(cmds, m.loadHistory(d.Name, nil))
+			}
+		}
+	}
+	// A tag pane is drawn from the chat channels' loaded messages, so it
+	// needs their latest pages; one page per chat channel on first visit.
+	if isTagPane(ch) {
+		for _, c := range m.channels {
+			if c.Kind == "ordinary" && !m.loaded[c.Name] {
+				cmds = append(cmds, m.loadHistory(c.Name, nil))
+			}
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // addMessages merges in into the channel buffer, ascending by seq, dropping
@@ -873,7 +1025,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 			delete(m.sessionsSeen, name)
 		}
 	}
-	cmds := []tea.Cmd{m.setChannels(msg.st.Channels, "oldest")}
+	cmds := []tea.Cmd{m.setChannels(msg.st.Channels, msg.tags, "oldest")}
 	if hadSel {
 		names := m.sessionNames()
 		switch i := slices.Index(names, selName); {
@@ -897,7 +1049,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 // selection by name, and subscribes to any channel not yet subscribed. DM
 // inboxes (dm/*) are split out into m.dms: they show in the sessions rail,
 // never the channel list, and are never selectable.
-func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
+func (m *Model) setChannels(chans []bus.Channel, tags [][]string, from string) tea.Cmd {
 	// cur comes from the channel list itself, not selName(): while the
 	// sessions pane holds the selection, selName() names a DM inbox that
 	// would never match a channel, silently losing the channel list's
@@ -923,6 +1075,12 @@ func (m *Model) setChannels(chans []bus.Channel, from string) tea.Cmd {
 	}
 	m.dms = dms
 	m.channels = channels
+	// Tag sets are rail entries too (a "tags" section under the channels):
+	// synthetic, never subscribed on the bus, drawn as chips, rendered from
+	// the messages already loaded for the chat channels.
+	for _, set := range tags {
+		m.channels = append(m.channels, bus.Channel{Name: tagPanePrefix + strings.Join(set, ","), Kind: "tags"})
+	}
 	m.sel = -1
 	for i, c := range m.channels {
 		if c.Name == cur {
@@ -953,7 +1111,11 @@ func (m *Model) statusCmd() tea.Cmd {
 	c := m.c
 	return func() tea.Msg {
 		st, err := c.b.StatusReport()
-		return statusMsg{st: st, err: err}
+		if err != nil {
+			return statusMsg{st: st, err: err}
+		}
+		tags, err := c.b.TagSubscriptions(c.as)
+		return statusMsg{st: st, tags: tags, err: err}
 	}
 }
 

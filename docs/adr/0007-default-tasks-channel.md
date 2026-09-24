@@ -23,6 +23,9 @@ Status: Accepted 2026-09-17. Decided by the user.
 3. **Task-list channels draw with U+2611 BALLOT BOX WITH CHECK** in the rail,
    header, and search hits (was the clipboard), rendered with the same
    Neutral-width escape treatment as the gear.
+
+   Amended 2026-09-23 (#7): the icon is now 📋 U+1F4CB, Wide, with no escape
+   treatment.
 4. **Task-list channel names use a new theme color `tasks`, default
    `yellow`**, rather than the memory color.
 

@@ -7,12 +7,15 @@ import (
 )
 
 type EditInput struct {
-	ID             int64             `json:"id"`
-	Content        string            `json:"content"`
-	Type           string            `json:"type,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	Refs           []Ref             `json:"refs,omitempty"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	ID       int64             `json:"id"`
+	Content  string            `json:"content"`
+	Type     string            `json:"type,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Refs     []Ref             `json:"refs,omitempty"`
+	// Tags is nil to keep the current revision's tags; an empty list clears
+	// them.
+	Tags           []string `json:"tags,omitempty"`
+	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
 type EditResult struct {
@@ -26,7 +29,7 @@ func (b *Bus) GetMemory(as string, id int64) (Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Message{}, err
 	}
-	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? AND tombstone=0 ORDER BY revision DESC LIMIT 1", id)
+	rows, err := b.db.Query("SELECT "+messageCols("messages")+" FROM messages WHERE memory_id=? AND tombstone=0 ORDER BY revision DESC LIMIT 1", id)
 	if err != nil {
 		return Message{}, internal(err)
 	}
@@ -49,7 +52,7 @@ func (b *Bus) MemoryRevisions(as string, id int64) ([]Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
-	rows, err := b.db.Query("SELECT "+messageColumns+" FROM messages WHERE memory_id=? ORDER BY revision ASC", id)
+	rows, err := b.db.Query("SELECT "+messageCols("messages")+" FROM messages WHERE memory_id=? ORDER BY revision ASC", id)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -99,6 +102,15 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if err := validateRefs(in.Refs); err != nil {
 		return EditResult{}, err
 	}
+	if in.Tags != nil {
+		var err error
+		if in.Tags, err = NormalizeTags(in.Tags); err != nil {
+			return EditResult{}, err
+		}
+		if in.Tags == nil {
+			in.Tags = []string{} // stays non-nil: "clear", not "keep"
+		}
+	}
 
 	key := in.IdempotencyKey
 	in.IdempotencyKey = ""
@@ -128,14 +140,20 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	// channel from the memory's current live revision. Repeated inside the
 	// transaction below so the tombstone/insert pair is computed against the
 	// committed state.
-	_, _, channel, err := liveRevision(b.db, in.ID)
+	liveSeq, _, channel, err := liveRevision(b.db, in.ID)
 	if err != nil {
 		return EditResult{}, err
 	}
 	if IsTaskChannel(channel) {
 		return EditResult{}, errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
 	}
-	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs}
+	tags := in.Tags
+	if tags == nil {
+		if tags, err = tagsOf(b.db, liveSeq); err != nil {
+			return EditResult{}, internal(err)
+		}
+	}
+	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs, Tags: tags}
 
 	// Preflight envelope-size gate (C1): must run before inspect and
 	// checkCapacity so an oversized input can never trigger the hook or
@@ -183,6 +201,15 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if err != nil {
 		return EditResult{}, err
 	}
+	// Re-resolve "keep" tags against the committed live revision: it may
+	// have moved between the read-only lookup above and this point.
+	tags = in.Tags
+	if tags == nil {
+		if tags, err = tagsOf(tx, curSeq); err != nil {
+			return EditResult{}, internal(err)
+		}
+	}
+	send.Tags = tags
 
 	// Authoritative envelope-size gate (R4/C1): same check as the preflight
 	// above, re-read on the write transaction.

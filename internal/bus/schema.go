@@ -1,6 +1,22 @@
 package bus
 
-const schemaVersion = 2
+const schemaVersion = 5
+
+// tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
+// migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
+// AND set, so matching drives from these few rows into message_tags(tag,
+// seq) instead of scanning messages. ON DELETE CASCADE means every existing
+// DELETE FROM tag_subscriptions (receive.go, sessions.go, UnsubscribeTags)
+// cleans this table up without code changes.
+const tagSubscriptionTagsDDL = `
+CREATE TABLE IF NOT EXISTS tag_subscription_tags (
+  sender TEXT NOT NULL,
+  tags_key TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (sender, tags_key, tag),
+  FOREIGN KEY (sender, tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE CASCADE
+);
+`
 
 const schema = `
 CREATE TABLE IF NOT EXISTS channels (
@@ -58,6 +74,19 @@ CREATE TABLE IF NOT EXISTS embeddings (
   model TEXT NOT NULL,
   vector BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS message_tags (
+  seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (seq, tag)
+);
+CREATE INDEX IF NOT EXISTS message_tags_tag_seq ON message_tags(tag, seq);
+CREATE TABLE IF NOT EXISTS tag_subscriptions (
+  sender TEXT NOT NULL,
+  tags_key TEXT NOT NULL,
+  created_seq INTEGER NOT NULL,
+  PRIMARY KEY (sender, tags_key)
+);
+` + tagSubscriptionTagsDDL + `
 CREATE TABLE IF NOT EXISTS receipts (
   sender TEXT NOT NULL,
   key TEXT NOT NULL,

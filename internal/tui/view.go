@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -43,6 +45,100 @@ func clock(ms int64) string {
 	return t.Format("Jan 2")
 }
 
+// stamp renders a message time as "YYYY-MM-DD HH:MM:SS"; today's date is
+// replaced by "(today)" padded to the same ten columns so times line up.
+func stamp(ms int64) string {
+	t := time.UnixMilli(ms).Local()
+	date := t.Format("2006-01-02")
+	if now := time.Now(); t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		date = "(today)   "
+	}
+	return date + " " + t.Format("15:04:05")
+}
+
+// agentLabel is an identity with its rail icon and color: the TUI's own
+// name in the user color, everyone else (and the empty tick sender, shown
+// as bus) in the agent color.
+func (m Model) agentLabel(name string) string {
+	if name == m.c.as {
+		return iconUser + m.theme.Style(m.theme.User).Render(name)
+	}
+	return iconAgent + m.theme.Style(m.theme.Agent).Render(senderName(name))
+}
+
+// channelLabel is a message's recipient: the agent for a dm/ inbox, else
+// the full channel name with its kind icon in chanStyle's color. A channel
+// not (yet) in the rail is drawn as chat.
+func (m Model) channelLabel(name string) string {
+	if owner, ok := strings.CutPrefix(name, bus.DMPrefix); ok {
+		return m.agentLabel(owner)
+	}
+	ch := bus.Channel{Name: name, Kind: "ordinary"}
+	for _, c := range m.channels {
+		if c.Name == name {
+			ch = c
+		}
+	}
+	icon := iconChat
+	switch {
+	case bus.IsTaskChannel(name):
+		icon = iconTasks
+	case ch.Kind == "memory":
+		icon = iconMem
+	}
+	return m.chanStyle(ch).Render(icon + name)
+}
+
+// tagChips renders tags as " tag " chips on the tag color, one space apart.
+// When the background alone emits no escape (tag is "default", or lipgloss
+// is on its no-color profile) a chip would be invisible, so they fall back
+// to dim "#tag" words.
+func (m Model) tagChips(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	chip := lipgloss.NewStyle().Background(m.theme.Tag).Foreground(chipText(m.theme.Tag))
+	parts := make([]string, len(tags))
+	if lipgloss.NewStyle().Background(m.theme.Tag).Render("x") == "x" {
+		for i, t := range tags {
+			parts[i] = "#" + t
+		}
+		return m.theme.Style(m.theme.Dim).Render(strings.Join(parts, " "))
+	}
+	for i, t := range tags {
+		parts[i] = chip.Render(" " + t + " ")
+	}
+	return strings.Join(parts, " ")
+}
+
+// chipText is the chip foreground on tag background bg: black on the light
+// ANSI colors, bright white on the rest.
+func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
+	switch bg {
+	case lipgloss.Color("3"), lipgloss.Color("6"), lipgloss.Color("7"), lipgloss.Color("10"), lipgloss.Color("11"), lipgloss.Color("14"), lipgloss.Color("15"):
+		return lipgloss.Color("0")
+	}
+	return lipgloss.Color("15")
+}
+
+// header is a message's first line: timestamp, sender → recipient, tag
+// chips. It never wraps: past avail columns the chips are cut first (dropped
+// under four columns), then the whole line is cut with an ellipsis.
+func (m Model) header(x bus.Message, stampStyle lipgloss.Style, avail int) string {
+	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender) + iconArrow + m.channelLabel(x.Channel)
+	if chips := m.tagChips(x.Tags); chips != "" {
+		if room := avail - lipgloss.Width(head) - 2; room >= lipgloss.Width(chips) {
+			head += "  " + chips
+		} else if room >= 4 {
+			head += "  " + ansi.Truncate(chips, room, "…")
+		}
+	}
+	if lipgloss.Width(head) > avail {
+		head = ansi.Truncate(head, avail, "…")
+	}
+	return head
+}
+
 func (m Model) showLeft() bool { return m.width >= 60 }
 
 // railWidth is the left column: a fifth of the screen, floored so channel
@@ -50,8 +146,9 @@ func (m Model) showLeft() bool { return m.width >= 60 }
 func (m Model) railWidth() int { return max(m.width/5, 16) }
 
 // Rail icons. Each carries U+FE0F so the terminal draws the color emoji
-// even when its monospace font has its own glyph at that codepoint.
-const (
+// even when its monospace font has its own glyph at that codepoint. These
+// are vars, not consts: LoadIcons overwrites them per cfg.Icons.
+var (
 	iconChat = "\U0001F4AC\uFE0F " // speech balloon
 	iconMem  = "\U0001F4BE\uFE0F " // floppy disk
 	// ponytail: gear is Neutral width: Terminal.app draws it two cells wide but
@@ -66,7 +163,19 @@ const (
 	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
 	iconUser  = "\U0001F9D1\uFE0F "           // adult
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
-	iconTasks = "\x1b[2X\u2611\uFE0F\x1b[1C " // ballot box with check; Neutral width, same treatment as the gear
+	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
+	iconArrow = " \u2192 "                    // rightwards arrow; ambiguous width, 1 column in Western setups
+	iconError = "\u2717 "                     // ballot X, the toast and overlay-footer error prefix
+)
+
+// Task status marks. The stopwatch U+23F1 is text-presentation by default
+// (like the gear) and carries U+FE0F for the color glyph; if a terminal
+// font draws its own half-width stopwatch, give it the gear's CSI 2X/1C
+// treatment.
+var (
+	taskPending    = "\u274E "       // negative squared cross mark
+	taskInProgress = "\u23F1\uFE0F " // stopwatch
+	taskCompleted  = "\u2705 "       // white heavy check mark
 )
 
 func (m Model) View() string {
@@ -97,7 +206,7 @@ func (m Model) View() string {
 	}
 	parts = append(parts, m.renderCompose())
 	if m.toast != "" {
-		parts = append(parts, m.theme.Style(m.theme.Error).Render("✗ "+m.toast))
+		parts = append(parts, m.theme.Style(m.theme.Error).Render(iconError+m.toast))
 	}
 	parts = append(parts, m.renderStatusBar())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -127,9 +236,13 @@ func (m Model) renderHeader() string {
 		return m.theme.Style(m.theme.Dim).Render("no channels yet · c to create one")
 	}
 	var s string
-	if owner, ok := strings.CutPrefix(ch.Name, bus.DMPrefix); ok {
+	switch {
+	case isTagPane(ch.Name):
+		s = m.tagChips(tagPaneSet(ch.Name)) + fmt.Sprintf(" · %d messages", len(m.rows(ch.Name)))
+	case strings.HasPrefix(ch.Name, bus.DMPrefix):
+		owner, _ := strings.CutPrefix(ch.Name, bus.DMPrefix)
 		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
-	} else {
+	default:
 		s = fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
 	}
 	if m.status.Notice != "" {
@@ -153,20 +266,33 @@ func (m Model) renderRails() string {
 	trunc := lipgloss.NewStyle().MaxWidth(rail)
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
+	// tagsShown tracks whether the "tags" section header has been written
+	// yet: tag panes sort after every real channel (their names start
+	// "tags:"), so the header goes up once, right before the first one.
+	tagsShown := false
 	for i, c := range m.channels {
-		mark := iconChat
-		switch {
-		case bus.IsTaskChannel(c.Name):
-			mark = iconTasks
-		case c.Kind == "memory":
-			mark = iconMem
-		}
-		line := m.chanStyle(c).Render(mark + c.Name)
-		if n := m.unread(c.Name); n > 0 {
-			line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
-		}
-		if !m.c.isSubscribed(c.Name) {
-			line += dim.Render(" (off)")
+		var line string
+		if isTagPane(c.Name) {
+			if !tagsShown {
+				l.WriteString(dim.Render("tags") + "\n")
+				tagsShown = true
+			}
+			line = m.tagChips(tagPaneSet(c.Name))
+		} else {
+			mark := iconChat
+			switch {
+			case bus.IsTaskChannel(c.Name):
+				mark = iconTasks
+			case c.Kind == "memory":
+				mark = iconMem
+			}
+			line = m.chanStyle(c).Render(mark + c.Name)
+			if n := m.unread(c.Name); n > 0 {
+				line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
+			}
+			if !isTagPane(c.Name) && !m.c.isSubscribed(c.Name) {
+				line += dim.Render(" (off)")
+			}
 		}
 		// While a session is selected, the channel list draws no highlighted
 		// row; the sessions list below highlights instead.
@@ -213,8 +339,12 @@ func (m Model) renderRails() string {
 	}
 	// Channels take what they need up to half the column; sessions get the
 	// rest, and a blank row separates the two lists.
+	extra := 0
+	if tagsShown {
+		extra = 1
+	}
 	total := m.stream.Height + 1
-	chanRows := min(len(m.channels)+1, max(total/2, total-len(names)-2))
+	chanRows := min(len(m.channels)+1+extra, max(total/2, total-len(names)-2))
 	channels := lipgloss.NewStyle().MaxHeight(chanRows).Render(l.String())
 	sessions := lipgloss.NewStyle().MaxHeight(max(total-chanRows-1, 1)).Render(r.String())
 	col := lipgloss.JoinVertical(lipgloss.Left, channels, "", sessions)
@@ -230,12 +360,13 @@ func shortDur(d time.Duration) string {
 
 // renderStream draws the selected channel's messages, oldest first, with the
 // "new" divider after the last seen message, "n evicted" dividers where the
-// bus reported gaps, and the normal-mode cursor row highlighted.
+// bus reported gaps, and the normal-mode cursor row highlighted. Each message
+// is a header line (timestamp, sender → recipient, tag chips) followed by
+// its body at the row's depth.
 func (m *Model) renderStream() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
 	ch := m.selName()
-	ms := m.msgs[ch]
 	m.cursorLine = -1
 	if ch == "" {
 		return ""
@@ -243,7 +374,9 @@ func (m *Model) renderStream() string {
 	if bus.IsTaskChannel(ch) {
 		return m.renderTasks(ch)
 	}
-	if len(ms) == 0 {
+	// A dm/X pane also shows X's outgoing messages (#4), so emptiness is
+	// judged on the merged rows, not the inbox alone.
+	if len(m.paneMsgs(ch)) == 0 {
 		return dim.Render("no messages yet in " + ch + " · type below to send the first")
 	}
 	w := max(m.stream.Width, 20)
@@ -269,27 +402,27 @@ func (m *Model) renderStream() string {
 			lineNum++
 			newShown = true
 		}
-		disp := senderName(x.Sender)
-		name := th.Style(th.Agent).Render(disp)
-		if x.Sender == m.c.as {
-			name = th.Style(th.User).Render(disp)
+		selected := i == m.cursor && m.mode == modeNormal
+		// On the selected row every dim segment (timestamp, marker, summary)
+		// takes the text color so it stays readable on the selection
+		// background; chips keep their own background.
+		rowDim, stampStyle := dim, th.Style(th.Stamp)
+		if selected {
+			rowDim, stampStyle = th.Style(th.Text), th.Style(th.Text)
 		}
 		// The tree prefix (indent plus expand/collapse marker) is applied
 		// after wrapping so every wrapped line sits at the row's depth.
 		prefix := strings.Repeat("  ", r.depth)
 		switch {
 		case r.hidden > 0:
-			prefix += dim.Render(markSel + " ")
+			prefix += rowDim.Render(markSel + " ")
 		case r.open:
-			prefix += dim.Render(markOpen + " ")
+			prefix += rowDim.Render(markOpen + " ")
 		default:
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		head := dim.Render(clock(x.CreatedAt)) + " " + name + " "
-		indent := strings.Repeat(" ", lipgloss.Width(head))
-		body := strings.ReplaceAll(x.Content, "\n", "\n"+indent)
-		line := head + body
+		line := m.header(x, stampStyle, w-pw) + "\n" + x.Content
 		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
 			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
 		}
@@ -299,13 +432,13 @@ func (m *Model) renderStream() string {
 				summary = "1 reply"
 			}
 			if r.depth == 0 {
-				summary += " · " + clock(r.latest)
+				summary += " \u00b7 " + clock(r.latest)
 			}
-			line += "\n" + indent + dim.Render(summary)
+			line += "\n" + rowDim.Render(summary)
 		}
 		line = lipgloss.NewStyle().Width(w - pw).Render(line)
 		line = prefix + strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", pw))
-		if i == m.cursor && m.mode == modeNormal {
+		if selected {
 			line = th.Highlight(line, w)
 		}
 		if i == m.cursor {
@@ -319,7 +452,7 @@ func (m *Model) renderStream() string {
 
 // markSel marks the selected list item and a message whose replies can be
 // expanded; markOpen marks a message whose replies are shown.
-const (
+var (
 	markSel  = "\u25b6" // ▶
 	markOpen = "\u25bc" // ▼
 )
@@ -345,7 +478,11 @@ func (m Model) renderCompose() string {
 	ch := m.selected()
 	label := ""
 	hint := ""
-	if ch != nil {
+	switch {
+	case ch == nil:
+	case isTagPane(ch.Name):
+		label = m.tagChips(tagPaneSet(ch.Name))
+	default:
 		mark, text := iconChat, ch.Name
 		switch {
 		case bus.IsTaskChannel(ch.Name):
@@ -378,7 +515,7 @@ func (m Model) renderStatusBar() string {
 			embed = th.Style(th.Warn).Render("unreachable")
 		}
 	}
-	left := fmt.Sprintf("db %s / %s  embed %s  backlog %d  as %s", fmtBytes(m.status.UsageBytes), fmtBytes(m.status.BudgetBytes), embed, m.status.EmbeddingBacklog, th.Style(th.User).Render(m.c.as))
+	left := th.Style(th.Dim).Render("agentbus v"+mcpserver.Version) + "  " + fmt.Sprintf("db %s / %s  embed %s  backlog %d  as %s", fmtBytes(m.status.UsageBytes), fmtBytes(m.status.BudgetBytes), embed, m.status.EmbeddingBacklog, th.Style(th.User).Render(m.c.as))
 	if m.statusErr != nil {
 		left += "  " + th.Style(th.Error).Render("status: "+errText(m.statusErr))
 	}
@@ -392,7 +529,7 @@ func (m Model) renderStatusBar() string {
 	// to clip from somewhere else on screen.
 	avail := m.width - lipgloss.Width(left) - 1
 	if avail <= 0 {
-		return left
+		return lipgloss.NewStyle().MaxWidth(m.width).Render(left)
 	}
 	help = lipgloss.NewStyle().MaxWidth(avail).Render(help)
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(help), 1)
@@ -424,7 +561,7 @@ func (m Model) overlaySize() (w, h int) {
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {
-		footer = m.theme.Style(m.theme.Error).Render("✗ "+m.toast) + "\n" + footer
+		footer = m.theme.Style(m.theme.Error).Render(iconError+m.toast) + "\n" + footer
 		h--
 	}
 	inner := lipgloss.JoinVertical(lipgloss.Left,

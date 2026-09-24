@@ -253,3 +253,123 @@ func TestSearchHitShowsBusForEmptySender(t *testing.T) {
 		t.Fatalf("reclaim's empty sender must show as bus:\n%s", v)
 	}
 }
+
+// TestSearchJumpToTaskChannelLandsCursorOnTask covers the review finding on
+// #16: on a task channel m.cursor indexes m.tasks[ch] (renderTasks' tree
+// order), not rows(ch) (raw revisions in seq order); a search jump must
+// resolve the hit to its task by id, not by the row index of its raw
+// revision. aaa gets a later revision (a claim) after bbb/target are
+// created, so its live seq becomes the newest: that pushes it to the end of
+// rows(ch)'s seq-ordered rows while it stays first in m.tasks[ch]'s
+// rank-ordered tree, the divergence a row-index/task-index mixup needs to
+// surface a wrong answer (verified against the pre-fix code: cursor landed
+// on "bbb", not the "zzyzx" target). The channel is never visited before
+// the jump, so m.tasks["tasks/work"] is still empty when jumpTo's
+// placeCursor call happens -- this also exercises pendingTaskCursor, the
+// tasksMsg handler placing the cursor once the tree loads.
+func TestSearchJumpToTaskChannelLandsCursorOnTask(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	aaa, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "aaa first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "bbb second"}); err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "zzyzx target task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskClaim(f.sam, aaa.ID, 0, ""); err != nil { // aaa's revision is now the newest
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd()) // learns tasks/work exists; never selects or loads it
+	f.key("/")
+	f.key("zzyzx")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	f.key("enter")
+	if f.m.mode != modeNormal || f.m.selected() == nil || f.m.selected().Name != "tasks/work" {
+		t.Fatalf("enter must jump to the hit's channel: mode=%v sel=%v", f.m.mode, f.m.selected())
+	}
+	got, ok := f.m.cursorTask()
+	if !ok || got.ID != target.ID {
+		t.Fatalf("cursor must land on the hit task, got %+v ok=%v", got, ok)
+	}
+}
+
+// TestSearchJumpToDeepTaskScrollsCursorIntoView: landing the cursor on a
+// task far down a long tree (via pendingTaskCursorID, since the channel is
+// never visited before the jump) must scroll it into view, the same as a
+// direct cursor move does.
+func TestSearchJumpToDeepTaskScrollsCursorIntoView(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: fmt.Sprintf("filler %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "zzyzx target task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd()) // never visits tasks/work before the jump
+	f.key("/")
+	f.key("zzyzx")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	f.key("enter")
+	got, ok := f.m.cursorTask()
+	if !ok || got.ID != target.ID {
+		t.Fatalf("cursor must land on the hit task, got %+v ok=%v", got, ok)
+	}
+	if f.m.stream.YOffset == 0 {
+		t.Fatalf("cursor at the bottom of a %d-task list must scroll into view: YOffset=%d cursorLine=%d height=%d",
+			41, f.m.stream.YOffset, f.m.cursorLine, f.m.stream.Height)
+	}
+}
+
+// TestPendingTaskCursorIgnoredIfChannelChangedBeforeTasksArrive: a
+// tasksMsg for ch=X arriving after the user has already navigated away to
+// another channel must not steal the cursor (which belongs to whatever
+// channel is now selected); it must still clear the pending fields, since
+// that pending request has now been answered.
+func TestPendingTaskCursorIgnoredIfChannelChangedBeforeTasksArrive(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/x", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/x", Subject: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "dev")
+	prevCursor := f.m.cursor
+
+	// Simulate the race: a jump into tasks/x set the pending fields, then
+	// (unlike the normal showSelected reset) they're still set when the
+	// response for tasks/x finally arrives, because "dev" is now selected.
+	f.m.pendingTaskCursorCh, f.m.pendingTaskCursorID = "tasks/x", target.ID
+	f.send(tasksMsg{ch: "tasks/x", tasks: []bus.TaskSummary{{ID: target.ID, Subject: "target"}}})
+
+	if f.m.cursor != prevCursor {
+		t.Fatalf("cursor changed from %d to %d: a pending target for an unselected channel must not move it", prevCursor, f.m.cursor)
+	}
+	if f.m.pendingTaskCursorCh != "" || f.m.pendingTaskCursorID != 0 {
+		t.Fatalf("pending fields not cleared after consuming tasksMsg for %q: ch=%q id=%d", "tasks/x", f.m.pendingTaskCursorCh, f.m.pendingTaskCursorID)
+	}
+}

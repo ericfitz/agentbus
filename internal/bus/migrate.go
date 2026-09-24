@@ -17,7 +17,15 @@ import (
 // restarted.
 var migrations = map[int]func(tx *sql.Tx) error{
 	1: dropMessagesBytes,
+	2: addTables,    // message_tags (ADR 0009)
+	3: addTables,    // tag_subscriptions (ADR 0009)
+	4: splitTagSets, // tag_subscription_tags (#13)
 }
+
+// addTables is the step for a version that only adds tables: the schema DDL
+// (CREATE ... IF NOT EXISTS) runs right after migrate and creates them, so
+// the step itself has nothing to do beyond stamping the version.
+func addTables(*sql.Tx) error { return nil }
 
 // migrate brings db from user_version from up to schemaVersion.
 func migrate(db *sql.DB, from int) error {
@@ -70,6 +78,39 @@ func runMigration(ctx context.Context, conn *sql.Conn, v int, step func(*sql.Tx)
 		return err
 	}
 	return tx.Commit()
+}
+
+// splitTagSets (schema 4 -> 5, #13) creates tag_subscription_tags and
+// backfills one row per tag from each existing tag_subscriptions.tags_key,
+// so matching can join from these rows into message_tags(tag, seq) instead
+// of scanning messages. message_tags_tag is dropped here: it can't
+// range-scan by seq, and message_tags_tag_seq (created by the schema DDL
+// that runs right after migrate) replaces it.
+func splitTagSets(tx *sql.Tx) error {
+	if _, err := tx.Exec(tagSubscriptionTagsDDL); err != nil {
+		return err
+	}
+	// A real v4 database always has tag_subscriptions (schema v4's own DDL
+	// created it). It's only absent here when a much older database jumps
+	// straight to v5 in one Open() call, skipping v4 (or a test simulates
+	// that); in that case there is nothing to back-fill, and the trailing
+	// schema DDL creates the table fresh right after migrate returns, same
+	// as it always has for a table dropped between opens.
+	var exists int
+	if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tag_subscriptions'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 1 {
+		if _, err := tx.Exec(`WITH RECURSIVE split(sender, tags_key, tag, rest) AS (
+			SELECT sender, tags_key, '', tags_key || ',' FROM tag_subscriptions
+			UNION ALL
+			SELECT sender, tags_key, substr(rest, 1, instr(rest, ',') - 1), substr(rest, instr(rest, ',') + 1) FROM split WHERE rest <> '')
+			INSERT OR IGNORE INTO tag_subscription_tags(sender, tags_key, tag) SELECT sender, tags_key, tag FROM split WHERE tag <> ''`); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec("DROP INDEX IF EXISTS message_tags_tag")
+	return err
 }
 
 // dropMessagesBytes (schema 1 -> 2, ADR 0006 item 4) rebuilds messages

@@ -237,7 +237,10 @@ separate process has no other way to learn it.
   TUI launch after upgrading subscribes to every existing inbox from its
   oldest retained message, so retained direct messages show as unread once.
   A `tasks/` channel shows its task tree (read-only): subtasks indented,
-  `○ ◐ ● ⊘` for pending, in progress, completed, blocked.
+  ❎ pending, ⏱️ in progress (with the owner's name beside it), ✅ completed
+  (dimmed); a blocked task keeps ❎ with `blocked by #n`. `t` follows a tag
+  set (a `tags` section lists yours; select one to see every chat message
+  carrying all of its tags; `s` on it unfollows).
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose
@@ -274,7 +277,9 @@ before the TUI starts.
 |-----------|----------|---------|
 | `background` | screen background | `default` |
 | `text` | message content | `default` |
-| `dim` | timestamps, dividers, help | `brightblack` |
+| `dim` | dividers, help, summaries | `brightblack` |
+| `timestamp` | message timestamps (unselected rows) | `brightblack` |
+| `tag` | tag chip background (`default` falls back to dim `#tag` words) | `brightblack` |
 | `agent` | agent names, selected channel, key hints | `cyan` |
 | `user` | your own name | `yellow` |
 | `memory` | memory channels and the memory browser | `magenta` |
@@ -284,10 +289,109 @@ before the TUI starts.
 | `error` | errors and the delete confirmation | `red` |
 | `selection` | selected row background | `blue` |
 
+On the selected message row, dim text (timestamp, thread summary) switches
+to the `text` color so it stays readable on `selection`.
+
+Chip text is black on light `tag` colors (yellow, cyan, white, and bright
+green/yellow/cyan/white) and bright white on the rest.
+
 The health overlay (`h`) shows the log file path, the theme in use with
 each resolved value, and the loaded config. `o` opens the config file in
 `$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with
-arguments or spaces works.
+arguments or spaces works. A GUI editor in `$VISUAL` (for example
+`code --wait`) opens in the background and the TUI stays live; the config
+check shows when the editor exits (with `--wait`, when you close the tab).
+A terminal editor (`vi`, `vim`, `nvim`, `nano`, `emacs`, `micro`, `hx`, and
+similar), or one set only in `$EDITOR`, takes over the terminal until you
+quit it. Editing a memory always waits for the editor, because the TUI reads
+the file back when you close it.
+
+## TUI icons
+
+`icons` picks the icon set the TUI draws for channels, senders, task status,
+and the other markers below; the default, `emoji`, needs no font setup and
+is what every screenshot in this doc shows.
+
+```json
+{
+  "icons": "nerdfont",
+  "icon_map": { "chat": "\uf27a" }
+}
+```
+
+| Value | What it does |
+|-------|--------------|
+| `emoji` | default; color emoji, no font setup |
+| `nerdfont` | Nerd Font glyphs at the codepoints below |
+| `custom` | `emoji`, overridden per-name by `icon_map` |
+
+`icon_map` applies on top of whichever `icons` set is chosen (`emoji`,
+`nerdfont`, or `custom`, itself just `emoji`); it maps any of the names
+below to a glyph (a literal character, or a `\uXXXX` JSON escape -- JSON
+has no `\U` escape, so a supplementary-plane glyph like `idle`'s needs a
+UTF-16 surrogate pair, e.g. `"\udb81\udcb2"` for U+F04B2, or the literal
+character pasted directly). An icon name `icon_map` doesn't set keeps its
+base-set glyph. An unknown `icons` value, an unknown `icon_map` name, or an
+empty `icon_map` value falls back to the base set for that icon and prints
+one line on stderr before the TUI starts, the same way a bad theme value
+does.
+
+| Icon name | Used for | emoji | nerdfont (Nerd Fonts 3.x codepoint) |
+|-----------|----------|-------|--------------------------------------|
+| `chat` | chat channels | speech balloon | U+F27A fa-message |
+| `memory` | memory channels | floppy disk | U+F0C7 fa-floppy-disk |
+| `tasks` | task-list channels | clipboard | U+F0AE fa-list-check |
+| `agent` | other senders and sessions | gear | U+EE0D fa-robot |
+| `user` | your own name | adult | U+F007 fa-user |
+| `idle` | an ended session in the rail | sleeping symbol | U+F04B2 md-sleep |
+| `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
+| `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
+| `task_completed` | a completed task | ✅ | U+F046 fa-square-check |
+| `collapsed` | selected list item; a thread that can expand | ▶ | U+F0DA fa-caret-right |
+| `expanded` | a thread whose replies are shown | ▼ | U+F0D7 fa-caret-down |
+| `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |
+| `arrow` | sender → recipient, a pending task's owner | → | U+F061 fa-arrow-right |
+
+The health overlay (`h`) names the active set on an `icons ·` line.
+
+### Using a Nerd Font
+
+`nerdfont` needs a Nerd Font installed and selected as the terminal's font
+for the codepoints above (agentbus does not install or download any font).
+Install a **Mono** variant — the non-Mono build advances two columns for
+these glyphs where agentbus's rail and task-row alignment assumes one, and
+they'll look off by a column:
+
+```
+brew install --cask font-sauce-code-pro-nerd-font
+```
+
+Then point the terminal at it:
+
+- **iTerm2**: Preferences → Profiles → Text → set "Non-ASCII Font" to the
+  Nerd Font Mono (the main font can stay whatever you use for code).
+- **kitty**: add a `symbol_map` line in `kitty.conf` covering the Private
+  Use Area ranges above, pointing at the Nerd Font Mono.
+- **WezTerm**: add the Nerd Font Mono to `font_fallback` in `wezterm.lua` (or
+  set it as the whole `font` if you want it for code too).
+- **Terminal.app**: its font fallback for these codepoints is unreliable;
+  set the Nerd Font Mono as the profile's own font rather than relying on
+  fallback.
+
+### Font Awesome Pro
+
+Three Font Awesome glyphs — `fa-face-sleeping` (idle), `fa-microchip-ai` and
+`fa-user-robot` (agent alternatives) — are Pro-only and not in Nerd Fonts.
+They're reachable only through `icon_map`, mapped to the codepoints of your
+own licensed Pro font; agentbus ships no fonts, Free or Pro.
+
+Nerd Fonts and Font Awesome Pro share some Private Use Area codepoints with
+different glyphs at them (for example U+F46D is `oct-home` in Nerd Fonts,
+not the Pro glyph some icon lists give it there). If your terminal's primary
+font is a Nerd Font, a Pro codepoint that collides with one of its
+assignments renders the Nerd Font's glyph instead of the Pro one, so check
+each `custom` codepoint against the Nerd Font cmap before relying on it. Do
+not redistribute a patched Pro font; that violates its license.
 
 ## Limits worth knowing
 

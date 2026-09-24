@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -138,23 +140,82 @@ func (m *Model) updateMemories(msg tea.Msg) tea.Cmd {
 
 // editorCommand runs $VISUAL, else $EDITOR, else vi, on path. A value that
 // is itself an existing file is run as-is, so a bare path with spaces
-// ("/Applications/Visual Studio Code.app/Contents/MacOS/Electron") works;
+// ("/Applications/Visual Studio Code.app/Contents/MacOS/Code") works;
 // splitting it on whitespace used to break it at "/Applications/Visual".
 // Anything else goes through the shell the way git runs GIT_EDITOR, so
 // arguments and quoting work ("code --wait"). A blank or whitespace-only
 // value falls back the same as unset.
 func editorCommand(path string) *exec.Cmd {
-	ed := strings.TrimSpace(os.Getenv("VISUAL"))
-	if ed == "" {
-		ed = strings.TrimSpace(os.Getenv("EDITOR"))
-	}
-	if ed == "" {
-		ed = "vi"
-	}
+	ed, _ := editorSetting()
 	if st, err := os.Stat(ed); err == nil && !st.IsDir() {
 		return exec.Command(ed, path)
 	}
 	return exec.Command("/bin/sh", "-c", ed+` "$1"`, "sh", path)
+}
+
+// terminalEditors need the terminal, so a $VISUAL naming one still blocks.
+// ponytail: fixed list; a terminal editor missing from it would run in the
+// background without a terminal, so add names as they come up.
+var terminalEditors = map[string]bool{
+	"vi": true, "vim": true, "view": true, "nvim": true, "nano": true, "pico": true,
+	"emacs": true, "micro": true, "hx": true, "helix": true, "kak": true,
+	"joe": true, "ne": true, "mg": true, "ed": true,
+}
+
+// backgroundEditor is $VISUAL on path, to run without the terminal while
+// the TUI stays live; ok is false when $VISUAL is unset or names a
+// terminal editor, and the caller then blocks as before.
+func backgroundEditor(path string) (cmd *exec.Cmd, ok bool) {
+	ed := strings.TrimSpace(os.Getenv("VISUAL"))
+	if ed == "" || terminalEditors[filepath.Base(editorProgram(ed))] {
+		return nil, false
+	}
+	return editorCommand(path), true
+}
+
+// editorProgram is the program an editor setting runs: the whole value when
+// it is an existing file (a path with spaces), else its first shell word
+// with surrounding quotes removed.
+func editorProgram(ed string) string {
+	if st, err := os.Stat(ed); err == nil && !st.IsDir() {
+		return ed
+	}
+	if q := ed[0]; q == '\'' || q == '"' {
+		if end := strings.IndexByte(ed[1:], q); end >= 0 {
+			return ed[1 : end+1]
+		}
+	}
+	prog, _, _ := strings.Cut(ed, " ")
+	return prog
+}
+
+// editorSetting is the editor editorCommand runs and where it came from
+// ("$VISUAL", "$EDITOR", or "default").
+func editorSetting() (ed, source string) {
+	if ed = strings.TrimSpace(os.Getenv("VISUAL")); ed != "" {
+		return ed, "$VISUAL"
+	}
+	if ed = strings.TrimSpace(os.Getenv("EDITOR")); ed != "" {
+		return ed, "$EDITOR"
+	}
+	return "vi", "default"
+}
+
+// editorErrText explains an editor failure for a toast. The shell exits 127
+// when the editor command does not exist and 126 when it cannot be run;
+// both usually mean a stale $VISUAL or $EDITOR, so name the setting.
+func editorErrText(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		ed, source := editorSetting()
+		switch ee.ExitCode() {
+		case 127:
+			return fmt.Sprintf("editor: command not found: %s (from %s)", ed, source)
+		case 126:
+			return fmt.Sprintf("editor: not executable: %s (from %s)", ed, source)
+		}
+	}
+	return "editor: " + err.Error()
 }
 
 // editMemoryInEditor writes the current revision to a fresh, unique temp
@@ -196,7 +257,7 @@ func (m *Model) editMemoryInEditor() tea.Cmd {
 func (m *Model) applyMemoryEdit(msg memEditedMsg) tea.Cmd {
 	defer func() { _ = os.Remove(msg.path) }()
 	if msg.err != nil {
-		return m.showToast("editor: " + msg.err.Error())
+		return m.showToast(editorErrText(msg.err))
 	}
 	body, err := os.ReadFile(msg.path)
 	if err != nil {
@@ -329,7 +390,7 @@ func (m Model) viewMemories() string {
 		b.WriteString(trunc.Render(line) + "\n")
 	}
 	if m.mem.err != nil {
-		b.WriteString(th.Style(th.Error).Render("✗ "+errText(m.mem.err)) + "\n")
+		b.WriteString(th.Style(th.Error).Render(iconError+errText(m.mem.err)) + "\n")
 	}
 	if len(m.mem.list) == 0 {
 		b.WriteString(dim.Render("no memories in "+m.mem.channel) + "\n")

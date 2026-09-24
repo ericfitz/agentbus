@@ -41,6 +41,7 @@ func (m Model) helpLines() []string {
 		{"r", "reply to the cursor message (own inbox only, in the sessions pane)"},
 		{"c", "new channel: <name> [memory]"},
 		{"s", "subscribe / unsubscribe the channel (no-op in the sessions pane)"},
+		{"t", "follow a tag set: <tag>[,<tag>...] (AND); s on its rail row unfollows"},
 		{"d", "delete the channel and all its messages (asks first; no-op in the sessions pane)"},
 		{"/", "search (tab cycles text / semantic / both)"},
 		{"m", "memory browser"},
@@ -55,6 +56,7 @@ func (m Model) helpLines() []string {
 		{"ctrl+u", "clear"},
 		{"", ""},
 		{"(task lists)", "tasks/ channels show the task tree; read-only"},
+		{"(tags)", "the tags rail section shows chat messages carrying every tag of a set; read-only"},
 	}
 	key, dim := m.theme.Style(m.theme.Agent), m.theme.Style(m.theme.Dim)
 	lines := make([]string, 0, len(rows))

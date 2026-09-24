@@ -16,33 +16,35 @@ import (
 )
 
 type Config struct {
-	DataDirectory                string   `json:"data_directory"`
-	SQLiteBudgetMiB              int      `json:"sqlite_budget_mib"`
-	MessageRetentionHours        int      `json:"message_retention_hours"`
-	CleanupFreePercent           int      `json:"cleanup_free_percent"`
-	CleanupIntervalSeconds       int      `json:"cleanup_interval_seconds"`
-	CursorIdleHours              int      `json:"cursor_idle_hours"`
-	TombstoneMinHours            int      `json:"tombstone_min_hours"`
-	ReceiptRetentionMinutes      int      `json:"receipt_retention_minutes"`
-	MaxMessageKiB                int      `json:"max_message_kib"`
-	SendMessagesPerSecond        int      `json:"send_messages_per_second"`
-	SendKiBPerSecond             int      `json:"send_kib_per_second"`
-	ReceiveDefaultCount          int      `json:"receive_default_count"`
-	ReceiveMaxCount              int      `json:"receive_max_count"`
-	ReceiveMaxWaitSeconds        int      `json:"receive_max_wait_seconds"`
-	ResultDefaultKiB             int      `json:"result_default_kib"`
-	DiscoveryEnabled             bool     `json:"discovery_enabled"`
-	InspectionCommand            []string `json:"inspection_command"`
-	InspectionTimeoutSeconds     float64  `json:"inspection_timeout_seconds"`
-	EmbeddingEndpoint            string   `json:"embedding_endpoint"`
-	EmbeddingModel               string   `json:"embedding_model"`
-	EmbeddingAPIKeyFile          string   `json:"embedding_api_key_file"`
-	EmbeddingAPIKeyEnv           string   `json:"embedding_api_key_env"`
-	EmbeddingQueryTimeoutSeconds float64  `json:"embedding_query_timeout_seconds"`
-	LogLevel                     string   `json:"log_level"`
-	TUIName                      string   `json:"tui_name"`
-	Theme                        string   `json:"theme"`  // name of the entry in Themes the TUI applies
-	Themes                       []Theme  `json:"themes"` // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
+	DataDirectory                string            `json:"data_directory"`
+	SQLiteBudgetMiB              int               `json:"sqlite_budget_mib"`
+	MessageRetentionHours        int               `json:"message_retention_hours"`
+	CleanupFreePercent           int               `json:"cleanup_free_percent"`
+	CleanupIntervalSeconds       int               `json:"cleanup_interval_seconds"`
+	CursorIdleHours              int               `json:"cursor_idle_hours"`
+	TombstoneMinHours            int               `json:"tombstone_min_hours"`
+	ReceiptRetentionMinutes      int               `json:"receipt_retention_minutes"`
+	MaxMessageKiB                int               `json:"max_message_kib"`
+	SendMessagesPerSecond        int               `json:"send_messages_per_second"`
+	SendKiBPerSecond             int               `json:"send_kib_per_second"`
+	ReceiveDefaultCount          int               `json:"receive_default_count"`
+	ReceiveMaxCount              int               `json:"receive_max_count"`
+	ReceiveMaxWaitSeconds        int               `json:"receive_max_wait_seconds"`
+	ResultDefaultKiB             int               `json:"result_default_kib"`
+	DiscoveryEnabled             bool              `json:"discovery_enabled"`
+	InspectionCommand            []string          `json:"inspection_command"`
+	InspectionTimeoutSeconds     float64           `json:"inspection_timeout_seconds"`
+	EmbeddingEndpoint            string            `json:"embedding_endpoint"`
+	EmbeddingModel               string            `json:"embedding_model"`
+	EmbeddingAPIKeyFile          string            `json:"embedding_api_key_file"`
+	EmbeddingAPIKeyEnv           string            `json:"embedding_api_key_env"`
+	EmbeddingQueryTimeoutSeconds float64           `json:"embedding_query_timeout_seconds"`
+	LogLevel                     string            `json:"log_level"`
+	TUIName                      string            `json:"tui_name"`
+	Theme                        string            `json:"theme"`    // name of the entry in Themes the TUI applies
+	Themes                       []Theme           `json:"themes"`   // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
+	Icons                        string            `json:"icons"`    // emoji (default), nerdfont, or custom
+	IconMap                      map[string]string `json:"icon_map"` // custom: icon name -> glyph, overriding a subset of emoji
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -73,6 +75,7 @@ func Default() Config {
 		TUIName:                      defaultTUIName(),
 		Theme:                        "default",
 		Themes:                       []Theme{DefaultTheme()},
+		Icons:                        "emoji",
 	}
 }
 
@@ -84,6 +87,8 @@ type Theme struct {
 	Background string `json:"background"`
 	Text       string `json:"text"`
 	Dim        string `json:"dim"`
+	Timestamp  string `json:"timestamp"`
+	Tag        string `json:"tag"`
 	Agent      string `json:"agent"`
 	User       string `json:"user"`
 	Memory     string `json:"memory"`
@@ -96,7 +101,7 @@ type Theme struct {
 
 // DefaultTheme is the built-in "default" theme and the per-value fallback.
 func DefaultTheme() Theme {
-	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
 }
 
 // Colors lists the theme's values as (key, value) pairs in a fixed order,
@@ -106,6 +111,8 @@ func (t Theme) Colors() [][2]string {
 		{"background", t.Background},
 		{"text", t.Text},
 		{"dim", t.Dim},
+		{"timestamp", t.Timestamp},
+		{"tag", t.Tag},
 		{"agent", t.Agent},
 		{"user", t.User},
 		{"memory", t.Memory},

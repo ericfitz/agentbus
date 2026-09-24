@@ -224,6 +224,15 @@ func TestTagSourceExcludesDirectDMTaskAndMemory(t *testing.T) {
 	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := b.CreateChannel(sam, "tasks/x", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/x", Subject: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("INSERT INTO message_tags(seq, tag) SELECT seq, 't' FROM messages WHERE channel='tasks/x'"); err != nil {
+		t.Fatal(err)
+	}
 	sendTagged(t, b, sam, "dev", "direct", "t")
 	sendTagged(t, b, sam, "dm/Kim", "dm", "t")
 	sendTagged(t, b, sam, "dm/Sam", "other dm", "t")
@@ -338,6 +347,62 @@ func TestTagRowSurvivesSweeps(t *testing.T) {
 		if p.Channel == tagSource {
 			t.Fatalf("pending must not list the pseudo row: %+v", reg.Pending)
 		}
+	}
+}
+
+// One batch mixes a direct channel (dev) and the tag source (general via
+// tag t): one token, per-source pending_end_seq from srcOf, redelivery
+// unchanged, and the ack advances both cursors (#10).
+func TestMixedChannelAndTagBatch(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.Subscribe(kim, "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	d1 := sendTagged(t, b, sam, "dev", "d1")
+	g1 := sendTagged(t, b, sam, "general", "g1", "t")
+	d2 := sendTagged(t, b, sam, "dev", "d2")
+	sendTagged(t, b, sam, "general", "g2", "t")
+	_ = d1
+
+	r1, err := b.Receive(kim, ReceiveInput{Count: 3}) // trims g2 out of the batch
+	if err != nil || len(r1.Messages) != 3 || r1.Batch == "" {
+		t.Fatalf("%+v %v", r1, err)
+	}
+	ends := map[string]int64{}
+	rows, err := b.db.Query("SELECT channel, pending_token, pending_end_seq FROM subscriptions WHERE sender=? AND pending_token!=''", kim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var ch, tok string
+		var end int64
+		if err := rows.Scan(&ch, &tok, &end); err != nil {
+			t.Fatal(err)
+		}
+		if tok != r1.Batch {
+			t.Fatalf("%s holds token %q, want the one batch token %q", ch, tok, r1.Batch)
+		}
+		ends[ch] = end
+	}
+	_ = rows.Close()
+	if len(ends) != 2 || ends["dev"] != d2.Seq || ends[tagSource] != g1.Seq {
+		t.Fatalf("pending_end_seq per source: %v (want dev=%d %s=%d)", ends, d2.Seq, tagSource, g1.Seq)
+	}
+
+	r2, _ := b.Receive(kim, ReceiveInput{})
+	if !r2.Redelivered || r2.Batch != r1.Batch || len(r2.Messages) != 3 {
+		t.Fatalf("redelivery: %+v", r2)
+	}
+
+	r3, _ := b.Receive(kim, ReceiveInput{Ack: r2.Batch})
+	if len(r3.Messages) != 1 || r3.Messages[0].Content != "g2" || r3.Redelivered {
+		t.Fatalf("ack advances both cursors; only g2 is new: %+v", r3.Messages)
+	}
+	if r4, _ := b.Receive(kim, ReceiveInput{Ack: r3.Batch}); len(r4.Messages) != 0 {
+		t.Fatalf("nothing left: %+v", r4.Messages)
 	}
 }
 

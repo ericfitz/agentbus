@@ -70,31 +70,34 @@ func setIcons(set map[string]string) {
 	}
 }
 
-// LoadIcons applies cfg.Icons: emoji (default), nerdfont, or custom, where
-// icon_map overrides any subset of emoji. An unknown set, an unknown name, or
-// an empty value warns one line and falls back to emoji, like LoadTheme.
+// LoadIcons applies cfg.Icons: emoji (default), nerdfont, or custom (a
+// backward-compatible alias for emoji), then applies icon_map on top of
+// whichever base set was chosen, overriding any subset of it. An unknown
+// set, an unknown icon_map name, or an empty value warns one line and skips
+// that entry (leaving the base set's icon in place), like LoadTheme.
 func LoadIcons(cfg config.Config, warn io.Writer) string {
-	set, name := emojiIcons, strings.ToLower(strings.TrimSpace(cfg.Icons))
+	name := strings.ToLower(strings.TrimSpace(cfg.Icons))
+	set := maps.Clone(emojiIcons)
 	switch name {
-	case "", "emoji":
-		name = "emoji"
+	case "", "emoji", "custom":
+		if name == "" {
+			name = "emoji"
+		}
 	case "nerdfont":
 		set = map[string]string{}
 		for k, g := range nerdIcons {
 			set[k] = padIcon(k, g)
 		}
-	case "custom":
-		set = maps.Clone(emojiIcons)
-		for k, g := range cfg.IconMap {
-			if _, ok := emojiIcons[k]; !ok || g == "" {
-				_, _ = fmt.Fprintf(warn, "agentbus tui: icon_map %q=%q is not a known icon with a value; using emoji\n", k, g)
-				continue
-			}
-			set[k] = padIcon(k, g)
-		}
 	default:
 		_, _ = fmt.Fprintf(warn, "agentbus tui: icons %q is not emoji, nerdfont, or custom; using emoji\n", cfg.Icons)
 		name = "emoji"
+	}
+	for k, g := range cfg.IconMap {
+		if _, ok := emojiIcons[k]; !ok || g == "" {
+			_, _ = fmt.Fprintf(warn, "agentbus tui: icon_map %q=%q is not a known icon with a value; keeping the current icon\n", k, g)
+			continue
+		}
+		set[k] = padIcon(k, g)
 	}
 	setIcons(set)
 	return name

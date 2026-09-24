@@ -51,6 +51,12 @@ func TestLoadIconsNerdfontWidthParity(t *testing.T) {
 	if w := lipgloss.Width(markOpen); w != 1 {
 		t.Errorf("expanded width = %d, want 1", w)
 	}
+	if iconArrow != "  " {
+		t.Errorf("nerdfont iconArrow = %q, want %q", iconArrow, "  ")
+	}
+	if iconError != " " {
+		t.Errorf("nerdfont iconError = %q, want %q", iconError, " ")
+	}
 
 	// A task row and the rail must occupy the same width per line whichever
 	// set is active.
@@ -116,6 +122,26 @@ func widths(s string) []int {
 		out[i] = lipgloss.Width(l)
 	}
 	return out
+}
+
+// TestLoadIconsNerdfontWithIconMapOverridesOneIcon (#17 controller ruling):
+// icon_map applies on top of whichever base set is chosen, not only custom.
+func TestLoadIconsNerdfontWithIconMapOverridesOneIcon(t *testing.T) {
+	t.Cleanup(func() { setIcons(emojiIcons) })
+	cfg := config.Default()
+	cfg.Icons = "nerdfont"
+	cfg.IconMap = map[string]string{"chat": "X"}
+	var warn bytes.Buffer
+	if got := LoadIcons(cfg, &warn); got != "nerdfont" || warn.Len() != 0 {
+		t.Fatalf("name = %q, warn = %q", got, warn.String())
+	}
+	if iconChat != "X  " {
+		t.Fatalf("iconChat = %q, want padded %q", iconChat, "X  ")
+	}
+	wantMem := padIcon("memory", nerdIcons["memory"])
+	if iconMem != wantMem {
+		t.Fatalf("iconMem = %q, want nerdfont %q (icon_map must not touch names it doesn't set)", iconMem, wantMem)
+	}
 }
 
 func TestLoadIconsCustomOverridesSubset(t *testing.T) {

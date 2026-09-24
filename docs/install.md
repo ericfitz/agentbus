@@ -309,7 +309,7 @@ is what every screenshot in this doc shows.
 ```json
 {
   "icons": "nerdfont",
-  "icon_map": { "chat": "" }
+  "icon_map": { "chat": "\uf27a" }
 }
 ```
 
@@ -319,12 +319,16 @@ is what every screenshot in this doc shows.
 | `nerdfont` | Nerd Font glyphs at the codepoints below |
 | `custom` | `emoji`, overridden per-name by `icon_map` |
 
-`icon_map` only applies when `icons` is `custom`; it maps any of the names
-below to a glyph (a literal character, or a `\uXXXX`/`\UXXXXXXXX` JSON
-escape). An icon name `icon_map` doesn't set keeps its emoji glyph. An
-unknown `icons` value, an unknown `icon_map` name, or an empty `icon_map`
-value falls back to emoji for that icon and prints one line on stderr before
-the TUI starts, the same way a bad theme value does.
+`icon_map` applies on top of whichever `icons` set is chosen (`emoji`,
+`nerdfont`, or `custom`, itself just `emoji`); it maps any of the names
+below to a glyph (a literal character, or a `\uXXXX` JSON escape -- JSON
+has no `\U` escape, so a supplementary-plane glyph like `idle`'s needs a
+UTF-16 surrogate pair, e.g. `"\udb81\udcb2"` for U+F04B2, or the literal
+character pasted directly). An icon name `icon_map` doesn't set keeps its
+base-set glyph. An unknown `icons` value, an unknown `icon_map` name, or an
+empty `icon_map` value falls back to the base set for that icon and prints
+one line on stderr before the TUI starts, the same way a bad theme value
+does.
 
 | Icon name | Used for | emoji | nerdfont (Nerd Fonts 3.x codepoint) |
 |-----------|----------|-------|--------------------------------------|
@@ -370,11 +374,10 @@ Then point the terminal at it:
 
 ### Font Awesome Pro
 
-Three glyphs the user's original icon map asked for — `fa-face-sleeping`
-(idle), `fa-microchip-ai` and `fa-user-robot` (agent alternatives) — are
-Font Awesome **Pro** icons and are not in Nerd Fonts. They're reachable only
-through `custom`, mapped to the codepoints of your own licensed Pro font;
-agentbus ships no fonts, Free or Pro.
+Three Font Awesome glyphs — `fa-face-sleeping` (idle), `fa-microchip-ai` and
+`fa-user-robot` (agent alternatives) — are Pro-only and not in Nerd Fonts.
+They're reachable only through `icon_map`, mapped to the codepoints of your
+own licensed Pro font; agentbus ships no fonts, Free or Pro.
 
 Nerd Fonts and Font Awesome Pro share some Private Use Area codepoints with
 different glyphs at them (for example U+F46D is `oct-home` in Nerd Fonts,

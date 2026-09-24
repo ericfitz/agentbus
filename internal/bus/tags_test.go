@@ -367,11 +367,10 @@ func TestMixedChannelAndTagBatch(t *testing.T) {
 	if err := b.SubscribeTags(kim, []string{"t"}); err != nil {
 		t.Fatal(err)
 	}
-	d1 := sendTagged(t, b, sam, "dev", "d1")
+	sendTagged(t, b, sam, "dev", "d1")
 	g1 := sendTagged(t, b, sam, "general", "g1", "t")
 	d2 := sendTagged(t, b, sam, "dev", "d2")
 	sendTagged(t, b, sam, "general", "g2", "t")
-	_ = d1
 
 	r1, err := b.Receive(kim, ReceiveInput{Count: 3}) // trims g2 out of the batch
 	if err != nil || len(r1.Messages) != 3 || r1.Batch == "" {

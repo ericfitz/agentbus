@@ -33,6 +33,22 @@ CREATE TABLE messages (
   bytes INTEGER NOT NULL
 );`
 
+// schemaV5FTS is messages_fts and its two triggers as shipped through
+// v1.7.0 (content only). Schema version 6 rebuilds them over subject and
+// content, so a test shaping an older file replaces the current ones with
+// these first.
+const schemaV5FTS = `
+DROP TRIGGER IF EXISTS messages_ai;
+DROP TRIGGER IF EXISTS messages_ad;
+DROP TABLE IF EXISTS messages_fts;
+CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='seq');
+CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, content) VALUES (new.seq, new.content);
+END;
+CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.seq, old.content);
+END;`
+
 // TestMigrateV1DropsMessagesBytes (ADR 0006 item 4): opening a schema
 // version 1 database rebuilds messages without bytes in one transaction,
 // keeps every row, embedding, and FTS entry, carries the AUTOINCREMENT
@@ -51,7 +67,7 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	}
 	// A v1 file: v1 messages table, then the rest of the shared DDL (which
 	// skips messages because it already exists), stamped 1.
-	for _, s := range []string{schemaV1Messages, schema, "PRAGMA user_version = 1",
+	for _, s := range []string{schemaV1Messages, schema, schemaV5FTS, "PRAGMA user_version = 1",
 		"INSERT INTO channels(name,kind,created_seq) VALUES('memory','memory',0)",
 		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,bytes) VALUES('memory','sam','r',1,'','remember me',1,1,42)",
 		"INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('general','sam','r',2,'','hello world',42)",
@@ -85,6 +101,9 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	}
 	if strings.Contains(cols, "bytes") {
 		t.Fatalf("bytes column survived: %s", cols)
+	}
+	if !strings.Contains(cols, "subject") {
+		t.Fatalf("subject column missing after the full chain: %s", cols)
 	}
 	var content string
 	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != "remember me" {
@@ -178,12 +197,12 @@ func TestMigrateV3AddsTagSubscriptions(t *testing.T) {
 	}
 }
 
-// TestMigrateV2To5 (#13): a database shaped like 1.6.0 -- user_version 2,
-// missing message_tags, tag_subscriptions, and tag_subscription_tags --
-// opens, walks every migration step up to schemaVersion, passes the FK
-// check each step already runs, and tag subscribe/send/receive works
-// afterward.
-func TestMigrateV2To5(t *testing.T) {
+// TestMigrateV2ToLatest (#13, ADR 0010): a database shaped like 1.6.0 --
+// user_version 2, missing message_tags, tag_subscriptions, and
+// tag_subscription_tags -- opens, walks every migration step up to
+// schemaVersion, passes the FK check each step already runs, and tag
+// subscribe/send/receive works afterward.
+func TestMigrateV2ToLatest(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
 	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
@@ -235,6 +254,10 @@ func TestMigrateV2To5(t *testing.T) {
 	}
 	if len(r.Messages) != 1 || r.Messages[0].Content != "hi" {
 		t.Fatalf("tag subscribe/send/receive after migration: %+v %v", r, err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM pragma_table_info('messages') WHERE name='subject'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("subject column after the chain: %d %v", n, err)
 	}
 }
 
@@ -299,5 +322,84 @@ func TestMigrateV4SplitsTagSets(t *testing.T) {
 	}
 	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='message_tags_tag_seq'").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("message_tags_tag_seq missing: %d %v", n, err)
+	}
+}
+
+// TestMigrateV5AddsSubject (ADR 0010): a v5 file gains messages.subject,
+// task rows are backfilled from their JSON document (a non-JSON row on a
+// task channel is skipped, not fatal), messages_fts is rebuilt over subject
+// and content so it still finds old content and now finds subjects, and
+// user_version is 6.
+func TestMigrateV5AddsSubject(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shape a v5 database: content-only FTS and triggers, no subject
+	// column, one task row, one malformed task-channel row, one chat row.
+	for _, s := range []string{
+		schemaV5FTS,
+		"ALTER TABLE messages DROP COLUMN subject",
+		"INSERT INTO channels(name,kind,created_seq) VALUES('tasks/repo','memory',0)",
+		`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision) VALUES('tasks/repo','sam','r',1,'','{"subject":"Ship v6","status":"pending","rank":"V"}',1,1)`,
+		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision) VALUES('tasks/repo','sam','r',2,'','not json',2,1)",
+		"INSERT INTO messages(channel,sender,context,created_at,type,content) VALUES('general','sam','r',3,'','hello world')",
+		"PRAGMA user_version = 5",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v5 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var subjects []string
+	rows, err := b.db.Query("SELECT subject FROM messages ORDER BY seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		subjects = append(subjects, s)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(subjects, "|") != "Ship v6||" {
+		t.Fatalf("backfilled subjects %q, want task row only", subjects)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'hello'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("fts lost old content after rebuild: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'subject:ship'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("fts must index the backfilled subject: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name IN ('messages_ai','messages_ad','messages_fts')").Scan(&n); err != nil || n != 3 {
+		t.Fatalf("fts objects after migration: %d %v", n, err)
+	}
+	// The recreated insert trigger carries both columns: a new row with a
+	// subject is found by a word that appears only there. Task 2 wires
+	// SendInput.Subject; here the row is written directly.
+	if _, err := b.db.Exec("INSERT INTO messages(channel,sender,context,created_at,type,subject,content) VALUES('general','sam','r',4,'','Zebra alert','nothing here')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'zebra'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("insert trigger must index subject: %d %v", n, err)
 	}
 }

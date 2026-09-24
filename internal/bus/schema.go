@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -16,6 +16,21 @@ CREATE TABLE IF NOT EXISTS tag_subscription_tags (
   PRIMARY KEY (sender, tags_key, tag),
   FOREIGN KEY (sender, tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE CASCADE
 );
+`
+
+// messagesFTSDDL is shared by schema.go (fresh databases) and migrate.go's
+// addSubject step (v5 -> v6, ADR 0010): the full-text index over subject
+// and content, external-content on messages, kept in step by two triggers.
+// No update trigger: a message row is never rewritten after insert (an
+// edit inserts a new revision row).
+const messagesFTSDDL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(subject, content, content='messages', content_rowid='seq');
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, subject, content) VALUES (new.seq, new.subject, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, subject, content) VALUES ('delete', old.seq, old.subject, old.content);
+END;
 `
 
 const schema = `
@@ -56,19 +71,14 @@ CREATE TABLE IF NOT EXISTS messages (
   memory_id INTEGER,
   revision INTEGER,
   tombstone INTEGER NOT NULL DEFAULT 0,
-  tombstone_at INTEGER
+  tombstone_at INTEGER,
+  subject TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS messages_channel_seq ON messages(channel, seq);
 CREATE INDEX IF NOT EXISTS messages_memory ON messages(memory_id, tombstone);
 CREATE INDEX IF NOT EXISTS messages_tombstone_at ON messages(tombstone_at);
 CREATE INDEX IF NOT EXISTS messages_created_at ON messages(created_at);
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, content='messages', content_rowid='seq');
-CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-  INSERT INTO messages_fts(rowid, content) VALUES (new.seq, new.content);
-END;
-CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.seq, old.content);
-END;
+` + messagesFTSDDL + `
 CREATE TABLE IF NOT EXISTS embeddings (
   seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
   model TEXT NOT NULL,

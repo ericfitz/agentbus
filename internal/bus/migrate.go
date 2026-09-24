@@ -20,6 +20,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	2: addTables,    // message_tags (ADR 0009)
 	3: addTables,    // tag_subscriptions (ADR 0009)
 	4: splitTagSets, // tag_subscription_tags (#13)
+	5: addSubject,   // messages.subject, FTS over subject and content (ADR 0010)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -111,6 +112,40 @@ func splitTagSets(tx *sql.Tx) error {
 	}
 	_, err := tx.Exec("DROP INDEX IF EXISTS message_tags_tag")
 	return err
+}
+
+// addSubject (schema 5 -> 6, ADR 0010) adds messages.subject, backfills it
+// on task-list rows from the task document's subject (the same channel
+// predicate as IsTaskChannel), and rebuilds messages_fts and its triggers
+// over subject and content; the rebuild indexes the backfilled subjects.
+// The column check keeps the step safe on a file that already has the
+// column (a test shaping an older version from a fresh file). json_valid
+// guards the backfill: json_extract raises on malformed text, and an error
+// here would leave the bus unopenable.
+func addSubject(tx *sql.Tx) error {
+	var has int
+	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('messages') WHERE name='subject'").Scan(&has); err != nil {
+		return err
+	}
+	if has == 0 {
+		if _, err := tx.Exec("ALTER TABLE messages ADD COLUMN subject TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	for _, s := range []string{
+		`UPDATE messages SET subject = COALESCE(json_extract(content, '$.subject'), '')
+		  WHERE (channel = 'tasks' OR channel LIKE 'tasks/%') AND json_valid(content)`,
+		"DROP TRIGGER IF EXISTS messages_ai",
+		"DROP TRIGGER IF EXISTS messages_ad",
+		"DROP TABLE IF EXISTS messages_fts",
+		messagesFTSDDL,
+		"INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+	} {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dropMessagesBytes (schema 1 -> 2, ADR 0006 item 4) rebuilds messages

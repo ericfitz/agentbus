@@ -487,3 +487,23 @@ Pushed to `main`:
 - **v1.6.0 released** (tag v1.6.0): build, sign, notarize, GitHub release,
   and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
   upgrading: `agentbus init --global`, restart harness sessions.
+
+## 2026-09-24: tags, tag subscriptions, TUI backlog, v1.7.0
+
+Pushed to `main` (merge of `feat/backlog-tags-tui`, issues #3–#18):
+
+- **Tags** (ADR 0009): message tags on `send`, tag filters on `history` and
+  `search`, AND-set tag subscriptions over MCP, CLI (`subscribe -tags`), and
+  `.local/agentbus.json` `tag_subscriptions`. Human decision 2026-09-23: tag
+  matching is an indexed join (`tag_subscription_tags`,
+  `message_tags(tag, seq)`), schema v5.
+- **TUI**: header with timestamp and `sender → recipient`, merged DM
+  threads, tags rail, task pane with status emoji and expandable task rows,
+  version in the status bar, chip text contrast, `icons`/`icon_map`
+  (emoji | nerdfont), background `$VISUAL` for Health `o`.
+- **Fixes**: tick reclaims tasks on bare `tasks`; bare `tasks` skipped by
+  embeddings; `task_list` gains `has_details`.
+- **v1.7.0 released** (tag v1.7.0): build, sign, notarize, GitHub release,
+  and `Formula/agentbus.rb` pushed to `ericfitz/homebrew-tap`. After
+  upgrading: `agentbus init --global`, restart all harness sessions and the
+  TUI together (schema v5).

@@ -208,12 +208,12 @@ func TestDMPaneThreadsConversationAcrossInboxes(t *testing.T) {
 	// by content rather than assuming it is line 0.
 	var first string
 	for _, l := range strings.Split(ansi.Strip(f.m.renderStream()), "\n") {
-		if strings.Contains(l, "-->") {
+		if strings.Contains(l, strings.TrimSpace(iconArrow)) {
 			first = l
 			break
 		}
 	}
-	if !strings.Contains(first, f.c.as+" --> ") || !strings.Contains(first, "Sam") {
+	if !strings.Contains(first, f.c.as+iconArrow) || !strings.Contains(first, "Sam") {
 		t.Fatalf("header shows the real direction: %q", first)
 	}
 }

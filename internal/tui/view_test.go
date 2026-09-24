@@ -344,7 +344,7 @@ func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
 	f.agentSend(t, "dev", "hello")
 	f.receive(t)
 	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
-	want := ansi.Strip(iconAgent) + "Sam --> " + iconChat + "dev"
+	want := ansi.Strip(iconAgent) + "Sam" + iconArrow + iconChat + "dev"
 	if !strings.Contains(first, want) || !strings.Contains(first, "(today)") {
 		t.Fatalf("channel header %q lacks %q", first, want)
 	}
@@ -368,7 +368,7 @@ func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
 	f.agentSend(t, "dm/"+f.c.as, "psst")
 	f.receive(t)
 	first = ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
-	want = ansi.Strip(iconAgent) + "Sam --> " + iconUser + f.c.as
+	want = ansi.Strip(iconAgent) + "Sam" + iconArrow + iconUser + f.c.as
 	if !strings.Contains(first, want) {
 		t.Fatalf("DM header %q lacks %q", first, want)
 	}
@@ -378,7 +378,7 @@ func TestHeaderBusSender(t *testing.T) {
 	f := newFixture(t)
 	f.msgAt("dev", "", 9001, time.Now().UnixMilli(), "reclaimed")
 	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
-	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus --> ") {
+	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus"+iconArrow) {
 		t.Fatalf("empty sender renders as bus: %q", first)
 	}
 }

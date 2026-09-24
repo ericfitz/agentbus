@@ -111,11 +111,11 @@ func (m Model) tagChips(tags []string) string {
 	return strings.Join(parts, " ")
 }
 
-// header is a message's first line: timestamp, sender --> recipient, tag
+// header is a message's first line: timestamp, sender → recipient, tag
 // chips. It never wraps: past avail columns the chips are cut first (dropped
 // under four columns), then the whole line is cut with an ellipsis.
 func (m Model) header(x bus.Message, stampStyle lipgloss.Style, avail int) string {
-	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender) + " --> " + m.channelLabel(x.Channel)
+	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender) + iconArrow + m.channelLabel(x.Channel)
 	if chips := m.tagChips(x.Tags); chips != "" {
 		if room := avail - lipgloss.Width(head) - 2; room >= lipgloss.Width(chips) {
 			head += "  " + chips
@@ -153,6 +153,7 @@ const (
 	iconUser  = "\U0001F9D1\uFE0F "           // adult
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
 	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
+	iconArrow = " \u2192 "                    // rightwards arrow; ambiguous width, 1 column in Western setups
 )
 
 // Task status marks. The stopwatch U+23F1 is text-presentation by default
@@ -348,7 +349,7 @@ func shortDur(d time.Duration) string {
 // renderStream draws the selected channel's messages, oldest first, with the
 // "new" divider after the last seen message, "n evicted" dividers where the
 // bus reported gaps, and the normal-mode cursor row highlighted. Each message
-// is a header line (timestamp, sender --> recipient, tag chips) followed by
+// is a header line (timestamp, sender → recipient, tag chips) followed by
 // its body at the row's depth.
 func (m *Model) renderStream() string {
 	th := m.theme

@@ -45,7 +45,7 @@ func TestTagRailSectionListsSetsAndPaneShowsMatches(t *testing.T) {
 	if !strings.Contains(s, "match") || strings.Contains(s, "partial") || strings.Contains(s, "memory") {
 		t.Fatalf("tag pane shows chat messages carrying every tag:\n%s", s)
 	}
-	if !strings.Contains(s, "Sam --> "+iconChat+"dev") {
+	if !strings.Contains(s, "Sam"+iconArrow+iconChat+"dev") {
 		t.Fatalf("rows keep the #3 header:\n%s", s)
 	}
 	for _, k := range []string{"i", "enter", "r"} {

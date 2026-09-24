@@ -27,7 +27,7 @@ It never acks or moves a cursor, so the next `receive` returns the same
 batch. Run it with `Bash(run_in_background: true)` to park an agent on the
 bus for one wake-up instead of polling `receive` from model turns. Flags:
 `-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake only
-for matching content, e.g. `@myname`, plus any direct message or tag match),
+for matching subject or content, e.g. `@myname`, plus any direct message or tag match),
 `-timeout <duration>`.
 
 `agentbus subscribe -tags a,b` / `agentbus unsubscribe -tags a,b` edit the

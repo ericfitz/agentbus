@@ -230,8 +230,10 @@ separate process has no other way to learn it.
   that identity a direct message. Your own row is your inbox; agents reach
   you at `dm/<tui_name>`. `/` searches, `h` opens
   health and config, `q` quits. Arrow keys never
-  change pane: `↑`/`↓` move within the focused one, `→` shows the replies
-  under the selected message, `←` hides its whole subtree. On a memory, `.`
+  change pane: `↑`/`↓` move within the focused one, `→` opens the selected
+  message's body if it's closed and has one, else shows its direct replies;
+  `←` hides shown replies (the whole subtree), else closes the body. `space`
+  shows / hides replies only. On a memory, `.`
   (or `>`) shows the next older version and `,` (or `<`) the next newer one;
   any other key returns it to the latest. `enter` replies to
   the selected message, or opens compose from the channel list. Colors

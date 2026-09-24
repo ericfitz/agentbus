@@ -186,6 +186,9 @@ func (m *Model) openCursor() {
 	if !ok {
 		return
 	}
+	// hasBody is judged on the live message: → is not a version key, so
+	// updateNormal (model.go) already reset m.mem before openCursor runs,
+	// and the row on screen is the live version.
 	if _, hasBody := rowLine(r.msg, m.rowAvail(r.depth)); hasBody && !m.bodyOpen[r.msg.Seq] {
 		m.bodyOpen[r.msg.Seq] = true
 		m.refreshStream()

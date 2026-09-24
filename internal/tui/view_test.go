@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 	"github.com/muesli/termenv"
 )
 
@@ -16,6 +17,10 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	f.agentSend(t, "dev", "hello from sam")
 	f.receive(t)
 	f.run(f.m.statusCmd())
+	// Wide enough that the version prefix (#15) doesn't truncate the normal-
+	// mode key hints this test checks for below; truncation itself is
+	// TestStatusBarShowsVersion's job.
+	f.m.width = 140
 
 	// Insert mode is the fixture's starting mode: the compose line reads
 	// "dev ›" and the status bar shows the insert-mode key hints.
@@ -49,6 +54,18 @@ func assertStatusBarIsLastLine(t *testing.T, v string, height int) {
 	}
 	if last := lines[len(lines)-1]; !strings.Contains(last, "db ") {
 		t.Fatalf("status bar must be the last line, got %q:\n%s", last, v)
+	}
+}
+
+func TestStatusBarShowsVersion(t *testing.T) {
+	f := newFixture(t)
+	bar := ansi.Strip(f.m.renderStatusBar())
+	if !strings.HasPrefix(bar, "agentbus v"+mcpserver.Version+"  db ") {
+		t.Fatalf("status bar: %q", bar)
+	}
+	f.m.width = 40
+	if bar := f.m.renderStatusBar(); strings.Contains(bar, "\n") || !strings.Contains(ansi.Strip(bar), "agentbus v") {
+		t.Fatalf("status bar must stay one row: %q", bar)
 	}
 }
 

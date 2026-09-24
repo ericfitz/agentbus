@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
 func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
-	f.m.height = 64 // tall enough that the whole body fits without scrolling
+	f.m.height = 65 // tall enough that the whole body (plus #15's version line) fits without scrolling
 	f.key("esc")
 	f.key("h")
 	if f.m.mode != modeHealth {
@@ -33,6 +35,14 @@ func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 	f.key("esc")
 	if f.m.mode != modeNormal {
 		t.Fatal("esc closes")
+	}
+}
+
+func TestHealthLinesShowVersion(t *testing.T) {
+	f := newFixture(t)
+	body := strings.Join(f.m.healthLines(), "\n")
+	if !strings.Contains(body, "version") || !strings.Contains(body, mcpserver.Version) {
+		t.Fatalf("health body lacks the version:\n%s", body)
 	}
 }
 

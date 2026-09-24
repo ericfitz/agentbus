@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -501,7 +502,7 @@ func (m Model) renderStatusBar() string {
 			embed = th.Style(th.Warn).Render("unreachable")
 		}
 	}
-	left := fmt.Sprintf("db %s / %s  embed %s  backlog %d  as %s", fmtBytes(m.status.UsageBytes), fmtBytes(m.status.BudgetBytes), embed, m.status.EmbeddingBacklog, th.Style(th.User).Render(m.c.as))
+	left := th.Style(th.Dim).Render("agentbus v"+mcpserver.Version) + "  " + fmt.Sprintf("db %s / %s  embed %s  backlog %d  as %s", fmtBytes(m.status.UsageBytes), fmtBytes(m.status.BudgetBytes), embed, m.status.EmbeddingBacklog, th.Style(th.User).Render(m.c.as))
 	if m.statusErr != nil {
 		left += "  " + th.Style(th.Error).Render("status: "+errText(m.statusErr))
 	}

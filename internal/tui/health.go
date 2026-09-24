@@ -66,6 +66,7 @@ func (m Model) healthLines() []string {
 	st := m.status
 	var b strings.Builder
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(&b, format, a...) }
+	p("%s %s\n", dim.Render("version"), "agentbus v"+mcpserver.Version)
 	pct := 0
 	if st.BudgetBytes > 0 {
 		pct = int(st.UsageBytes * 100 / st.BudgetBytes)

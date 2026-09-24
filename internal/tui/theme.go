@@ -22,6 +22,9 @@ type Theme struct {
 	// color key ("cyan", "default", ...), for the Health overlay.
 	Name    string
 	Sources map[string]string
+	// IconSet is the active icon set name (LoadIcons's return value), for
+	// the Health overlay.
+	IconSet string
 }
 
 // ParseColor is config.ColorIndex as a Lip Gloss color.

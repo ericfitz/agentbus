@@ -300,6 +300,90 @@ each resolved value, and the loaded config. `o` opens the config file in
 `$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with
 arguments or spaces works.
 
+## TUI icons
+
+`icons` picks the icon set the TUI draws for channels, senders, task status,
+and the other markers below; the default, `emoji`, needs no font setup and
+is what every screenshot in this doc shows.
+
+```json
+{
+  "icons": "nerdfont",
+  "icon_map": { "chat": "" }
+}
+```
+
+| Value | What it does |
+|-------|--------------|
+| `emoji` | default; color emoji, no font setup |
+| `nerdfont` | Nerd Font glyphs at the codepoints below |
+| `custom` | `emoji`, overridden per-name by `icon_map` |
+
+`icon_map` only applies when `icons` is `custom`; it maps any of the names
+below to a glyph (a literal character, or a `\uXXXX`/`\UXXXXXXXX` JSON
+escape). An icon name `icon_map` doesn't set keeps its emoji glyph. An
+unknown `icons` value, an unknown `icon_map` name, or an empty `icon_map`
+value falls back to emoji for that icon and prints one line on stderr before
+the TUI starts, the same way a bad theme value does.
+
+| Icon name | Used for | emoji | nerdfont (Nerd Fonts 3.x codepoint) |
+|-----------|----------|-------|--------------------------------------|
+| `chat` | chat channels | speech balloon | U+F27A fa-message |
+| `memory` | memory channels | floppy disk | U+F0C7 fa-floppy-disk |
+| `tasks` | task-list channels | clipboard | U+F0AE fa-list-check |
+| `agent` | other senders and sessions | gear | U+EE0D fa-robot |
+| `user` | your own name | adult | U+F007 fa-user |
+| `idle` | an ended session in the rail | sleeping symbol | U+F04B2 md-sleep |
+| `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
+| `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
+| `task_completed` | a completed task | ✅ | U+F046 fa-square-check |
+| `collapsed` | selected list item; a thread that can expand | ▶ | U+F0DA fa-caret-right |
+| `expanded` | a thread whose replies are shown | ▼ | U+F0D7 fa-caret-down |
+| `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |
+| `arrow` | sender → recipient, a pending task's owner | → | U+F061 fa-arrow-right |
+
+The health overlay (`h`) names the active set on an `icons ·` line.
+
+### Using a Nerd Font
+
+`nerdfont` needs a Nerd Font installed and selected as the terminal's font
+for the codepoints above (agentbus does not install or download any font).
+Install a **Mono** variant — the non-Mono build advances two columns for
+these glyphs where agentbus's rail and task-row alignment assumes one, and
+they'll look off by a column:
+
+```
+brew install --cask font-sauce-code-pro-nerd-font
+```
+
+Then point the terminal at it:
+
+- **iTerm2**: Preferences → Profiles → Text → set "Non-ASCII Font" to the
+  Nerd Font Mono (the main font can stay whatever you use for code).
+- **kitty**: add a `symbol_map` line in `kitty.conf` covering the Private
+  Use Area ranges above, pointing at the Nerd Font Mono.
+- **WezTerm**: add the Nerd Font Mono to `font_fallback` in `wezterm.lua` (or
+  set it as the whole `font` if you want it for code too).
+- **Terminal.app**: its font fallback for these codepoints is unreliable;
+  set the Nerd Font Mono as the profile's own font rather than relying on
+  fallback.
+
+### Font Awesome Pro
+
+Three glyphs the user's original icon map asked for — `fa-face-sleeping`
+(idle), `fa-microchip-ai` and `fa-user-robot` (agent alternatives) — are
+Font Awesome **Pro** icons and are not in Nerd Fonts. They're reachable only
+through `custom`, mapped to the codepoints of your own licensed Pro font;
+agentbus ships no fonts, Free or Pro.
+
+Nerd Fonts and Font Awesome Pro share some Private Use Area codepoints with
+different glyphs at them (for example U+F46D is `oct-home` in Nerd Fonts,
+not the Pro glyph some icon lists give it there). If your terminal's primary
+font is a Nerd Font, a Pro codepoint that collides with one of its
+assignments renders the Nerd Font's glyph instead of the Pro one, so check
+each `custom` codepoint against the Nerd Font cmap before relying on it. Do
+not redistribute a patched Pro font; that violates its license.
+
 ## Limits worth knowing
 
 - `register`'s `context` is capped at 1 KiB and `parent` at 512 bytes.

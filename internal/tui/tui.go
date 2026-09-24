@@ -20,6 +20,7 @@ func Run(cfg config.Config, as string, stderr io.Writer) error {
 		return err
 	}
 	theme := LoadTheme(cfg, stderr)
+	theme.IconSet = LoadIcons(cfg, stderr)
 	c, err := newClient(cfg, as, log)
 	if err != nil {
 		return err

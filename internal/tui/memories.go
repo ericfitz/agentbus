@@ -329,7 +329,7 @@ func (m Model) viewMemories() string {
 		b.WriteString(trunc.Render(line) + "\n")
 	}
 	if m.mem.err != nil {
-		b.WriteString(th.Style(th.Error).Render("✗ "+errText(m.mem.err)) + "\n")
+		b.WriteString(th.Style(th.Error).Render(iconError+errText(m.mem.err)) + "\n")
 	}
 	if len(m.mem.list) == 0 {
 		b.WriteString(dim.Render("no memories in "+m.mem.channel) + "\n")

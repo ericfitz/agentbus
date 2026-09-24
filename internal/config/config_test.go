@@ -24,8 +24,19 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SQLiteBudgetMiB != 2048 || c.ReceiveMaxWaitSeconds != 60 || c.LogLevel != "info" {
+	if c.SQLiteBudgetMiB != 2048 || c.ReceiveMaxWaitSeconds != 60 || c.LogLevel != "info" || c.Icons != "emoji" {
 		t.Fatalf("defaults wrong: %+v", c)
+	}
+}
+
+func TestIconsAndIconMapFromFile(t *testing.T) {
+	p := write(t, t.TempDir(), `{"icons": "custom", "icon_map": {"chat": "X"}}`)
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Icons != "custom" || c.IconMap["chat"] != "X" {
+		t.Fatalf("icons wrong: %+v", c)
 	}
 }
 

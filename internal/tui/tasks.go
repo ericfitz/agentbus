@@ -54,7 +54,7 @@ func (m Model) renderTasks(ch string) string {
 			}
 			line += "  " + icon + style.Render(t.Owner)
 		case t.Status == "pending" && t.Owner != "":
-			suffix += " → " + t.Owner
+			suffix += iconArrow + t.Owner
 		}
 		if len(t.OpenBlockers) > 0 {
 			ids := make([]string, len(t.OpenBlockers))

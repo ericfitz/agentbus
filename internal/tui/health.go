@@ -120,6 +120,7 @@ func (m Model) healthLines() []string {
 	for _, kv := range config.DefaultTheme().Colors() {
 		p("  %s %s\n", kv[0], th.Sources[kv[0]])
 	}
+	p("%s %s\n", dim.Render("icons ·"), th.IconSet)
 	p("\n%s %s\n", dim.Render("config ·"), cfg.Path)
 	js, err := json.MarshalIndent(cfg, "  ", "  ")
 	if err != nil {

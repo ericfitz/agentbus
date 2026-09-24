@@ -162,7 +162,7 @@ func (m Model) viewSearch() string {
 		var summary string
 		switch {
 		case m.search.err != nil:
-			summary = th.Style(th.Error).Render("✗ " + errText(m.search.err))
+			summary = th.Style(th.Error).Render(iconError + errText(m.search.err))
 		case len(hits) > visible:
 			summary = fmt.Sprintf("showing %d-%d of %d results", start+1, end, len(hits))
 		default:

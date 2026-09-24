@@ -146,8 +146,9 @@ func (m Model) showLeft() bool { return m.width >= 60 }
 func (m Model) railWidth() int { return max(m.width/5, 16) }
 
 // Rail icons. Each carries U+FE0F so the terminal draws the color emoji
-// even when its monospace font has its own glyph at that codepoint.
-const (
+// even when its monospace font has its own glyph at that codepoint. These
+// are vars, not consts: LoadIcons overwrites them per cfg.Icons.
+var (
 	iconChat = "\U0001F4AC\uFE0F " // speech balloon
 	iconMem  = "\U0001F4BE\uFE0F " // floppy disk
 	// ponytail: gear is Neutral width: Terminal.app draws it two cells wide but
@@ -164,13 +165,14 @@ const (
 	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
 	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
 	iconArrow = " \u2192 "                    // rightwards arrow; ambiguous width, 1 column in Western setups
+	iconError = "\u2717 "                     // ballot X, the toast and overlay-footer error prefix
 )
 
 // Task status marks. The stopwatch U+23F1 is text-presentation by default
 // (like the gear) and carries U+FE0F for the color glyph; if a terminal
 // font draws its own half-width stopwatch, give it the gear's CSI 2X/1C
 // treatment.
-const (
+var (
 	taskPending    = "\u274E "       // negative squared cross mark
 	taskInProgress = "\u23F1\uFE0F " // stopwatch
 	taskCompleted  = "\u2705 "       // white heavy check mark
@@ -204,7 +206,7 @@ func (m Model) View() string {
 	}
 	parts = append(parts, m.renderCompose())
 	if m.toast != "" {
-		parts = append(parts, m.theme.Style(m.theme.Error).Render("✗ "+m.toast))
+		parts = append(parts, m.theme.Style(m.theme.Error).Render(iconError+m.toast))
 	}
 	parts = append(parts, m.renderStatusBar())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -450,7 +452,7 @@ func (m *Model) renderStream() string {
 
 // markSel marks the selected list item and a message whose replies can be
 // expanded; markOpen marks a message whose replies are shown.
-const (
+var (
 	markSel  = "\u25b6" // ▶
 	markOpen = "\u25bc" // ▼
 )
@@ -559,7 +561,7 @@ func (m Model) overlaySize() (w, h int) {
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {
-		footer = m.theme.Style(m.theme.Error).Render("✗ "+m.toast) + "\n" + footer
+		footer = m.theme.Style(m.theme.Error).Render(iconError+m.toast) + "\n" + footer
 		h--
 	}
 	inner := lipgloss.JoinVertical(lipgloss.Left,

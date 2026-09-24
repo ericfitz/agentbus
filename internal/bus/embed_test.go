@@ -175,6 +175,30 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	}
 }
 
+// TestEmbedBatchSkipsBareTasksChannel: the bare "tasks" list is a task
+// channel too (ADR 0007, bus.IsTaskChannel), same as tasks/*, so its task
+// descriptions must not be embedded either (#14 root cause).
+func TestEmbedBatchSkipsBareTasksChannel(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks", Subject: "a", Description: "roses are red"}); err != nil {
+		t.Fatal(err)
+	}
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	var embedded int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
+		t.Fatal(err)
+	}
+	if embedded != 0 {
+		t.Fatalf("embedded=%d, want 0: the bare tasks list must not be embedded", embedded)
+	}
+}
+
 // R6a: editing a memory must remove the old revision's embedding vector
 // rather than waiting for the FK cascade, which only fires at purge, up to
 // 72h later. embeddings must hold live revisions only.

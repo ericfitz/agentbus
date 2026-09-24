@@ -178,6 +178,66 @@ func TestMigrateV3AddsTagSubscriptions(t *testing.T) {
 	}
 }
 
+// TestMigrateV2To5 (#13): a database shaped like 1.6.0 -- user_version 2,
+// missing message_tags, tag_subscriptions, and tag_subscription_tags --
+// opens, walks every migration step up to schemaVersion, passes the FK
+// check each step already runs, and tag subscribe/send/receive works
+// afterward.
+func TestMigrateV2To5(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		"DROP TABLE tag_subscription_tags", // FK'd to tag_subscriptions: drop first
+		"DROP TABLE tag_subscriptions",
+		"DROP TABLE message_tags",
+		"PRAGMA user_version = 2",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v2 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	for _, tbl := range []string{"message_tags", "tag_subscriptions", "tag_subscription_tags"} {
+		var n int
+		if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name=?", tbl).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s missing after migration: %d %v", tbl, n, err)
+		}
+	}
+	sam, kim := reg(t, b, "Sam"), reg(t, b, "Kim")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "hi", Tags: []string{"a"}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Messages) != 1 || r.Messages[0].Content != "hi" {
+		t.Fatalf("tag subscribe/send/receive after migration: %+v %v", r, err)
+	}
+}
+
 // TestMigrateV4SplitsTagSets (#13): a v4 database's tag_subscriptions row
 // backfills into tag_subscription_tags (one row per tag), message_tags_tag
 // is dropped, and message_tags_tag_seq replaces it.

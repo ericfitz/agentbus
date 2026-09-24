@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS tag_subscription_tags (
   PRIMARY KEY (sender, tags_key, tag),
   FOREIGN KEY (sender, tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS tag_subscription_tags_tag ON tag_subscription_tags(tag);
 `
 
 const schema = `

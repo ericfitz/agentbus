@@ -80,6 +80,7 @@ type Model struct {
 	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
 	expanded   map[int64]bool  // message seq -> its direct replies are shown
 	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
+	bodyOpen   map[int64]bool  // message seq -> its body (subject line and full content) is shown
 
 	// pendingTaskCursorCh/ID: a task_get/task_list jump target picked by
 	// placeCursor before ch's tree had loaded, e.g. a search jump into a
@@ -133,6 +134,7 @@ func New(c *client, th Theme) Model {
 		cursorLine:   -1,
 		expanded:     map[int64]bool{},
 		peek:         map[int64]int64{},
+		bodyOpen:     map[int64]bool{},
 		divider:      -1,
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
@@ -429,8 +431,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.layout()
 	// up/down move within the focused pane. Channels and sessions are one
 	// rail: down past the last channel enters the sessions, up from the first
-	// session returns to the last channel. right shows the cursor message's
-	// direct replies, left hides its whole subtree.
+	// session returns to the last channel. right opens the cursor message's
+	// body, then its direct replies; left hides its whole subtree, then its
+	// body.
 	case "down":
 		switch m.pane() {
 		case paneStream:
@@ -459,12 +462,12 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		if bus.IsTaskChannel(m.selName()) {
 			return m.expandTask()
 		}
-		m.expandCursor()
+		m.openCursor()
 	case "left":
 		if bus.IsTaskChannel(m.selName()) {
 			m.collapseTask()
 		} else {
-			m.collapseCursor()
+			m.closeCursor()
 		}
 	case "tab", "shift+tab", "home":
 		return m.paneKey(msg)

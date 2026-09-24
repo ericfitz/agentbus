@@ -34,7 +34,7 @@ func (m Model) helpLines() []string {
 		{"i", "compose (in the sessions pane, sends a direct message)"},
 		{"enter", "reply to the cursor message, else compose"},
 		{"↑ / ↓", "previous / next in the focused pane"},
-		{"→ / ←", "show the cursor message's replies / hide its whole subtree"},
+		{"→ / ←", "open the cursor message's body, then its replies / hide its replies, then its body"},
 		{"pgup / pgdn", "scroll (pgup at the top loads older history)"},
 		{"g / G", "oldest / newest"},
 		{"space", "show / hide the replies under the cursor message"},

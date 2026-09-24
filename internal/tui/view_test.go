@@ -196,7 +196,9 @@ func TestReplyIndentAppliesToWrappedLines(t *testing.T) {
 	f.m.layout()
 	f.key("shift+tab") // compose -> stream directly
 	f.key("up")
-	f.key("right")
+	f.key("right") // A has no body: shows the reply
+	f.key("down")
+	f.key("right") // the reply's cut first line is its body: open it
 	var reply []string
 	for _, l := range strings.Split(f.m.renderStream(), "\n") {
 		if strings.Contains(l, "word") {

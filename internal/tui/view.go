@@ -185,8 +185,6 @@ func (m Model) View() string {
 	switch m.mode {
 	case modeSearch:
 		return m.viewSearch()
-	case modeMemories, modeConfirmDelete:
-		return m.viewMemories()
 	case modeHealth:
 		return m.viewHealth()
 	case modeHelp:
@@ -422,9 +420,17 @@ func (m *Model) renderStream() string {
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		line := m.header(x, stampStyle, w-pw) + "\n" + x.Content
+		label := ""
 		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
-			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
+			label = "r" + itoa(*x.Revision)
+		}
+		if v, ok := m.mem.version(x); ok {
+			x.Sender, x.CreatedAt, x.Content = v.Sender, v.CreatedAt, v.Content
+			label = "r" + strconv.Itoa(m.mem.idx+1) + " of " + strconv.Itoa(len(m.mem.revs))
+		}
+		line := m.header(x, stampStyle, w-pw) + "\n" + x.Content
+		if label != "" {
+			line += " " + th.Style(th.Mem).Render(label)
 		}
 		if r.hidden > 0 {
 			summary := strconv.Itoa(r.hidden) + " replies"
@@ -519,7 +525,7 @@ func (m Model) renderStatusBar() string {
 	if m.statusErr != nil {
 		left += "  " + th.Style(th.Error).Render("status: "+errText(m.statusErr))
 	}
-	help := m.hints("?", "help", "/", "search", "m", "memories", "h", "health", "q", "quit")
+	help := m.hints("?", "help", "/", "search", "h", "health", "q", "quit")
 	if m.mode == modeInsert {
 		help = m.hints("esc", "commands", "tab", "next pane", "alt+enter", "newline")
 	}
@@ -557,7 +563,7 @@ func (m Model) overlaySize() (w, h int) {
 }
 
 // overlay renders a titled, bordered box centered on the screen; the border
-// color names the overlay (cyan search, magenta memories, green health).
+// color names the overlay (cyan search, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {

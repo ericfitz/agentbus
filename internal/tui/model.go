@@ -22,10 +22,8 @@ const (
 	modeInsert mode = iota // compose line focused; letters type
 	modeNormal             // letter keymap active
 	modeSearch
-	modeMemories
 	modeHealth
 	modeHelp
-	modeConfirmDelete
 	modeConfirmChannel // d on the channel list; y deletes, anything else cancels
 )
 
@@ -109,7 +107,7 @@ type Model struct {
 	lastNotice string
 
 	search     searchState
-	mem        memState
+	mem        memView
 	health     healthState
 	helpScroll int
 }
@@ -316,34 +314,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case configEditedMsg:
 		cmds = append(cmds, m.onConfigEdited(msg))
-	case memListMsg:
-		if msg.channel != m.mem.channel {
-			break // stale: memories was reopened on a different channel
-		}
-		m.mem.err = msg.err
-		if msg.err == nil {
-			m.mem.list = msg.msgs
-			m.mem.cursor = min(m.mem.cursor, max(len(msg.msgs)-1, 0))
-			cmds = append(cmds, m.loadRevisions())
-		}
 	case revisionsMsg:
-		if m.mem.currentID() == msg.id {
-			if msg.err != nil {
-				m.mem.err = msg.err
-			} else {
-				m.mem.err = nil
-				m.mem.revs = msg.revs
-				m.mem.rev = len(msg.revs) - 1
-			}
-		}
-	case memEditedMsg:
-		cmds = append(cmds, m.applyMemoryEdit(msg))
-	case memChangedMsg:
-		if msg.err != nil {
-			cmds = append(cmds, m.showToast("memory: "+errText(msg.err)))
-		} else {
-			cmds = append(cmds, m.loadMemoryList())
-		}
+		cmds = append(cmds, m.applyRevisions(msg))
 	}
 	switch m.mode {
 	case modeInsert:
@@ -352,8 +324,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateNormal(msg))
 	case modeSearch:
 		cmds = append(cmds, m.updateSearch(msg))
-	case modeMemories, modeConfirmDelete:
-		cmds = append(cmds, m.updateMemories(msg))
 	case modeConfirmChannel:
 		cmds = append(cmds, m.updateConfirmChannel(msg))
 	case modeHealth:
@@ -419,7 +389,11 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	if m.prompt.active {
 		return m.updatePrompt(msg)
 	}
-	switch keyString(msg) {
+	k := keyString(msg)
+	if k != "" && !isVersionKey(k) {
+		m.mem = memView{} // any other key shows the latest version again
+	}
+	switch k {
 	case "q":
 		return tea.Quit
 	case "i":
@@ -540,14 +514,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 	case "/":
 		return m.openSearch()
-	case "m":
-		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
-		}
-		if isTagPane(m.selName()) {
-			return m.showToast(tagReadOnlyToast)
-		}
-		return m.openMemories()
+	case ".", ">":
+		return m.stepVersion(true)
+	case ",", "<":
+		return m.stepVersion(false)
 	case "h":
 		return m.openHealth()
 	case "?":

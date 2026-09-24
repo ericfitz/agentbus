@@ -35,7 +35,7 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	// Normal mode swaps the status bar for the command-key help.
 	f.key("esc")
 	v = f.m.View()
-	for _, want := range []string{"? help", "/ search", "m memories", "h health", "q quit"} {
+	for _, want := range []string{"? help", "/ search", "h health", "q quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("normal-mode view lacks %q:\n%s", want, v)
 		}

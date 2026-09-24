@@ -253,3 +253,53 @@ func TestSearchHitShowsBusForEmptySender(t *testing.T) {
 		t.Fatalf("reclaim's empty sender must show as bus:\n%s", v)
 	}
 }
+
+// TestSearchJumpToTaskChannelLandsCursorOnTask covers the review finding on
+// #16: on a task channel m.cursor indexes m.tasks[ch] (renderTasks' tree
+// order), not rows(ch) (raw revisions in seq order); a search jump must
+// resolve the hit to its task by id, not by the row index of its raw
+// revision. aaa gets a later revision (a claim) after bbb/target are
+// created, so its live seq becomes the newest: that pushes it to the end of
+// rows(ch)'s seq-ordered rows while it stays first in m.tasks[ch]'s
+// rank-ordered tree, the divergence a row-index/task-index mixup needs to
+// surface a wrong answer (verified against the pre-fix code: cursor landed
+// on "bbb", not the "zzyzx" target). The channel is never visited before
+// the jump, so m.tasks["tasks/work"] is still empty when jumpTo's
+// placeCursor call happens -- this also exercises pendingTaskCursor, the
+// tasksMsg handler placing the cursor once the tree loads.
+func TestSearchJumpToTaskChannelLandsCursorOnTask(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	aaa, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "aaa first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "bbb second"}); err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "zzyzx target task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskClaim(f.sam, aaa.ID, 0, ""); err != nil { // aaa's revision is now the newest
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd()) // learns tasks/work exists; never selects or loads it
+	f.key("/")
+	f.key("zzyzx")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	f.key("enter")
+	if f.m.mode != modeNormal || f.m.selected() == nil || f.m.selected().Name != "tasks/work" {
+		t.Fatalf("enter must jump to the hit's channel: mode=%v sel=%v", f.m.mode, f.m.selected())
+	}
+	got, ok := f.m.cursorTask()
+	if !ok || got.ID != target.ID {
+		t.Fatalf("cursor must land on the hit task, got %+v ok=%v", got, ok)
+	}
+}

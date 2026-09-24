@@ -82,8 +82,15 @@ type Model struct {
 	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
 	expanded   map[int64]bool  // message seq -> its direct replies are shown
 	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
-	stream     viewport.Model
-	follow     bool
+
+	// pendingTaskCursorCh/ID: a task_get/task_list jump target picked by
+	// placeCursor before ch's tree had loaded, e.g. a search jump into a
+	// task channel never visited yet. The tasksMsg handler consumes it (and
+	// clears it) once ch's tasks arrive. "" / 0 for none.
+	pendingTaskCursorCh string
+	pendingTaskCursorID int64
+	stream              viewport.Model
+	follow              bool
 
 	compose  textarea.Model
 	replyTo  *bus.Message
@@ -197,10 +204,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loaded[msg.channel] = true
 		// A prepend, or another inbox's page in a merged DM pane, shifts
-		// indices; keep the cursor on the same message.
+		// indices; keep the cursor on the same message. On a task channel
+		// m.cursor indexes m.tasks(selName()), not rows(selName()) -- tasksMsg
+		// owns that cursor (see placeTaskCursor/pendingTaskCursorID), so it's
+		// left untouched here.
 		var cursorSeq int64
-		if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
-			cursorSeq = rs[m.cursor].msg.Seq
+		if !bus.IsTaskChannel(m.selName()) {
+			if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
+				cursorSeq = rs[m.cursor].msg.Seq
+			}
 		}
 		// A pgup-at-top prepend grows the content above what's on screen;
 		// remember the line count so the offset can grow by the same
@@ -240,6 +252,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ts := m.tasks[msg.ch]; m.cursor >= 0 && m.cursor < len(ts) {
 				cursorID = ts[m.cursor].ID
 			}
+		}
+		if msg.ch == m.pendingTaskCursorCh {
+			cursorID = m.pendingTaskCursorID
+			m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 		}
 		m.tasks[msg.ch] = msg.tasks
 		if cursorID != 0 {
@@ -654,12 +670,50 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 }
 
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
-// it is not loaded) and scrolls just enough to bring it into view.
+// it is not loaded) and scrolls just enough to bring it into view. On a task
+// channel the cursor indexes m.tasks[ch] (see renderTasks), not rows(ch), so
+// this resolves to the task-channel case instead.
 func (m *Model) placeCursor(seq int64) {
-	for i, r := range m.rows(m.selName()) {
+	ch := m.selName()
+	if bus.IsTaskChannel(ch) {
+		m.placeTaskCursor(ch, seq)
+		return
+	}
+	for i, r := range m.rows(ch) {
 		if r.msg.Seq == seq {
 			m.cursor = i
 		}
+	}
+	m.follow = false
+	m.refreshStream()
+	m.scrollCursorIntoView()
+}
+
+// placeTaskCursor is placeCursor's task-channel case: seq is a raw
+// revision's seq (e.g. a search hit), resolved to its task via that
+// revision's MemoryID (m.msgs[ch] carries it; jumpTo adds the hit there
+// before calling placeCursor), then to that task's index in m.tasks[ch]. If
+// ch's tree hasn't loaded yet, the id is remembered in pendingTaskCursorID
+// for the tasksMsg that follows (every jump into a task channel triggers a
+// loadTasks) to place once it arrives.
+func (m *Model) placeTaskCursor(ch string, seq int64) {
+	var id int64
+	for _, x := range m.msgs[ch] {
+		if x.Seq == seq && x.MemoryID != nil {
+			id = *x.MemoryID
+			break
+		}
+	}
+	m.cursor = -1
+	if id != 0 {
+		for i, t := range m.tasks[ch] {
+			if t.ID == id {
+				m.cursor = i
+			}
+		}
+	}
+	if m.cursor < 0 && id != 0 {
+		m.pendingTaskCursorCh, m.pendingTaskCursorID = ch, id
 	}
 	m.follow = false
 	m.refreshStream()

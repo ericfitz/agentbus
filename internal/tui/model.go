@@ -72,6 +72,8 @@ type Model struct {
 	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
 	msgs       map[string][]bus.Message
 	tasks      map[string][]bus.TaskSummary // task channel name -> its current tree
+	taskOpen   map[int64]bool               // task id -> its detail block is expanded
+	taskDetail map[int64]bus.Task           // task id -> its full task_get result, once loaded
 	gaps       map[string][]bus.Gap
 	loaded     map[string]bool
 	seen       map[string]int64
@@ -130,6 +132,8 @@ func New(c *client, th Theme) Model {
 		follow:       true,
 		msgs:         map[string][]bus.Message{},
 		tasks:        map[string][]bus.TaskSummary{},
+		taskOpen:     map[int64]bool{},
+		taskDetail:   map[int64]bus.Task{},
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
 		seen:         map[string]int64{},
@@ -231,7 +235,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.showToast("tasks: "+errText(msg.err)))
 			break
 		}
+		var cursorID int64
+		if msg.ch == m.selName() {
+			if ts := m.tasks[msg.ch]; m.cursor >= 0 && m.cursor < len(ts) {
+				cursorID = ts[m.cursor].ID
+			}
+		}
 		m.tasks[msg.ch] = msg.tasks
+		if cursorID != 0 {
+			for i, t := range msg.tasks {
+				if t.ID == cursorID {
+					m.cursor = i
+				}
+			}
+		}
+		for _, t := range msg.tasks {
+			if m.taskOpen[t.ID] {
+				cmds = append(cmds, m.loadTask(t.ID))
+			}
+		}
+		m.refreshStream()
+	case taskMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.showToast("task: "+errText(msg.err)))
+			break
+		}
+		m.taskDetail[msg.task.ID] = msg.task
 		m.refreshStream()
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
@@ -428,9 +457,16 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return m.selectChannel(m.sel - 1)
 		}
 	case "right":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.expandTask()
+		}
 		m.expandCursor()
 	case "left":
-		m.collapseCursor()
+		if bus.IsTaskChannel(m.selName()) {
+			m.collapseTask()
+		} else {
+			m.collapseCursor()
+		}
 	case "tab", "shift+tab", "home":
 		return m.paneKey(msg)
 	case "pgup", "pgdown":
@@ -536,7 +572,7 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && len(m.paneMsgs(m.selName())) > 0 && !bus.IsTaskChannel(m.selName()):
+		case p == paneStream && m.paneLen(m.selName()) > 0:
 			return m.focusPane(p)
 		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)
@@ -558,7 +594,7 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	if p == paneStream {
 		m.mode = modeNormal
 		m.compose.Blur()
-		if n := len(m.rows(m.selName())); m.cursor < 0 || m.cursor >= n {
+		if n := m.paneLen(m.selName()); m.cursor < 0 || m.cursor >= n {
 			m.cursor = n - 1
 		}
 		return m.moveCursor(0)
@@ -589,17 +625,23 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	return m.showSelected()
 }
 
-// moveCursor moves the normal-mode stream cursor and scrolls to keep it
-// visible (refreshStream renders the cursor row highlighted). A task
-// channel renders the task tree instead of the stream (see renderTasks) and
-// has no cursor: m.msgs still accumulates its raw revisions as they arrive
-// through receive, so without this early return the cursor would walk rows
-// that are never shown.
-func (m *Model) moveCursor(d int) tea.Cmd {
-	if bus.IsTaskChannel(m.selName()) {
-		return nil
+// paneLen is the stream pane's cursor bound for ch: the task count for a
+// task channel (renderTasks draws one row per task, not per raw revision in
+// m.msgs, which has no cursor of its own), else the row count rows(ch)
+// shows (fewer than paneMsgs(ch) when a thread's replies are collapsed).
+func (m *Model) paneLen(ch string) int {
+	if bus.IsTaskChannel(ch) {
+		return len(m.tasks[ch])
 	}
-	n := len(m.rows(m.selName()))
+	return len(m.rows(ch))
+}
+
+// moveCursor moves the normal-mode stream cursor and scrolls to keep it
+// visible (refreshStream renders the cursor row highlighted). paneLen bounds
+// it to the task count on a task channel (renderTasks draws one row per
+// task, not per raw revision in m.msgs) and the visible row count otherwise.
+func (m *Model) moveCursor(d int) tea.Cmd {
+	n := m.paneLen(m.selName())
 	if n == 0 {
 		m.cursor = -1
 		return nil

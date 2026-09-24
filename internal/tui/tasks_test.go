@@ -52,13 +52,16 @@ func TestTaskChannelRendersTree(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("want at least 3 lines, got %d: %q", len(lines), lines)
 	}
-	if !strings.HasPrefix(lines[0], taskPending+"#") || !strings.Contains(lines[0], "a") {
+	// "a" is bare (no description/metadata/blockers): no triangle, so its row
+	// gets the two-space no-details mark in place of markSel/markOpen (#16).
+	if !strings.HasPrefix(lines[0], "  "+taskPending+"#") || !strings.Contains(lines[0], "a") {
 		t.Fatalf("line0 = %q", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "  "+taskInProgress+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
+	if !strings.HasPrefix(lines[1], "  "+"  "+taskInProgress+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
 		t.Fatalf("line1 = %q", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], taskPending+"#") || !strings.Contains(lines[2], "blocked by #"+itoa(a.ID)) {
+	// "b" is blocked, so it has details and shows the collapsed triangle.
+	if !strings.HasPrefix(lines[2], markSel+" "+taskPending+"#") || !strings.Contains(lines[2], "blocked by #"+itoa(a.ID)) {
 		t.Fatalf("line2 = %q", lines[2])
 	}
 }
@@ -141,39 +144,146 @@ func TestTaskTreeRefreshesOnRevision(t *testing.T) {
 	}
 }
 
-// TestTaskChannelMoveCursorIsNoop covers T6-1 of the final review: a
-// search jump can land the cursor on one of a task channel's raw revisions
-// in m.msgs (never rendered; renderTasks draws the tree instead, which is
-// why the jump itself is harmless), but arrow keys after that must not walk
-// those hidden rows. The jump itself is out of scope here (see the search
-// tests); this sets the cursor directly to reach the same state.
-func TestTaskChannelMoveCursorIsNoop(t *testing.T) {
-	f := newFixture(t)
-	f.key("esc")
+// taskTree creates the tree the cursor/expand tests share: "a" (a
+// description and metadata, so it has details), "a1" (a's child, bare, no
+// details), and "b" (blocked by a1, so it has details too).
+func (f *fixture) taskTree(t *testing.T) (a, a1, b bus.Task) {
+	t.Helper()
 	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"}); err != nil {
+	var err error
+	a, err = f.ab.TaskCreate(f.sam, bus.TaskCreateInput{
+		Channel: "tasks/work", Subject: "a", Description: "desc a", Metadata: map[string]string{"k": "v"},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "b"}); err != nil {
+	a1, err = f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a1", Parent: a.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err = f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "b", BlockedBy: []int64{a1.ID}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())
-	f.receive(t)
 	f.selectTaskChannel(t, "tasks/work")
-	if len(f.m.msgs["tasks/work"]) < 2 {
-		t.Fatalf("expected m.msgs to hold the channel's raw revisions, got %d", len(f.m.msgs["tasks/work"]))
-	}
-	f.m.cursor = 0
+	f.key("tab")
+	return a, a1, b
+}
 
-	f.key("down")
-	if f.m.cursor != 0 {
-		t.Fatalf("down moved the cursor to %d on a task channel", f.m.cursor)
+// TestTaskCursorMovesOverTasks: tab focuses the stream with the cursor on
+// the last task; up/down move over tasks in tree order, and expanding a
+// task adds no cursor stops of its own.
+func TestTaskCursorMovesOverTasks(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	a, a1, _ := f.taskTree(t)
+	_ = a1
+	if f.m.pane() != paneStream {
+		t.Fatalf("tab did not focus the stream, pane = %v", f.m.pane())
+	}
+	if got, ok := f.m.cursorTask(); !ok || got.Subject != "b" {
+		t.Fatalf("tab cursor = %+v, want b", got)
 	}
 	f.key("up")
-	if f.m.cursor != 0 {
-		t.Fatalf("up moved the cursor to %d on a task channel", f.m.cursor)
+	f.key("up")
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
+		t.Fatalf("cursor after two ups = %+v, want a", got)
+	}
+	f.key("right")
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
+		t.Fatalf("expanding a moved the cursor: %+v", got)
+	}
+	f.key("down")
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a1.ID {
+		t.Fatalf("down from a = %+v, want a1", got)
+	}
+}
+
+// TestTaskExpandCollapse: ▶/▼ marks only on tasks with details; right
+// expands and fetches the block via task_get; left collapses it; right on a
+// task with no details does nothing.
+func TestTaskExpandCollapse(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.taskTree(t)
+
+	before := ansi.Strip(f.m.renderStream())
+	if strings.Contains(before, ansi.Strip(markOpen)) {
+		t.Fatalf("nothing should start expanded:\n%s", before)
+	}
+	lines := strings.Split(before, "\n")
+	if !strings.HasPrefix(lines[0], markSel+" ") {
+		t.Fatalf("a should show %q: %q", markSel, lines[0])
+	}
+	if strings.HasPrefix(lines[1], markSel+" ") || strings.Contains(lines[1], markSel) {
+		t.Fatalf("a1 (no details) should show no triangle: %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], markSel+" ") {
+		t.Fatalf("b (has a blocker) should show %q: %q", markSel, lines[2])
+	}
+
+	f.key("up")
+	f.key("up") // cursor on a
+	cmd := f.m.expandTask()
+	if cmd == nil {
+		t.Fatal("expanding a should return a task_get cmd")
+	}
+	f.run(cmd)
+	expanded := ansi.Strip(f.m.renderStream())
+	if !strings.Contains(expanded, ansi.Strip(markOpen)) {
+		t.Fatalf("a should show %q once expanded:\n%s", markOpen, expanded)
+	}
+	if !strings.Contains(expanded, "desc a") {
+		t.Fatalf("expanded block should show the description:\n%s", expanded)
+	}
+	if !strings.Contains(expanded, "k: v") {
+		t.Fatalf("expanded block should show metadata:\n%s", expanded)
+	}
+	if !strings.Contains(expanded, "updated by") {
+		t.Fatalf("expanded block should show the last update:\n%s", expanded)
+	}
+
+	f.m.collapseTask()
+	collapsed := ansi.Strip(f.m.renderStream())
+	if strings.Contains(collapsed, "desc a") {
+		t.Fatalf("left should hide the block again:\n%s", collapsed)
+	}
+
+	f.key("down") // cursor on a1, no details
+	if cmd := f.m.expandTask(); cmd != nil {
+		t.Fatal("right on a task with no details should do nothing")
+	}
+}
+
+// TestTaskExpansionSurvivesRevision: an expanded task's block refetches and
+// stays open, with the cursor still on it, after a live revision arrives.
+func TestTaskExpansionSurvivesRevision(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	a, _, _ := f.taskTree(t)
+	f.key("up")
+	f.key("up") // cursor on a
+	f.run(f.m.expandTask())
+
+	desc2 := "desc a2"
+	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: a.ID, Description: &desc2}); err != nil {
+		t.Fatal(err)
+	}
+	f.receive(t)
+
+	after := ansi.Strip(f.m.renderStream())
+	if !strings.Contains(after, "desc a2") {
+		t.Fatalf("block should show the revised description:\n%s", after)
+	}
+	lines := strings.Split(after, "\n")
+	if !strings.HasPrefix(lines[0], markOpen+" ") {
+		t.Fatalf("a should still show %q: %q", markOpen, lines[0])
+	}
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
+		t.Fatalf("cursor should still be on a: %+v", got)
 	}
 }
 
@@ -221,8 +331,10 @@ func TestTaskIndentIsCapped(t *testing.T) {
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	deepest := lines[len(lines)-1]
 	trimmed := strings.TrimLeft(deepest, " ")
-	if got := len(deepest) - len(trimmed); got != 12 {
-		t.Fatalf("leading spaces = %d, want 12: %q", got, deepest)
+	// 6 levels of two-space indent, capped, plus the two-space no-details
+	// mark (these bare tasks have no triangle) (#16).
+	if got := len(deepest) - len(trimmed); got != 14 {
+		t.Fatalf("leading spaces = %d, want 14: %q", got, deepest)
 	}
 }
 
@@ -279,7 +391,9 @@ func TestTaskRowSuffixes(t *testing.T) {
 		t.Fatalf("lease must follow the owner: %q", lines[1])
 	}
 	dimOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Dim).Render("\x00"), "\x00")
-	if !strings.HasPrefix(raw[2], dimOpen+taskCompleted) {
+	// "done" is bare (no details): its row gets the plain two-space
+	// no-details mark before the dimmed status icon and subject (#16).
+	if !strings.HasPrefix(raw[2], "  "+dimOpen+taskCompleted) {
 		t.Fatalf("completed row (icon included) must be dim: %q", raw[2])
 	}
 }

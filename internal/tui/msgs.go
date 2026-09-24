@@ -60,4 +60,8 @@ type (
 		tasks []bus.TaskSummary
 		err   error
 	}
+	taskMsg struct {
+		task bus.Task
+		err  error
+	}
 )

@@ -197,6 +197,28 @@ func TestTaskBlockedIsDerived(t *testing.T) {
 	}
 }
 
+func TestTaskListSetsHasDetails(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+	withDesc := mustCreate(t, b, TaskCreateInput{Subject: "a", Description: "desc a"})
+	bare := mustCreate(t, b, TaskCreateInput{Subject: "a1"})
+	list, err := b.TaskList("Sam", TaskListInput{Channel: "tasks/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]TaskSummary{}
+	for _, x := range list {
+		byID[x.ID] = x
+	}
+	if !byID[withDesc.ID].HasDetails {
+		t.Fatalf("task with description should have HasDetails: %+v", byID[withDesc.ID])
+	}
+	if byID[bare.ID].HasDetails {
+		t.Fatalf("bare task should not have HasDetails: %+v", byID[bare.ID])
+	}
+}
+
 func TestPlainWritesRefusedOnTaskChannels(t *testing.T) {
 	b := newTestBus(t)
 	reg(t, b, "Sam")

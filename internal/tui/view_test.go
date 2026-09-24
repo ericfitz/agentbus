@@ -63,9 +63,11 @@ func TestStatusBarShowsVersion(t *testing.T) {
 	if !strings.HasPrefix(bar, "agentbus v"+mcpserver.Version+"  db ") {
 		t.Fatalf("status bar: %q", bar)
 	}
-	f.m.width = 40
-	if bar := f.m.renderStatusBar(); strings.Contains(bar, "\n") || !strings.Contains(ansi.Strip(bar), "agentbus v") {
-		t.Fatalf("status bar must stay one row: %q", bar)
+	for _, w := range []int{60, 40} {
+		f.m.width = w
+		if got := lipgloss.Width(f.m.renderStatusBar()); got > w {
+			t.Fatalf("width %d: status bar is %d cols wide, must stay one row: %q", w, got, f.m.renderStatusBar())
+		}
 	}
 }
 

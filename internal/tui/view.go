@@ -529,7 +529,7 @@ func (m Model) renderStatusBar() string {
 	// to clip from somewhere else on screen.
 	avail := m.width - lipgloss.Width(left) - 1
 	if avail <= 0 {
-		return left
+		return lipgloss.NewStyle().MaxWidth(m.width).Render(left)
 	}
 	help = lipgloss.NewStyle().MaxWidth(avail).Render(help)
 	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(help), 1)

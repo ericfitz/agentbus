@@ -362,7 +362,7 @@ func (m *Model) renderStream() string {
 	}
 	// A dm/X pane also shows X's outgoing messages (#4), so emptiness is
 	// judged on the merged rows, not the inbox alone.
-	if len(m.rows(ch)) == 0 {
+	if len(m.paneMsgs(ch)) == 0 {
 		return dim.Render("no messages yet in " + ch + " · type below to send the first")
 	}
 	w := max(m.stream.Width, 20)

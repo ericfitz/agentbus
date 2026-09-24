@@ -192,9 +192,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.loaded[msg.channel] = true
-		// A prepend shifts indices; keep the cursor on the same message.
+		// A prepend, or another inbox's page in a merged DM pane, shifts
+		// indices; keep the cursor on the same message.
 		var cursorSeq int64
-		if rs := m.rows(msg.channel); msg.channel == m.selName() && m.cursor >= 0 && m.cursor < len(rs) {
+		if rs := m.rows(m.selName()); m.cursor >= 0 && m.cursor < len(rs) {
 			cursorSeq = rs[m.cursor].msg.Seq
 		}
 		// A pgup-at-top prepend grows the content above what's on screen;
@@ -535,7 +536,7 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && len(m.rows(m.selName())) > 0 && !bus.IsTaskChannel(m.selName()):
+		case p == paneStream && len(m.paneMsgs(m.selName())) > 0 && !bus.IsTaskChannel(m.selName()):
 			return m.focusPane(p)
 		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)

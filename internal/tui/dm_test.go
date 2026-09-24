@@ -159,8 +159,7 @@ func TestCrossChannelReplyRendersTopLevel(t *testing.T) {
 	}
 }
 
-// dmSetup registers a second agent and returns a sender for each identity:
-// the TUI ("eric"), Sam, and Kim, all on the same bus file.
+// selectSessionNamed selects the sessions-pane row for name.
 func (f *fixture) selectSessionNamed(t *testing.T, name string) {
 	t.Helper()
 	f.key("esc")
@@ -260,6 +259,27 @@ func TestDMPaneLoadsOtherInboxHistory(t *testing.T) {
 	f.selectSessionNamed(t, f.c.as)
 	if got := contents(f.m.rows("dm/" + f.c.as)); !eq(got, []string{"earlier"}) {
 		t.Fatalf("own pane after history: %v", got)
+	}
+	if s := ansi.Strip(f.m.renderStream()); strings.Contains(s, "no messages yet") || !strings.Contains(s, "earlier") {
+		t.Fatalf("outgoing-only pane must render its messages:\n%s", s)
+	}
+}
+
+// A history page for another inbox that lands above the cursor must not
+// move the selection in a merged DM pane (#11).
+func TestDMPaneCursorStaysOnHistoryFromOtherInbox(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd())
+	f.sendAs(t, f.ab, f.sam, "dm/"+f.c.as, nil, "a")
+	f.sendAs(t, f.ab, f.sam, "dm/"+f.c.as, nil, "b")
+	f.receive(t)
+	f.selectSessionNamed(t, f.c.as)
+	f.m.mode = modeNormal
+	f.m.cursor = 1 // on "b"
+	older := bus.Message{Seq: 0, Channel: "dm/Sam", Sender: f.c.as, Content: "older", CreatedAt: 1}
+	f.send(historyMsg{channel: "dm/Sam", msgs: []bus.Message{older}})
+	if r, ok := f.m.cursorRow(); !ok || r.msg.Content != "b" {
+		t.Fatalf("cursor drifted to %+v", r.msg)
 	}
 }
 

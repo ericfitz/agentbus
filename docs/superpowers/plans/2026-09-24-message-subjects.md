@@ -14,7 +14,7 @@
 
 - American spelling ("color").
 - Field name is `subject` everywhere (ADR 0010 decision 1). Optional; no backfill for non-task rows (decision 2). Stored in `messages.subject`, schema v6 (decision 3). No TUI compose input for it (decision 6).
-- Subject rules (spec "Validation"): trim surrounding whitespace, empty means no subject; a `\n` or `\r` is an error; more than 200 runes is an error. The error code is `validation` (the code this package's tag checks use; the spec's "invalid_argument" names that same class) and its message contains the word `subject`.
+- Subject rules (spec "Validation"): trim surrounding whitespace, empty means no subject; a `\n` or `\r` is an error; more than 200 runes is an error. The error code is `validation`, the code the tag checks use (human decision 2026-09-24) and its message contains the word `subject`.
 - A refused subject writes nothing (spec "Errors").
 - `task_create` / `task_update` keep their API and their own 1-256 byte subject rule; `normalizeSubject` never runs on task subjects.
 - Embeddings embed `subject + "\n\n" + content` when there is a subject, else `content`. Existing embeddings are not recomputed.
@@ -1334,7 +1334,7 @@ subject and keeps the body open. Search rows show the subject. ADR 0010."
 
 **Files:**
 - Create: `release/notes-v1.8.0.md`
-- Modify: `internal/mcpserver/server.go:27` (`Version = "1.8.0"`, as the v1.7.0 release commit did)
+- Do NOT modify `internal/mcpserver/server.go` (`Version`). Human decision 2026-09-24: the bump to 1.8.0 happens in the release step, not on this branch. Local test builds set the version with ldflags only: `go build -ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=1.7.1-dev" -o dist/agentbus-dev .`
 
 **Interfaces:**
 - Consumes: everything above landed on `feat/message-subjects`.
@@ -1390,21 +1390,19 @@ refuse it.
 Existing non-task messages keep no subject and show their first line.
 ```
 
-- [ ] **Step 2: Version.** In `internal/mcpserver/server.go`: `var Version = "1.8.0"`. `go test ./internal/tui -run TestStatusBarShowsVersion -count=1` still passes (it reads the variable).
-
-- [ ] **Step 3: Gate, then commit.** Run the full gate, then:
+- [ ] **Step 2: Gate, then commit.** Run the full gate, then:
 
 ```bash
-git add release/notes-v1.8.0.md internal/mcpserver/server.go
-git commit -m "chore: release notes and version for v1.8.0"
+git add release/notes-v1.8.0.md
+git commit -m "docs: release notes for v1.8.0"
 ```
 
-Tagging, `release/release.sh v1.8.0`, the tap update and `PROGRESS.md` stay with the controller and the user.
+The version bump to 1.8.0, tagging, `release/release.sh v1.8.0`, the tap update and `PROGRESS.md` stay with the controller and the user.
 
 ---
 
 ## Self-review notes
 
 - Spec coverage: schema v6 and migration (Task 1); validation, payloads, `SendInput.Subject`, no reply inheritance, embeddings (Task 2); `EditInput.Subject`, task rows (Task 3); MCP schemas and descriptions, protocol text, skill (Task 4); every TUI section — row line, has-a-body rule, `bodyOpen`, keys, markers, opened body, memory versions, search overlay, compose unchanged, task pane unchanged (Task 5); rollout (Task 6). Spec "Testing" items each map to a named test above.
-- Interpretation recorded for the executor: the spec's error code `invalid_argument` does not exist in this codebase; the tag checks it cites use `validation`, so the plan uses `validation` (see Global Constraints). `json_valid` guards the task backfill; it does not change which rows are backfilled for any well-formed task row.
+- Human decisions 2026-09-24: error code is `validation` (the spec now says so); the `json_valid` guard on the task backfill is approved; no version change on this branch (Task 6).
 - Names used across tasks: `normalizeSubject`, `maxSubjectRunes`, `embedText`, `editSubject`, `messagesFTSDDL`, `schemaV5FTS`, `rowLine`, `rowAvail`, `openCursor`, `closeCursor`, `bodyOpen` — each defined in one task and referenced by name in later ones.

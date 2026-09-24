@@ -46,7 +46,7 @@ have `subject`, so the name is the same everywhere.
 - A line break (`\n` or `\r`) is an error.
 - More than 200 characters (runes) is an error.
 
-Errors use `invalid_argument` and name the `subject` field, the same as the
+Errors use `validation` and name the `subject` field, the same as the
 tag checks.
 
 ### Payloads
@@ -149,7 +149,7 @@ their first line.
 ## Errors
 
 - A bad subject is refused before anything is written, with
-  `invalid_argument` naming `subject`.
+  `validation` naming `subject`.
 - An `edit_memory` on a memory with no subject leaves it empty unless the
   edit sets one.
 

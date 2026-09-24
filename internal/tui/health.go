@@ -49,7 +49,7 @@ func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 // running bus keeps its old settings; the toast says so.
 func (m *Model) onConfigEdited(msg configEditedMsg) tea.Cmd {
 	if msg.err != nil {
-		return m.showToast("editor: " + msg.err.Error())
+		return m.showToast(editorErrText(msg.err))
 	}
 	if _, _, err := config.Load(m.c.cfg.Path); err != nil {
 		return m.showToast("config: " + err.Error())

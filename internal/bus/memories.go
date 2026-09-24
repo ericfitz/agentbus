@@ -7,7 +7,10 @@ import (
 )
 
 type EditInput struct {
-	ID       int64             `json:"id"`
+	ID int64 `json:"id"`
+	// Subject is nil to keep the current revision's subject; a pointer to
+	// "" clears it (the same shape as TaskPatch.Subject).
+	Subject  *string           `json:"subject,omitempty" jsonschema:"one-line summary shown as the memory's title; omit to keep the current one, pass an empty string to clear it"`
 	Content  string            `json:"content"`
 	Type     string            `json:"type,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -81,6 +84,21 @@ func liveRevision(q queryRower, id int64) (seq, revision int64, channel string, 
 	return seq, revision, channel, nil
 }
 
+// editSubject resolves the subject the next revision stores: the edit's own
+// when set, else the live revision's (seq), so an edit that omits it keeps
+// it. Runs on b.db for the preflight and again on the write tx against the
+// committed live revision, like the tags.
+func editSubject(q queryRower, in EditInput, seq int64) (string, error) {
+	if in.Subject != nil {
+		return *in.Subject, nil
+	}
+	var s string
+	if err := q.QueryRow("SELECT subject FROM messages WHERE seq=?", seq).Scan(&s); err != nil {
+		return "", internal(err)
+	}
+	return s, nil
+}
+
 // EditMemory tombstones a memory's current revision and inserts the next one
 // in a single transaction. Ordering: auth and payload-shape validation (no
 // mutable-state reads) come first, then the idempotency receipt lookup, and
@@ -101,6 +119,13 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	}
 	if err := validateRefs(in.Refs); err != nil {
 		return EditResult{}, err
+	}
+	if in.Subject != nil {
+		s, err := normalizeSubject(*in.Subject)
+		if err != nil {
+			return EditResult{}, err
+		}
+		in.Subject = &s
 	}
 	if in.Tags != nil {
 		var err error
@@ -153,7 +178,11 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 			return EditResult{}, internal(err)
 		}
 	}
-	send := SendInput{Channel: channel, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs, Tags: tags}
+	subject, err := editSubject(b.db, in, liveSeq)
+	if err != nil {
+		return EditResult{}, err
+	}
+	send := SendInput{Channel: channel, Subject: subject, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs, Tags: tags}
 
 	// Preflight envelope-size gate (C1): must run before inspect and
 	// checkCapacity so an oversized input can never trigger the hook or
@@ -210,6 +239,11 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 		}
 	}
 	send.Tags = tags
+	// Re-resolve "keep" subject against the committed live revision, like
+	// the tags above.
+	if send.Subject, err = editSubject(tx, in, curSeq); err != nil {
+		return EditResult{}, err
+	}
 
 	// Authoritative envelope-size gate (R4/C1): same check as the preflight
 	// above, re-read on the write transaction.

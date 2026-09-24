@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -150,6 +151,42 @@ func editorCommand(path string) *exec.Cmd {
 		return exec.Command(ed, path)
 	}
 	return exec.Command("/bin/sh", "-c", ed+` "$1"`, "sh", path)
+}
+
+// terminalEditors need the terminal, so a $VISUAL naming one still blocks.
+// ponytail: fixed list; a terminal editor missing from it would run in the
+// background without a terminal, so add names as they come up.
+var terminalEditors = map[string]bool{
+	"vi": true, "vim": true, "view": true, "nvim": true, "nano": true, "pico": true,
+	"emacs": true, "micro": true, "hx": true, "helix": true, "kak": true,
+	"joe": true, "ne": true, "mg": true, "ed": true,
+}
+
+// backgroundEditor is $VISUAL on path, to run without the terminal while
+// the TUI stays live; ok is false when $VISUAL is unset or names a
+// terminal editor, and the caller then blocks as before.
+func backgroundEditor(path string) (cmd *exec.Cmd, ok bool) {
+	ed := strings.TrimSpace(os.Getenv("VISUAL"))
+	if ed == "" || terminalEditors[filepath.Base(editorProgram(ed))] {
+		return nil, false
+	}
+	return editorCommand(path), true
+}
+
+// editorProgram is the program an editor setting runs: the whole value when
+// it is an existing file (a path with spaces), else its first shell word
+// with surrounding quotes removed.
+func editorProgram(ed string) string {
+	if st, err := os.Stat(ed); err == nil && !st.IsDir() {
+		return ed
+	}
+	if q := ed[0]; q == '\'' || q == '"' {
+		if end := strings.IndexByte(ed[1:], q); end >= 0 {
+			return ed[1 : end+1]
+		}
+	}
+	prog, _, _ := strings.Cut(ed, " ")
+	return prog
 }
 
 // editorSetting is the editor editorCommand runs and where it came from

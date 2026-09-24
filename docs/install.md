@@ -298,7 +298,13 @@ green/yellow/cyan/white) and bright white on the rest.
 The health overlay (`h`) shows the log file path, the theme in use with
 each resolved value, and the loaded config. `o` opens the config file in
 `$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with
-arguments or spaces works.
+arguments or spaces works. A GUI editor in `$VISUAL` (for example
+`code --wait`) opens in the background and the TUI stays live; the config
+check shows when the editor exits (with `--wait`, when you close the tab).
+A terminal editor (`vi`, `vim`, `nvim`, `nano`, `emacs`, `micro`, `hx`, and
+similar), or one set only in `$EDITOR`, takes over the terminal until you
+quit it. Editing a memory always waits for the editor, because the TUI reads
+the file back when you close it.
 
 ## TUI icons
 

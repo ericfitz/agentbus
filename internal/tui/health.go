@@ -40,6 +40,12 @@ func (m *Model) updateHealth(msg tea.Msg) tea.Cmd {
 		maxScroll := max(len(m.healthLines())-1, 0)
 		m.health.scroll = min(m.health.scroll+1, maxScroll)
 	case "o":
+		// A GUI $VISUAL runs off the terminal: the command waits for it in
+		// the background, the TUI stays live, and the config check toasts
+		// when the editor exits (with code --wait, when the tab closes).
+		if cmd, ok := backgroundEditor(m.c.cfg.Path); ok {
+			return func() tea.Msg { return configEditedMsg{err: cmd.Run()} }
+		}
 		return tea.ExecProcess(editorCommand(m.c.cfg.Path), func(err error) tea.Msg { return configEditedMsg{err: err} })
 	}
 	return nil

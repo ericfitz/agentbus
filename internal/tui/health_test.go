@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
 
@@ -101,5 +102,39 @@ func TestConfigEditedReloadsAndReportsErrors(t *testing.T) {
 	f.send(configEditedMsg{})
 	if !strings.Contains(f.m.toast, "restart") {
 		t.Fatalf("valid config must say a restart applies it, got %q", f.m.toast)
+	}
+}
+
+// A GUI $VISUAL runs in the background: o returns at once and the TUI stays
+// live; the config check toasts when the editor exits. A terminal editor
+// still gets the terminal (blocking).
+func TestVisualEditorRunsInBackground(t *testing.T) {
+	for _, tc := range []struct {
+		visual string
+		bg     bool
+	}{
+		{"code --wait", true},
+		{"'/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' --wait", true},
+		{"vim", false},
+		{"/usr/bin/nano -w", false},
+		{"'/opt/homebrew/bin/nvim'", false},
+		{"", false},
+	} {
+		t.Setenv("VISUAL", tc.visual)
+		if _, ok := backgroundEditor("x.json"); ok != tc.bg {
+			t.Errorf("VISUAL=%q: background=%v, want %v", tc.visual, ok, tc.bg)
+		}
+	}
+
+	f := newFixture(t)
+	f.key("esc")
+	f.key("h")
+	t.Setenv("VISUAL", "true")
+	cmd := f.m.updateHealth(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	if cmd == nil || f.m.mode != modeHealth {
+		t.Fatalf("o must return a background command and stay in health, mode=%v", f.m.mode)
+	}
+	if msg, ok := cmd().(configEditedMsg); !ok || msg.err != nil {
+		t.Fatalf("editor exit must report configEditedMsg without error, got %#v", msg)
 	}
 }

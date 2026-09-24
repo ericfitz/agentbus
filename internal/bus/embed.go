@@ -170,6 +170,15 @@ func decodeVec(b []byte) []float32 {
 	return v
 }
 
+// embedText is what a memory revision embeds: subject and content together
+// when it has a subject, else the content alone (ADR 0010).
+func embedText(subject, content string) string {
+	if subject == "" {
+		return content
+	}
+	return subject + "\n\n" + content
+}
+
 // embedBatch embeds up to embedBatchSize live memory revisions lacking a row for
 // the configured model, after deleting rows from other models. The HTTP call
 // can outlive an edit/delete of the memory it's embedding, so each insert is
@@ -192,7 +201,7 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 			return 0, internal(err)
 		}
 	}
-	rows, err := b.db.Query(`SELECT m.seq, m.content FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq
+	rows, err := b.db.Query(`SELECT m.seq, m.subject, m.content FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq
 	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel <> 'tasks' AND m.channel NOT LIKE 'tasks/%' ORDER BY m.seq LIMIT ?`, embedBatchSize)
 	if err != nil {
 		return 0, internal(err)
@@ -202,12 +211,12 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 	var texts []string
 	for rows.Next() {
 		var s int64
-		var c string
-		if err := rows.Scan(&s, &c); err != nil {
+		var subject, c string
+		if err := rows.Scan(&s, &subject, &c); err != nil {
 			return 0, internal(err)
 		}
 		seqs = append(seqs, s)
-		texts = append(texts, c)
+		texts = append(texts, embedText(subject, c))
 	}
 	if err := rows.Err(); err != nil {
 		return 0, internal(err)

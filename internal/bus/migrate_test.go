@@ -255,9 +255,11 @@ func TestMigrateV2ToLatest(t *testing.T) {
 	if len(r.Messages) != 1 || r.Messages[0].Content != "hi" {
 		t.Fatalf("tag subscribe/send/receive after migration: %+v %v", r, err)
 	}
-	var n int
-	if err := b.db.QueryRow("SELECT count(*) FROM pragma_table_info('messages') WHERE name='subject'").Scan(&n); err != nil || n != 1 {
-		t.Fatalf("subject column after the chain: %d %v", n, err)
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Subject: "Zebra alert", Content: "after the chain"}); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := b.Search(sam, SearchInput{Query: "zebra", Mode: "text"}); err != nil || len(s.Hits) != 1 || s.Hits[0].Subject != "Zebra alert" {
+		t.Fatalf("subject after the v2 chain: %+v %v", s, err)
 	}
 }
 

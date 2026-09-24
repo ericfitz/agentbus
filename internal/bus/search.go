@@ -117,7 +117,7 @@ func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, err
 		var h SearchHit
 		var meta, refs, tags *string
 		var rank float64
-		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Content, &h.ReplyTo, &meta, &refs, &h.MemoryID, &h.Revision, &tags, &rank); err != nil {
+		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Subject, &h.Content, &h.ReplyTo, &meta, &refs, &h.MemoryID, &h.Revision, &tags, &rank); err != nil {
 			return nil, internal(err)
 		}
 		m, err := decodeJSONFields(h.Message, meta, refs)

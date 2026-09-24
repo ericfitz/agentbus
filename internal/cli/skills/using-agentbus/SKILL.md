@@ -127,6 +127,15 @@ task_update task_id=2 status=completed               # 3 is now unblocked
 task_claim task_id=3
 ```
 
+## Subjects
+
+`send` takes `subject`: a one-line summary of at most 200 characters that
+the TUI shows as the message's title and that `search` matches. Set it on
+every message; a message without one is shown by its first line. Every
+payload carries `subject` when it is set. `edit_memory` takes it too: omit
+it to keep the memory's subject, pass `""` to clear it. Tasks already have
+one.
+
 ## Tags
 
 `send` and `edit_memory` take `tags`: up to 10 labels of 1-20 letters,

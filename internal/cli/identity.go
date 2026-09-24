@@ -78,6 +78,8 @@ const protocol = `Then follow this protocol:
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
   its seq.
+- Give every send a subject: a one-line summary of the message. The TUI
+  shows it as the message's title, and search matches it.
 - Search the memory channels register returned before starting unfamiliar work,
   and whenever something you believe should work is not working.
 - Post to a memory channel whenever you discover a non-obvious fact that would

@@ -144,6 +144,97 @@ func TestTaskTreeRefreshesOnRevision(t *testing.T) {
 	}
 }
 
+// TestSelectedLongSubjectTaskRendersOneLine: a selected row with a long
+// subject must be clipped to the stream width before going through
+// th.Highlight, or the width padding wraps it onto a second line and
+// lineNum/cursorLine drift for every row after it.
+func TestSelectedLongSubjectTaskRendersOneLine(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: strings.Repeat("x", 256)}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	f.key("tab") // focus stream; cursor lands on the only (selected) task
+
+	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("selected long-subject row wrapped to %d lines: %q", len(lines), lines)
+	}
+}
+
+// TestSelectedCompletedTaskDimsWithRowDim: a selected completed row must
+// swap dim text to the selection-readable color (rowDim), not stay dim on
+// the whole body, matching the unselected-row convention used for suffix.
+func TestSelectedCompletedTaskDimsWithRowDim(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	task, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := "completed"
+	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: task.ID, Status: &completed}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	f.key("tab") // focus stream; cursor lands on the only (selected) task
+
+	th := f.m.theme
+	textCode, _, _ := strings.Cut(th.Style(th.Text).Render("\x00"), "\x00")
+	dimCode, _, _ := strings.Cut(th.Style(th.Dim).Render("\x00"), "\x00")
+	got := f.m.renderStream()
+	if !strings.Contains(got, textCode) {
+		t.Fatalf("selected completed row must switch to th.Text (rowDim), got:\n%q", got)
+	}
+	if strings.Contains(got, dimCode) {
+		t.Fatalf("selected completed row must not render its body in th.Dim, got:\n%q", got)
+	}
+}
+
+// TestTasksMsgClampsCursorWhenTaskDeleted: if the task under the cursor is
+// gone from the next tasksMsg (e.g. it dropped out of a filtered list), the
+// cursor must clamp to the new last index rather than pointing past the end
+// of m.tasks[ch].
+func TestTasksMsgClampsCursorWhenTaskDeleted(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	f.key("tab") // cursor lands on the last task, "b" (index 1)
+	if f.m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (b)", f.m.cursor)
+	}
+
+	// b is gone from the next tasksMsg.
+	f.send(tasksMsg{ch: "tasks/work", tasks: []bus.TaskSummary{{ID: a.ID, Subject: "a"}}})
+
+	if f.m.cursor != 0 {
+		t.Fatalf("cursor = %d, want clamped to 0", f.m.cursor)
+	}
+}
+
 // taskTree creates the tree the cursor/expand tests share: "a" (a
 // description and metadata, so it has details), "a1" (a's child, bare, no
 // details), and "b" (blocked by a1, so it has details too).
@@ -180,7 +271,6 @@ func TestTaskCursorMovesOverTasks(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
 	a, a1, _ := f.taskTree(t)
-	_ = a1
 	if f.m.pane() != paneStream {
 		t.Fatalf("tab did not focus the stream, pane = %v", f.m.pane())
 	}

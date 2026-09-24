@@ -244,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tasksMsg:
 		if msg.err != nil {
+			m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 			cmds = append(cmds, m.showToast("tasks: "+errText(msg.err)))
 			break
 		}
@@ -254,7 +255,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.ch == m.pendingTaskCursorCh {
-			cursorID = m.pendingTaskCursorID
+			if msg.ch == m.selName() {
+				cursorID = m.pendingTaskCursorID
+			}
 			m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 		}
 		m.tasks[msg.ch] = msg.tasks
@@ -265,12 +268,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.ch == m.selName() && len(msg.tasks) > 0 {
+			m.cursor = min(m.cursor, len(msg.tasks)-1)
+		}
 		for _, t := range msg.tasks {
 			if m.taskOpen[t.ID] {
 				cmds = append(cmds, m.loadTask(t.ID))
 			}
 		}
 		m.refreshStream()
+		if cursorID != 0 {
+			m.scrollCursorIntoView()
+		}
 	case taskMsg:
 		if msg.err != nil {
 			cmds = append(cmds, m.showToast("task: "+errText(msg.err)))
@@ -894,6 +903,7 @@ func (m *Model) showSelected() tea.Cmd {
 	m.cursor = -1
 	m.follow = true
 	m.replyTo = nil
+	m.pendingTaskCursorCh, m.pendingTaskCursorID = "", 0
 	ch := m.selName()
 	m.divider = m.dividerFor(ch)
 	m.markSeen(ch)

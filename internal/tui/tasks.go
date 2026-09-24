@@ -142,12 +142,12 @@ func (m *Model) renderTasks(ch string) string {
 			body += rowDim.Render(suffix)
 		}
 		if t.Status == "completed" {
-			body = dim.Render(body)
+			body = rowDim.Render(body)
 		}
 		pw := lipgloss.Width(prefix)
 		line := prefix + body
 		if selected {
-			line = th.Highlight(line, w)
+			line = th.Highlight(lipgloss.NewStyle().MaxWidth(w).Render(line), w)
 		} else {
 			line = lipgloss.NewStyle().MaxWidth(w).Render(line)
 		}

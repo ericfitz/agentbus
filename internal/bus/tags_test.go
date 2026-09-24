@@ -1,9 +1,15 @@
 package bus
 
 import (
+	"io"
+	"log/slog"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 func TestNormalizeTags(t *testing.T) {
@@ -403,6 +409,100 @@ func TestMixedChannelAndTagBatch(t *testing.T) {
 	}
 	if r4, _ := b.Receive(kim, ReceiveInput{Ack: r3.Batch}); len(r4.Messages) != 0 {
 		t.Fatalf("nothing left: %+v", r4.Messages)
+	}
+}
+
+// Tag matching is a join from the sender's subscribed tags into
+// message_tags(tag, seq): no scan of messages or message_tags (#13).
+func TestTagCondUsesTagSeqIndex(t *testing.T) {
+	b, _, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	q, a := tagCond(kim, 0)
+	rows, err := b.db.Query("EXPLAIN QUERY PLAN SELECT seq FROM messages WHERE messages.seq>? AND "+q, append([]any{0}, a...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	_ = rows.Close()
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "message_tags_tag_seq") || strings.Contains(joined, "SCAN messages") || strings.Contains(joined, "SCAN mt") {
+		t.Fatalf("plan:\n%s", joined)
+	}
+}
+
+// tagBenchSetup opens a fresh bus and a dev channel, standalone from
+// newTestBus/tagSetup so the benchmark works against *testing.B.
+func tagBenchSetup(b *testing.B) (*Bus, string, string) {
+	b.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = b.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	cfg.SendMessagesPerSecond = 1_000_000 // benchmark setup sends fast; not what's timed
+	bus, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	samR, err := bus.Register("Sam", "", "r", true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	kimR, err := bus.Register("Kim", "", "r", true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := bus.CreateChannel(samR.Sender, "dev", "ordinary"); err != nil {
+		b.Fatal(err)
+	}
+	return bus, samR.Sender, kimR.Sender
+}
+
+// BenchmarkTagMatchFewMatches: 20,000 untagged messages plus 5 matching a
+// subscribed tag, to measure whether tag matching reads only the tagged
+// messages (#13) or scans every message on the channel.
+func BenchmarkTagMatchFewMatches(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		bus, sam, kim := tagBenchSetup(b)
+		if err := bus.SubscribeTags(kim, []string{"t"}); err != nil {
+			b.Fatal(err)
+		}
+		for j := 0; j < 20000; j++ {
+			if _, err := bus.Send(sam, SendInput{Channel: "dev", Content: "noise"}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		for j := 0; j < 5; j++ {
+			if _, err := bus.Send(sam, SendInput{Channel: "dev", Content: "match", Tags: []string{"t"}}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		for {
+			r, err := bus.Receive(kim, ReceiveInput{})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(r.Messages) == 0 {
+				break
+			}
+			if _, err := bus.Receive(kim, ReceiveInput{Ack: r.Batch}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+		if err := bus.Close(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

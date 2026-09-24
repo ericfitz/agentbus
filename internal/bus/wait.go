@@ -92,9 +92,9 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 			if len(sets) == 0 {
 				continue
 			}
-			tq, ta := tagCond(as, sets)
-			conds = append(conds, "(messages.seq>? AND "+tq+")")
-			args = append(args, append([]any{floor}, ta...)...)
+			tq, ta := tagCond(as, floor)
+			conds = append(conds, "("+tq+")")
+			args = append(args, ta...)
 			continue
 		}
 		direct[s.channel] = true

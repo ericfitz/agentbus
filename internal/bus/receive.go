@@ -467,8 +467,8 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 	srcCond := func(s subRow, bounded bool) (string, []any) {
 		q, a := "(channel=? AND seq>?", []any{s.channel, s.cursor}
 		if s.tags {
-			tq, ta := tagCond(as, sets)
-			q, a = "(messages.seq>? AND "+tq, append([]any{s.cursor}, ta...)
+			tq, ta := tagCond(as, s.cursor)
+			q, a = "("+tq, ta
 		}
 		if bounded {
 			return q + " AND seq<=?)", append(a, s.pendingEnd)

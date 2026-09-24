@@ -59,3 +59,44 @@ expression.
 - Channel-subscription behavior is unchanged; the source abstraction is a
   refactor of `receiveOnce` plus one new source kind.
 - TUI tag display (chips with a `tag` theme color, `#tag` fallback) is in #3/#5.
+
+## Amendment (2026-09-23): indexed tag matching
+
+**Human decision (user, 2026-09-23):** "store tags in such a way that I can
+do a join on indexed fields to get matching messages, and don't have to
+iterate."
+
+Item 5's `tag_subscriptions(sender, tags_key, created_seq)` held each AND
+set as one comma-joined `tags_key` string, so matching a message against a
+sender's sets required iterating messages (or, per candidate message, a
+correlated per-set subquery) and re-splitting `tags_key` in SQL. `#13`
+replaces that with:
+
+- `tag_subscription_tags(sender, tags_key, tag)`: one row per tag of each
+  AND set, primary key `(sender, tags_key, tag)`, `FOREIGN KEY (sender,
+  tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE
+  CASCADE`. `tag_subscriptions` still owns `created_seq`; this table only
+  fans a set's tags into individually indexable rows. The cascade means
+  every existing `DELETE FROM tag_subscriptions` (unsubscribe, session
+  cleanup, resume=false) drops the fanned-out rows without any code change.
+- `message_tags_tag ON message_tags(tag)` is replaced by `message_tags_tag_seq
+  ON message_tags(tag, seq)`. `message_tags` is a rowid table keyed by
+  `(seq, tag)`, so a tag-only index can't range-scan by seq; the composite
+  index can.
+- `tagCond` now drives the match from the sender's few subscribed tags
+  (`tag_subscription_tags`) into `message_tags` by `(tag, seq > floor)`, a
+  join and `GROUP BY ... HAVING count(*) = set size`, so it reads only
+  tagged messages above the cursor — never every message on a matched
+  channel, and never a scan of `message_tags`. `TestTagCondUsesTagSeqIndex`
+  asserts on `EXPLAIN QUERY PLAN` that `message_tags_tag_seq` is used and
+  neither `messages` nor `message_tags` (aliased `mt`) is scanned.
+- Schema v5 (migration step 4, `splitTagSets`): creates
+  `tag_subscription_tags`, backfills one row per tag from each existing
+  `tag_subscriptions.tags_key`, and drops `message_tags_tag`. 1.7.0 ships
+  schema v5; a v4 database migrates on its next open.
+
+Measured effect (`BenchmarkTagMatchFewMatches`: 20,000 untagged messages
+plus 5 matching a subscribed tag, one `Receive`+`Ack` drain loop): roughly
+11–24 ms/op before, ~0.87–0.95 ms/op after — about an order of magnitude,
+consistent with reading 5 tagged rows through the index instead of every
+message on the channel.

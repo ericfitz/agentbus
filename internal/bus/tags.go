@@ -121,6 +121,11 @@ func (b *Bus) SubscribeTags(as string, tags []string) error {
 	if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscriptions(sender,tags_key,created_seq) VALUES(?,?,?)", as, tagsKey(tags), head); err != nil {
 		return internal(err)
 	}
+	for _, t := range tags {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscription_tags(sender,tags_key,tag) VALUES(?,?,?)", as, tagsKey(tags), t); err != nil {
+			return internal(err)
+		}
+	}
 	// Upsert, not INSERT OR IGNORE: a tags/ row can be older than
 	// cursor_idle_hours (its owner has other live subscriptions keeping the
 	// identity around), and adding a set must count as activity or the row
@@ -203,19 +208,23 @@ func (b *Bus) tagSets(q querier, as string) ([]tagSet, error) {
 // carrying every tag of at least one set added before the message. Once a
 // direct channel subscription ends, that channel's messages above the tag
 // cursor become tag-deliverable again (ADR 0009 item 7 applies to current
-// direct subscriptions, not past ones).
-func tagCond(as string, sets []tagSet) (string, []any) {
-	args := []any{as}
-	ors := make([]string, len(sets))
-	for i, s := range sets {
-		ors[i] = "(messages.seq>? AND (SELECT count(*) FROM message_tags t WHERE t.seq=messages.seq AND t.tag IN (" + strings.Repeat("?,", len(s.tags)-1) + "?))=?)"
-		args = append(args, s.createdSeq)
-		for _, t := range s.tags {
-			args = append(args, t)
-		}
-		args = append(args, len(s.tags))
-	}
-	return "messages.channel IN (SELECT name FROM channels WHERE kind='ordinary' AND name NOT LIKE 'dm/%') AND messages.channel NOT IN (SELECT channel FROM subscriptions WHERE sender=?) AND (" + strings.Join(ors, " OR ") + ")", args
+// direct subscriptions, not past ones). Matching is driven from the
+// sender's few subscribed tags into message_tags(tag, seq) above floor
+// (#13), so only tagged messages above the cursor are read, never a scan
+// of messages or message_tags; a message matches a set when it carries as
+// many of the set's tags as the set has. mt.seq's two comparisons (rather
+// than max(ts.created_seq, ?)) are what let SQLite range-scan
+// message_tags_tag_seq instead of scanning it.
+func tagCond(as string, floor int64) (string, []any) {
+	return `messages.seq IN (
+		SELECT mt.seq FROM tag_subscription_tags st
+		JOIN tag_subscriptions ts ON ts.sender=st.sender AND ts.tags_key=st.tags_key
+		JOIN message_tags mt ON mt.tag=st.tag AND mt.seq>? AND mt.seq>ts.created_seq
+		WHERE st.sender=?
+		GROUP BY mt.seq, st.tags_key
+		HAVING count(*)=(SELECT count(*) FROM tag_subscription_tags c WHERE c.sender=st.sender AND c.tags_key=st.tags_key))
+	AND messages.channel IN (SELECT name FROM channels WHERE kind='ordinary' AND name NOT LIKE 'dm/%')
+	AND messages.channel NOT IN (SELECT channel FROM subscriptions WHERE sender=?)`, []any{floor, as, as}
 }
 
 // matchedTags is the union of the sets m satisfies, sorted.

@@ -781,7 +781,13 @@ and the two envelope estimates that feed the size gate, so they count the subjec
 	context, size, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: typ, Subject: patched.Subject, Content: content}, true)
 ```
 
-The reclaim path (`tasks_reclaim.go`) calls `writeTaskRevision`, so it is covered. The pre-transaction preflight at `tasks_update.go:368` is left as is: it builds a placeholder document and the authoritative check inside the transaction now includes the subject.
+The reclaim path (`tasks_reclaim.go`) calls `writeTaskRevision`, so it is covered. The pre-transaction preflight at `tasks_update.go:368` also counts the subject column (human decision 2026-09-24), so a patch whose subject pushes the row over the limit fails there, before `inspect` and `checkCapacity`:
+
+```go
+	if _, _, err := b.sendEnvelope(b.db, as, SendInput{Channel: channel, Subject: subj, Content: string(preflight)}, true); err != nil {
+```
+
+Add a test in `internal/bus/subject_test.go` that pins it: a `task_update` whose patch subject plus description is sized so the document alone fits but the document plus the subject column does not is refused with the size error, and the task's revision count is unchanged.
 
 - [ ] **Step 5: Run the tests, then the gate.** `go test ./internal/bus -count=1`, then the full gate.
 

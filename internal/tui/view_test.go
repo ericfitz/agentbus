@@ -458,3 +458,11 @@ func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
 		t.Fatalf("body still on line 2: %q", lines)
 	}
 }
+
+func TestChipTextContrastsWithTagColor(t *testing.T) {
+	for bg, want := range map[string]string{"7": "0", "11": "0", "15": "0", "3": "0", "4": "15", "8": "15", "1": "15"} {
+		if got := chipText(lipgloss.Color(bg)); got != lipgloss.Color(want) {
+			t.Errorf("tag %s: chip text %v, want %s", bg, got, want)
+		}
+	}
+}

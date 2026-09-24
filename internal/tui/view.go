@@ -97,7 +97,7 @@ func (m Model) tagChips(tags []string) string {
 	if len(tags) == 0 {
 		return ""
 	}
-	chip := lipgloss.NewStyle().Background(m.theme.Tag).Foreground(lipgloss.Color("15"))
+	chip := lipgloss.NewStyle().Background(m.theme.Tag).Foreground(chipText(m.theme.Tag))
 	parts := make([]string, len(tags))
 	if lipgloss.NewStyle().Background(m.theme.Tag).Render("x") == "x" {
 		for i, t := range tags {
@@ -109,6 +109,16 @@ func (m Model) tagChips(tags []string) string {
 		parts[i] = chip.Render(" " + t + " ")
 	}
 	return strings.Join(parts, " ")
+}
+
+// chipText is the chip foreground on tag background bg: black on the light
+// ANSI colors, bright white on the rest.
+func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
+	switch bg {
+	case lipgloss.Color("3"), lipgloss.Color("6"), lipgloss.Color("7"), lipgloss.Color("10"), lipgloss.Color("11"), lipgloss.Color("14"), lipgloss.Color("15"):
+		return lipgloss.Color("0")
+	}
+	return lipgloss.Color("15")
 }
 
 // header is a message's first line: timestamp, sender → recipient, tag

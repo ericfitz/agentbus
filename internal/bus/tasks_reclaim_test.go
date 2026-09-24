@@ -208,6 +208,31 @@ func TestTickReclaimsWithEmptySender(t *testing.T) {
 	}
 }
 
+// The tick sweeps the machine-wide tasks list too, not only tasks/<repo> (#14).
+func TestTickReclaimsOnBareTasksList(t *testing.T) {
+	b, other := twoAgents(t)
+	// The bare "tasks" list is a default channel ensureDefaults already
+	// created; CreateChannel unconditionally rejects the reserved name
+	// "tasks" (resolveKind), so there's nothing to create here.
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks", Subject: "x"})
+	if _, err := other.TaskClaim("Pat", tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DELETE FROM sessions WHERE sender='Pat'"); err != nil {
+		t.Fatal(err)
+	}
+
+	b.Tick(context.Background())
+
+	revs, err := b.MemoryRevisions("Sam", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := revs[len(revs)-1]; last.Type != "reclaimed" {
+		t.Fatalf("tick did not reclaim on tasks: last revision %+v", last)
+	}
+}
+
 func TestReclaimIsNotRateCharged(t *testing.T) {
 	b, other := twoAgents(t)
 	taskList(t, b)

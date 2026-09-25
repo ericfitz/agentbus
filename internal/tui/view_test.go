@@ -35,7 +35,7 @@ func TestViewShowsRailsStreamComposeAndStatus(t *testing.T) {
 	// Normal mode swaps the status bar for the command-key help.
 	f.key("esc")
 	v = f.m.View()
-	for _, want := range []string{"? help", "/ search", "m memories", "h health", "q quit"} {
+	for _, want := range []string{"? help", "/ search", "h health", "q quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("normal-mode view lacks %q:\n%s", want, v)
 		}
@@ -196,7 +196,9 @@ func TestReplyIndentAppliesToWrappedLines(t *testing.T) {
 	f.m.layout()
 	f.key("shift+tab") // compose -> stream directly
 	f.key("up")
-	f.key("right")
+	f.key("right") // A has no body: shows the reply
+	f.key("down")
+	f.key("right") // the reply's cut first line is its body: open it
 	var reply []string
 	for _, l := range strings.Split(f.m.renderStream(), "\n") {
 		if strings.Contains(l, "word") {

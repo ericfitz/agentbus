@@ -139,6 +139,19 @@ func (m Model) header(x bus.Message, stampStyle lipgloss.Style, avail int) strin
 	return head
 }
 
+// rowLine is a collapsed row's one text line: the subject, else the
+// content's first line, cut to avail columns with an ellipsis. hasBody
+// reports whether the content holds anything that line doesn't show: any
+// content under a subject, a second line, or a first line that was cut.
+func rowLine(x bus.Message, avail int) (line string, hasBody bool) {
+	if x.Subject != "" {
+		return ansi.Truncate(x.Subject, avail, "…"), x.Content != ""
+	}
+	first, rest, _ := strings.Cut(x.Content, "\n")
+	line = ansi.Truncate(first, avail, "…")
+	return line, rest != "" || line != first
+}
+
 func (m Model) showLeft() bool { return m.width >= 60 }
 
 // railWidth is the left column: a fifth of the screen, floored so channel
@@ -185,8 +198,6 @@ func (m Model) View() string {
 	switch m.mode {
 	case modeSearch:
 		return m.viewSearch()
-	case modeMemories, modeConfirmDelete:
-		return m.viewMemories()
 	case modeHealth:
 		return m.viewHealth()
 	case modeHelp:
@@ -362,7 +373,8 @@ func shortDur(d time.Duration) string {
 // "new" divider after the last seen message, "n evicted" dividers where the
 // bus reported gaps, and the normal-mode cursor row highlighted. Each message
 // is a header line (timestamp, sender → recipient, tag chips) followed by
-// its body at the row's depth.
+// its row line (subject or first line) or, when opened, its body, at the
+// row's depth.
 func (m *Model) renderStream() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
@@ -410,21 +422,43 @@ func (m *Model) renderStream() string {
 		if selected {
 			rowDim, stampStyle = th.Style(th.Text), th.Style(th.Text)
 		}
+		avail := m.rowAvail(r.depth)
+		label := ""
+		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
+			label = "r" + itoa(*x.Revision)
+		}
+		if v, ok := m.mem.version(x); ok {
+			x.Sender, x.CreatedAt, x.Subject, x.Content = v.Sender, v.CreatedAt, v.Subject, v.Content
+			label = "r" + strconv.Itoa(m.mem.idx+1) + " of " + strconv.Itoa(len(m.mem.revs))
+		}
+		// The row line is the subject or the first line, cut to fit; the
+		// body (what that line leaves out) shows only once opened with →,
+		// as the subject line (when set) and the full content.
+		text, hasBody := rowLine(x, avail)
+		bodyOpen := hasBody && m.bodyOpen[x.Seq]
+		if bodyOpen {
+			text = x.Content
+			if x.Subject != "" {
+				text = x.Subject + "\n" + x.Content
+			}
+		}
 		// The tree prefix (indent plus expand/collapse marker) is applied
 		// after wrapping so every wrapped line sits at the row's depth.
+		// ▶ means something is hidden (body or replies); ▼ means the body
+		// is open, or the replies are shown with nothing left hidden.
 		prefix := strings.Repeat("  ", r.depth)
 		switch {
-		case r.hidden > 0:
+		case r.hidden > 0 || (hasBody && !bodyOpen):
 			prefix += rowDim.Render(markSel + " ")
-		case r.open:
+		case r.open || bodyOpen:
 			prefix += rowDim.Render(markOpen + " ")
 		default:
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		line := m.header(x, stampStyle, w-pw) + "\n" + x.Content
-		if x.MemoryID != nil && x.Revision != nil && *x.Revision > 1 {
-			line += " " + th.Style(th.Mem).Render("r"+itoa(*x.Revision))
+		line := m.header(x, stampStyle, avail) + "\n" + text
+		if label != "" {
+			line += " " + th.Style(th.Mem).Render(label)
 		}
 		if r.hidden > 0 {
 			summary := strconv.Itoa(r.hidden) + " replies"
@@ -450,8 +484,9 @@ func (m *Model) renderStream() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// markSel marks the selected list item and a message whose replies can be
-// expanded; markOpen marks a message whose replies are shown.
+// markSel marks the selected list item and a message row with something
+// hidden (its body, its replies, or both); markOpen marks a row whose body
+// is open, or whose replies are shown with nothing left hidden.
 var (
 	markSel  = "\u25b6" // ▶
 	markOpen = "\u25bc" // ▼
@@ -519,7 +554,7 @@ func (m Model) renderStatusBar() string {
 	if m.statusErr != nil {
 		left += "  " + th.Style(th.Error).Render("status: "+errText(m.statusErr))
 	}
-	help := m.hints("?", "help", "/", "search", "m", "memories", "h", "health", "q", "quit")
+	help := m.hints("?", "help", "/", "search", "h", "health", "q", "quit")
 	if m.mode == modeInsert {
 		help = m.hints("esc", "commands", "tab", "next pane", "alt+enter", "newline")
 	}
@@ -557,7 +592,7 @@ func (m Model) overlaySize() (w, h int) {
 }
 
 // overlay renders a titled, bordered box centered on the screen; the border
-// color names the overlay (cyan search, magenta memories, green health).
+// color names the overlay (cyan search, green health).
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {

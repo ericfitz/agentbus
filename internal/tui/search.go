@@ -149,7 +149,10 @@ func (m Model) viewSearch() string {
 		if hit.Revision != nil {
 			rev = " r" + itoa(*hit.Revision)
 		}
-		first := strings.SplitN(hit.Content, "\n", 2)[0]
+		first := hit.Subject
+		if first == "" {
+			first = strings.SplitN(hit.Content, "\n", 2)[0]
+		}
 		line := fmt.Sprintf("%s%s #%d%s %s %s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(senderName(hit.Sender)), dim.Render(clock(hit.CreatedAt)), first)
 		if i == m.search.cursor {
 			line = th.Style(th.Agent).Render(markSel+" ") + line

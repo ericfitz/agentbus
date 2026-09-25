@@ -132,6 +132,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Use a task list (tasks/<repo>; machine-wide: tasks) for multi-step work",
 		"claim before you start",
 		"- Register returns the other live agents in \"others\"; call discover only to",
+		"- Give every send a subject",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)

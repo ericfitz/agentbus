@@ -87,7 +87,7 @@ func TestTaskChannelIsReadOnly(t *testing.T) {
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
 
-	for _, k := range []string{"i", "enter", "r", "m"} {
+	for _, k := range []string{"i", "enter", "r"} {
 		f.key(k)
 		if f.m.mode != modeNormal {
 			t.Fatalf("key %q left mode %v", k, f.m.mode)

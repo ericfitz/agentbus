@@ -479,7 +479,7 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	if err != nil {
 		return Task{}, internal(err)
 	}
-	send := SendInput{Channel: in.Channel, Content: content}
+	send := SendInput{Channel: in.Channel, Subject: in.Subject, Content: content}
 	if _, _, err := b.sendEnvelope(b.db, as, send, true); err != nil {
 		return Task{}, err
 	}

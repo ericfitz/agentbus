@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
 type Ref struct {
@@ -14,6 +15,7 @@ type Ref struct {
 
 type SendInput struct {
 	Channel        string            `json:"channel"`
+	Subject        string            `json:"subject,omitempty" jsonschema:"optional one-line summary (at most 200 characters) shown as the message's title; without one, readers see the first line of content"`
 	Content        string            `json:"content"`
 	Type           string            `json:"type,omitempty"`
 	ReplyTo        *int64            `json:"reply_to,omitempty"`
@@ -29,18 +31,20 @@ type SendResult struct {
 }
 
 type Message struct {
-	Seq       int64             `json:"seq"`
-	Channel   string            `json:"channel"`
-	Sender    string            `json:"sender"`
-	Context   string            `json:"context"`
-	CreatedAt int64             `json:"created_at"`
-	Type      string            `json:"type,omitempty"`
-	Content   string            `json:"content"`
-	ReplyTo   *int64            `json:"reply_to,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Refs      []Ref             `json:"refs,omitempty"`
-	MemoryID  *int64            `json:"memory_id,omitempty"`
-	Revision  *int64            `json:"revision,omitempty"`
+	Seq       int64  `json:"seq"`
+	Channel   string `json:"channel"`
+	Sender    string `json:"sender"`
+	Context   string `json:"context"`
+	CreatedAt int64  `json:"created_at"`
+	Type      string `json:"type,omitempty"`
+	// Subject is the message's one-line title; empty when it has none.
+	Subject  string            `json:"subject,omitempty"`
+	Content  string            `json:"content"`
+	ReplyTo  *int64            `json:"reply_to,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Refs     []Ref             `json:"refs,omitempty"`
+	MemoryID *int64            `json:"memory_id,omitempty"`
+	Revision *int64            `json:"revision,omitempty"`
 	// Tags is the message's lowercase tag set, sorted; empty when the
 	// message carries none.
 	Tags []string `json:"tags,omitempty"`
@@ -54,7 +58,7 @@ type Message struct {
 // (seq, tag), so the ordered subquery walks the primary key and the string
 // comes back sorted; scanMessages splits it on spaces.
 func messageCols(alias string) string {
-	cols := strings.Split("seq, channel, sender, context, created_at, type, content, reply_to, metadata, refs, memory_id, revision", ", ")
+	cols := strings.Split("seq, channel, sender, context, created_at, type, subject, content, reply_to, metadata, refs, memory_id, revision", ", ")
 	for i, c := range cols {
 		cols[i] = alias + "." + c
 	}
@@ -82,7 +86,7 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 	for rows.Next() {
 		var m Message
 		var meta, refs, tags *string
-		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision, &tags); err != nil {
+		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Subject, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision, &tags); err != nil {
 			return nil, err
 		}
 		m, err := decodeJSONFields(m, meta, refs)
@@ -127,6 +131,24 @@ func validateSendShape(in SendInput) error {
 		return errf("validation", false, "channel and content are required")
 	}
 	return validateRefs(in.Refs)
+}
+
+// maxSubjectRunes bounds a message subject (ADR 0010).
+const maxSubjectRunes = 200
+
+// normalizeSubject trims s; an empty result means no subject. A line break
+// or more than maxSubjectRunes characters is a validation error naming the
+// field, like the tag checks. Task subjects never come through here: task
+// documents keep their own rule (validateTaskSubject).
+func normalizeSubject(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if strings.ContainsAny(s, "\r\n") {
+		return "", errf("validation", false, "subject must be a single line")
+	}
+	if utf8.RuneCountInString(s) > maxSubjectRunes {
+		return "", errf("validation", false, "subject must be at most %d characters", maxSubjectRunes)
+	}
+	return s, nil
 }
 
 // validateSendRefs checks the mutable state a send depends on: the channel
@@ -177,6 +199,7 @@ func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) i
 		Sender:   sender,
 		Context:  context,
 		Type:     in.Type,
+		Subject:  in.Subject,
 		Content:  in.Content,
 		ReplyTo:  in.ReplyTo,
 		Metadata: in.Metadata,
@@ -216,8 +239,8 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		}
 		refs = string(j)
 	}
-	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,content,reply_to,metadata,refs) VALUES(?,?,?,?,?,?,?,?,?)",
-		in.Channel, as, context, b.nowMs(), in.Type, in.Content, in.ReplyTo, meta, refs)
+	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,subject,content,reply_to,metadata,refs) VALUES(?,?,?,?,?,?,?,?,?,?)",
+		in.Channel, as, context, b.nowMs(), in.Type, in.Subject, in.Content, in.ReplyTo, meta, refs)
 	if err != nil {
 		return 0, err
 	}
@@ -301,8 +324,11 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 		return SendResult{}, errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", in.Channel)
 	}
 	// Normalize before the receipt lookup so a keyed retry with the same
-	// tags in another case or order fingerprints identically.
+	// subject or tags in another form fingerprints identically.
 	var err error
+	if in.Subject, err = normalizeSubject(in.Subject); err != nil {
+		return SendResult{}, err
+	}
 	if in.Tags, err = NormalizeTags(in.Tags); err != nil {
 		return SendResult{}, err
 	}

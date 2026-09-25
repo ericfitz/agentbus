@@ -20,7 +20,7 @@ type WaitOptions struct {
 	As         string
 	Channels   []string
 	IncludeOwn bool
-	Filter     string // regexp on content; non-matching messages are skipped, except direct messages
+	Filter     string // regexp on subject or content; non-matching messages are skipped, except direct messages
 	Timeout    time.Duration
 }
 
@@ -47,7 +47,7 @@ func Wait(o WaitOptions, out io.Writer) error {
 		// tag-subscription match is addressed to this identity too, so both
 		// wake the waiter even when its text does not match the filter.
 		match = func(m bus.Message) bool {
-			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Content)
+			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Subject) || re.MatchString(m.Content)
 		}
 	}
 	b, err := bus.Open(o.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -65,7 +65,7 @@ func Wait(o WaitOptions, out io.Writer) error {
 	enc := json.NewEncoder(out)
 	for _, m := range msgs {
 		if strings.HasPrefix(m.Channel, bus.DMPrefix) {
-			m.Content = ""
+			m.Content, m.Subject = "", ""
 		}
 		if err := enc.Encode(m); err != nil {
 			return err

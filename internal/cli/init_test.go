@@ -114,7 +114,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	// The using-agentbus skill lands in each harness's personal skills dir.
 	for _, p := range []string{".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
 		skill, err := os.ReadFile(filepath.Join(home, p))
-		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "memory/<repo>") {
+		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "memory/<repo>") || !strings.Contains(string(skill), "`subject`") {
 			t.Fatalf("skill %s: %v\n%s", p, err, skill)
 		}
 	}

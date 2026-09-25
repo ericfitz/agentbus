@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -427,5 +429,54 @@ func TestSemanticQueryTimeoutIsConfigurable(t *testing.T) {
 	}
 	if d := time.Since(start); d > 3*time.Second {
 		t.Fatalf("search took %v; the 0.2 s query timeout was not applied", d)
+	}
+}
+
+// A memory with a subject embeds subject and content together (ADR 0010);
+// one without embeds the content alone.
+func TestEmbedBatchEmbedsSubjectWithContent(t *testing.T) {
+	var mu sync.Mutex
+	var inputs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+			Model string   `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		inputs = append(inputs, req.Input...)
+		mu.Unlock()
+		type item struct {
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		}
+		data := make([]item, len(req.Input))
+		for i := range req.Input {
+			data[i] = item{Index: i, Embedding: []float64{1, 0, 0}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "model": req.Model})
+	}))
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	if _, err := b.Send(sam, SendInput{Channel: "mem", Subject: "Roses", Content: "roses are red"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "violets are blue"}); err != nil {
+		t.Fatal(err)
+	}
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// Background passes started by each Send may overlap and re-embed a
+	// row; only the set of texts matters here.
+	sort.Strings(inputs)
+	inputs = slices.Compact(inputs)
+	if want := []string{"Roses\n\nroses are red", "violets are blue"}; !slices.Equal(inputs, want) {
+		t.Fatalf("embedded texts %q, want %q", inputs, want)
 	}
 }

@@ -720,3 +720,45 @@ func TestTagSubscriptionOverMCP(t *testing.T) {
 		t.Fatalf("unsubscribed_tags must echo the normalized set: %+v", uout)
 	}
 }
+
+// TestSendAndEditMemoryCarrySubject (ADR 0010): both tool schemas list
+// subject (it reaches them through bus.SendInput / bus.EditInput), both
+// descriptions explain it, and a subject sent over MCP comes back on
+// history.
+func TestSendAndEditMemoryCarrySubject(t *testing.T) {
+	cs := testSession(t)
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, tl := range tools.Tools {
+		if tl.Name != "send" && tl.Name != "edit_memory" {
+			continue
+		}
+		seen++
+		j, err := json.Marshal(tl.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(j), `"subject"`) {
+			t.Fatalf("%s schema lacks subject: %s", tl.Name, j)
+		}
+		if !strings.Contains(tl.Description, "subject") {
+			t.Fatalf("%s description must explain subject: %s", tl.Name, tl.Description)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("saw %d of send and edit_memory", seen)
+	}
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "subject": "Deploy plan", "content": "step one"})
+	_, res := call(t, cs, "history", map[string]any{"as": "Sam", "channel": "general"})
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"subject":"Deploy plan"`) {
+		t.Fatalf("history over MCP lacks the subject: %s", text)
+	}
+	_, bad := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "subject": "two\nlines", "content": "x"})
+	if !bad.IsError || !strings.Contains(bad.Content[0].(*mcp.TextContent).Text, "subject") {
+		t.Fatalf("a bad subject is refused naming the field: %+v", bad)
+	}
+}

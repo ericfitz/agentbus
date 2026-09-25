@@ -29,25 +29,10 @@ type (
 		res   bus.SearchResult
 		err   error
 	}
-	memListMsg struct {
-		channel string
-		msgs    []bus.Message
-		err     error
-	}
 	revisionsMsg struct {
-		id   int64
+		seq  int64 // the live row the fetch was for
 		revs []bus.Message
 		err  error
-	}
-	memEditedMsg struct {
-		id       int64
-		path     string
-		original string // the content written to path, to detect a no-op edit
-		err      error
-	}
-	memChangedMsg struct { // an edit or delete finished; reload the list
-		id  int64
-		err error
 	}
 	configEditedMsg struct{ err error }
 	toastClearMsg   struct{ seq int }

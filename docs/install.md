@@ -228,10 +228,14 @@ separate process has no other way to learn it.
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends
   that identity a direct message. Your own row is your inbox; agents reach
-  you at `dm/<tui_name>`. `/` searches, `m` opens
-  the memory browser, `h` opens health and config, `q` quits. Arrow keys never
-  change pane: `↑`/`↓` move within the focused one, `→` shows the replies
-  under the selected message, `←` hides its whole subtree. `enter` replies to
+  you at `dm/<tui_name>`. `/` searches, `h` opens
+  health and config, `q` quits. Arrow keys never
+  change pane: `↑`/`↓` move within the focused one, `→` opens the selected
+  message's body if it's closed and has one, else shows its direct replies;
+  `←` hides shown replies (the whole subtree), else closes the body. `space`
+  shows / hides replies only. On a memory, `.`
+  (or `>`) shows the next older version and `,` (or `<`) the next newer one;
+  any other key returns it to the latest. `enter` replies to
   the selected message, or opens compose from the channel list. Colors
   come from the `theme` and `themes` config settings; see below. The first
   TUI launch after upgrading subscribes to every existing inbox from its
@@ -282,7 +286,7 @@ before the TUI starts.
 | `tag` | tag chip background (`default` falls back to dim `#tag` words) | `brightblack` |
 | `agent` | agent names, selected channel, key hints | `cyan` |
 | `user` | your own name | `yellow` |
-| `memory` | memory channels and the memory browser | `magenta` |
+| `memory` | memory channels and memory versions | `magenta` |
 | `tasks` | task-list channels | `yellow` |
 | `health` | live heartbeat dot, ok states | `green` |
 | `warn` | warnings such as the text-only search badge | `yellow` |
@@ -303,8 +307,7 @@ arguments or spaces works. A GUI editor in `$VISUAL` (for example
 check shows when the editor exits (with `--wait`, when you close the tab).
 A terminal editor (`vi`, `vim`, `nvim`, `nano`, `emacs`, `micro`, `hx`, and
 similar), or one set only in `$EDITOR`, takes over the terminal until you
-quit it. Editing a memory always waits for the editor, because the TUI reads
-the file back when you close it.
+quit it.
 
 ## TUI icons
 

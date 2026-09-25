@@ -289,7 +289,7 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 	if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), t.seq); err != nil {
 		return Task{}, internal(err)
 	}
-	seq, err := b.insertMessage(tx, as, context, SendInput{Channel: t.Channel, Type: typ, Content: doc}, "ordinary")
+	seq, err := b.insertMessage(tx, as, context, SendInput{Channel: t.Channel, Type: typ, Subject: t.Subject, Content: doc}, "ordinary")
 	if err != nil {
 		return Task{}, internal(err)
 	}
@@ -365,7 +365,7 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	if err != nil {
 		return TaskUpdateResult{}, internal(err)
 	}
-	if _, _, err := b.sendEnvelope(b.db, as, SendInput{Channel: channel, Content: string(preflight)}, true); err != nil {
+	if _, _, err := b.sendEnvelope(b.db, as, SendInput{Channel: channel, Subject: subj, Content: string(preflight)}, true); err != nil {
 		return TaskUpdateResult{}, err
 	}
 
@@ -443,7 +443,7 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 			if err != nil {
 				return TaskUpdateResult{}, internal(err)
 			}
-			fctx, fsize, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: "forced", Content: doc}, true)
+			fctx, fsize, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: "forced", Subject: cur.Subject, Content: doc}, true)
 			if err != nil {
 				return TaskUpdateResult{}, err
 			}
@@ -494,7 +494,7 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	if err != nil {
 		return TaskUpdateResult{}, internal(err)
 	}
-	context, size, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: typ, Content: content}, true)
+	context, size, err := b.sendEnvelope(tx, as, SendInput{Channel: channel, Type: typ, Subject: patched.Subject, Content: content}, true)
 	if err != nil {
 		return TaskUpdateResult{}, err
 	}

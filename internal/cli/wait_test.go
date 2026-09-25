@@ -61,7 +61,7 @@ func TestWaitWithholdsDirectMessageContentFromJSON(t *testing.T) {
 	if _, err := b.Register("Sam", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "secret payload"}); err != nil {
+	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Subject: "re: rename", Content: "secret payload"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,8 +76,44 @@ func TestWaitWithholdsDirectMessageContentFromJSON(t *testing.T) {
 	if got.Content != "" {
 		t.Fatalf("content must be withheld, got %q", got.Content)
 	}
+	if got.Subject != "" {
+		t.Fatalf("subject must be withheld, got %q", got.Subject)
+	}
 	if got.Channel != "dm/Pat" || got.Sender != "Sam" || got.Seq == 0 {
 		t.Fatalf("other fields must be unaffected: %+v", got)
+	}
+}
+
+// TestWaitFilterMatchesSubject reproduces the review finding that -filter
+// only matched content: a message whose filter word appears only in its
+// subject must still wake the waiter.
+func TestWaitFilterMatchesSubject(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	if _, err := b.Register("Pat", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("Sam", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.CreateChannel("Sam", "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe("Pat", "dev", "now"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send("Sam", bus.SendInput{Channel: "dev", Subject: "rename landed", Content: "see the diff"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "rename", Timeout: 2 * time.Second}, &out); err != nil {
+		t.Fatalf("a filter word present only in the subject must wake the waiter: %v", err)
 	}
 }
 

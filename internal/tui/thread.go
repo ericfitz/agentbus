@@ -173,11 +173,45 @@ func (m *Model) toggleExpand() {
 	}
 }
 
-// expandCursor shows the direct replies of the cursor message.
-func (m *Model) expandCursor() {
-	if r, ok := m.cursorRow(); ok {
-		m.setExpanded(r, true)
+// rowAvail is the width left for a row's text after its tree prefix: two
+// columns per depth level plus the two-column marker.
+func (m *Model) rowAvail(depth int) int {
+	return max(m.stream.Width, 20) - 2*depth - 2
+}
+
+// openCursor (→) opens the cursor row's body when it's closed and the row
+// has one; otherwise it shows the row's direct replies.
+func (m *Model) openCursor() {
+	r, ok := m.cursorRow()
+	if !ok {
+		return
 	}
+	// hasBody is judged on the live message: → is not a version key, so
+	// updateNormal (model.go) already reset m.mem before openCursor runs,
+	// and the row on screen is the live version.
+	if _, hasBody := rowLine(r.msg, m.rowAvail(r.depth)); hasBody && !m.bodyOpen[r.msg.Seq] {
+		m.bodyOpen[r.msg.Seq] = true
+		m.refreshStream()
+		m.scrollCursorIntoView()
+		return
+	}
+	m.setExpanded(r, true)
+}
+
+// closeCursor (←) hides the replies under the cursor row (the whole
+// subtree) when any are shown; otherwise it closes the row's body.
+func (m *Model) closeCursor() {
+	r, ok := m.cursorRow()
+	if !ok {
+		return
+	}
+	if r.open {
+		m.collapseCursor()
+		return
+	}
+	delete(m.bodyOpen, r.msg.Seq)
+	m.refreshStream()
+	m.scrollCursorIntoView()
 }
 
 // collapseCursor hides everything under the cursor message, so a later

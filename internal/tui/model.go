@@ -106,6 +106,8 @@ type Model struct {
 
 	toast      string
 	toastSeq   int
+	toastHint  bool      // the toast is a hint (text color, no error prefix), not an error
+	draft      taskDraft // the one unsaved task state change; id 0 for none
 	lastNotice string
 
 	search     searchState
@@ -335,6 +337,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeHelp:
 		cmds = append(cmds, m.updateHelp(msg))
 	}
+	// A draft lives only on the cursor row of the focused task pane (ADR
+	// 0011 decision 2): whatever the message above did, if that is no longer
+	// where the draft is, the draft goes.
+	if cmd := m.dropStaleDraft(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -361,7 +369,7 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 		return m.scrollStream(msg)
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -402,18 +410,22 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		return tea.Quit
 	case "i":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil // no compose in a task list
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
 		}
 		m.mode = modeInsert
 		return m.compose.Focus()
-	// enter performs the pane's action: reply to the cursor message in the
-	// stream, compose to the selected channel otherwise.
+	// enter performs the pane's action: save the task draft in a task list,
+	// reply to the cursor message in the stream, compose to the selected
+	// channel otherwise.
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			if m.draft.id != 0 {
+				return m.saveDraft()
+			}
+			return nil
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -428,6 +440,11 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.mode = modeInsert
 		return m.compose.Focus()
 	case "esc":
+		if m.draft.id != 0 {
+			m.draft = taskDraft{} // cancel the draft, and only the draft
+			m.refreshStream()
+			return nil
+		}
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
@@ -484,10 +501,14 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.follow = true
 		m.stream.GotoBottom()
 	case " ":
-		m.toggleExpand()
+		// Not a show/hide key anywhere (ADR 0011 decision 4): the arrows do
+		// that; in a task list space cycles the state.
+		if bus.IsTaskChannel(m.selName()) {
+			return m.cycleTaskState()
+		}
 	case "r":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil // no compose in a task list
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -513,10 +534,18 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 		return m.toggleSubscribe()
 	case "t":
-		// A rail key (ADR 0011 decision 7): from a message list it means
-		// nothing, and Task 6 gives it to take in a task list.
-		if p := m.pane(); p == paneChannels || p == paneSessions {
+		// Rail: follow a tag set. Task list: take (ADR 0011 decision 7).
+		switch m.pane() {
+		case paneChannels, paneSessions:
 			return m.tagPrompt()
+		case paneStream:
+			if bus.IsTaskChannel(m.selName()) {
+				return m.takeTask()
+			}
+		}
+	case "u":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.unassignTask()
 		}
 	case "d":
 		if m.sessSel >= 0 || m.selected() == nil {
@@ -948,6 +977,21 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 		}
 		if bus.IsTaskChannel(ch) {
 			cmds = append(cmds, m.loadTasks(ch))
+			// A revision of the drafted task on the bus discards the draft
+			// (ADR 0011 decision 2). Saves are synchronous and clear the
+			// draft first, so this is always someone else's change. Revision
+			// 1 is the task's own creation record, which a fresh "oldest"
+			// subscription backlog can still deliver after the draft was
+			// built on the tree it already describes; only revision 2+ (an
+			// actual edit) counts.
+			if m.draft.id != 0 && ch == m.draft.ch {
+				for _, x := range ms {
+					if x.MemoryID != nil && *x.MemoryID == m.draft.id && x.Revision != nil && *x.Revision > 1 {
+						cmds = append(cmds, m.dropDraft())
+						break
+					}
+				}
+			}
 		}
 	}
 	for _, g := range res.Gaps {
@@ -1115,12 +1159,21 @@ func (m *Model) loadHistory(ch string, before *int64) tea.Cmd {
 	}
 }
 
+// showToast shows s as an error (red, ✗ prefix) for toastFor.
 func (m *Model) showToast(s string) tea.Cmd {
 	m.toast = s
+	m.toastHint = false
 	m.toastSeq++
 	m.layout()
 	seq := m.toastSeq
 	return tick(toastFor, func(time.Time) tea.Msg { return toastClearMsg{seq: seq} })
+}
+
+// showHint is showToast in the hint style: the text color, no prefix.
+func (m *Model) showHint(s string) tea.Cmd {
+	cmd := m.showToast(s)
+	m.toastHint = true
+	return cmd
 }
 
 // errText renders a bus error as "code: message" and anything else as-is.

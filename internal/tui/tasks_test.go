@@ -86,7 +86,11 @@ func TestTaskChannelRailIcon(t *testing.T) {
 	}
 }
 
-func TestTaskChannelIsReadOnly(t *testing.T) {
+// TestTaskChannelHasNoCompose: a task list has no compose line, so i and r
+// do nothing there (no toast: the read-only toast is gone, ADR 0011
+// decision 6), enter without a draft does nothing, tab never reaches
+// compose, and d still asks before deleting the channel.
+func TestTaskChannelHasNoCompose(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
 	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
@@ -97,11 +101,8 @@ func TestTaskChannelIsReadOnly(t *testing.T) {
 
 	for _, k := range []string{"i", "enter", "r"} {
 		f.key(k)
-		if f.m.mode != modeNormal {
-			t.Fatalf("key %q left mode %v", k, f.m.mode)
-		}
-		if f.m.toast != tasksReadOnlyToast {
-			t.Fatalf("key %q toast = %q, want %q", k, f.m.toast, tasksReadOnlyToast)
+		if f.m.mode != modeNormal || f.m.toast != "" {
+			t.Fatalf("key %q: mode %v toast %q", k, f.m.mode, f.m.toast)
 		}
 	}
 

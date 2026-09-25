@@ -11,10 +11,6 @@ import (
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
-// tasksReadOnlyToast is shown when a key that would send or compose is
-// pressed with a task channel selected: tasks/ channels are read-only here.
-const tasksReadOnlyToast = "task lists are read-only here"
-
 // loadTasks fetches ch's current task tree.
 func (m *Model) loadTasks(ch string) tea.Cmd {
 	c := m.c
@@ -32,6 +28,171 @@ func (m *Model) loadTask(id int64) tea.Cmd {
 		t, err := c.b.TaskGet(c.as, id)
 		return taskMsg{task: t, err: err}
 	}
+}
+
+// taskDraft is the one unsaved state change space builds on a task row
+// (ADR 0011 decision 2): the task, and the status and owner its row shows
+// until enter saves or anything else discards it. id 0 means no draft.
+type taskDraft struct {
+	ch     string
+	id     int64
+	status string
+	owner  string
+}
+
+const (
+	draftHintToast       = "enter saves · esc cancels"
+	draftDiscardedToast  = "change discarded"
+	unassignRefusedToast = "only a not-started task can be unassigned"
+)
+
+// ownedToast is the refusal for a task some other identity owns: the bus
+// has no user/agent kind, so only the TUI's own identity counts as the
+// user (ADR 0011 decision 1).
+func ownedToast(owner string) string {
+	return "owned by " + owner + "; only unassigned tasks or yours can be changed here"
+}
+
+// nextStatus is space's cycle.
+var nextStatus = map[string]string{"pending": "in_progress", "in_progress": "completed", "completed": "pending"}
+
+// taskEditable reports whether the TUI may change t: unassigned, or its own.
+func (m *Model) taskEditable(t bus.TaskSummary) bool {
+	return t.Owner == "" || t.Owner == m.c.as
+}
+
+// shownTask is t as its row shows it, with the draft applied when t holds
+// it; drafted reports which.
+func (m *Model) shownTask(ch string, t bus.TaskSummary) (shown bus.TaskSummary, drafted bool) {
+	if m.draft.id == t.ID && m.draft.ch == ch {
+		t.Status, t.Owner = m.draft.status, m.draft.owner
+		return t, true
+	}
+	return t, false
+}
+
+// cycleTaskState (space) drafts the cursor task's next state: pending →
+// in progress → completed → pending, from whatever the row shows. A task
+// unassigned on the bus is drafted as the TUI's own while off pending; a
+// draft that lands back on the saved status and owner is dropped.
+func (m *Model) cycleTaskState() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	ch := m.selName()
+	shown, _ := m.shownTask(ch, t)
+	d := taskDraft{ch: ch, id: t.ID, status: nextStatus[shown.Status], owner: shown.Owner}
+	if t.Owner == "" {
+		d.owner = m.c.as
+		if d.status == "pending" {
+			d.owner = ""
+		}
+	}
+	if d.status == t.Status && d.owner == t.Owner {
+		m.draft = taskDraft{}
+		m.refreshStream()
+		return nil
+	}
+	m.draft = d
+	m.refreshStream()
+	return m.showHint(draftHintToast)
+}
+
+// saveDraft (enter) writes the draft as the TUI's identity: into in
+// progress is a claim (TaskClaim, so the lease follows the TUI's
+// heartbeat like an agent's), anything else a task_update carrying the
+// drafted status and owner (both, so the saved task matches the row: a
+// bare status pending would make the bus drop the assignment). The call
+// is synchronous, like toggleSubscribe's, so no receive batch can race it.
+// A refusal shows the bus's message and keeps the draft for esc.
+func (m *Model) saveDraft() tea.Cmd {
+	d := m.draft
+	var err error
+	if d.status == "in_progress" {
+		_, err = m.c.b.TaskClaim(m.c.as, d.id, 0, "")
+	} else {
+		status, owner := d.status, d.owner
+		_, err = m.c.b.TaskUpdate(m.c.as, bus.TaskPatch{ID: d.id, Status: &status, Owner: &owner})
+	}
+	if err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	m.draft = taskDraft{}
+	return m.loadTasks(d.ch)
+}
+
+// dropDraft discards the draft with the "change discarded" hint.
+func (m *Model) dropDraft() tea.Cmd {
+	m.draft = taskDraft{}
+	m.refreshStream()
+	return m.showHint(draftDiscardedToast)
+}
+
+// dropStaleDraft discards the draft once its row is no longer the cursor
+// row of the focused task pane: the cursor moved, focus left, the channel
+// changed, or the task vanished from the tree (ADR 0011 decision 2). Update
+// runs it after every message.
+func (m *Model) dropStaleDraft() tea.Cmd {
+	if m.draft.id == 0 {
+		return nil
+	}
+	if t, ok := m.cursorTask(); ok && m.pane() == paneStream && m.selName() == m.draft.ch && t.ID == m.draft.id {
+		return nil
+	}
+	return m.dropDraft()
+}
+
+// takeTask (t in a task list) assigns an unassigned cursor task to the TUI
+// at once, without changing its state.
+func (m *Model) takeTask() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if m.draft.id != 0 {
+		return m.showHint(draftHintToast)
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	if t.Owner != "" {
+		return nil // already yours
+	}
+	as := m.c.as
+	if _, err := m.c.b.TaskUpdate(as, bus.TaskPatch{ID: t.ID, Owner: &as}); err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	return m.loadTasks(m.selName())
+}
+
+// unassignTask (u in a task list) clears the owner of the TUI's own
+// not-started cursor task at once.
+func (m *Model) unassignTask() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if m.draft.id != 0 {
+		return m.showHint(draftHintToast)
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	if t.Owner == "" {
+		return nil
+	}
+	if t.Status != "pending" {
+		return m.showToast(unassignRefusedToast)
+	}
+	none := ""
+	if _, err := m.c.b.TaskUpdate(m.c.as, bus.TaskPatch{ID: t.ID, Owner: &none}); err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	return m.loadTasks(m.selName())
 }
 
 // taskRow is one visible row of a task tree.
@@ -187,7 +348,8 @@ func (m *Model) collapseTask() {
 // nothing hidden, blank otherwise; a row with hidden children is followed
 // by a dim "N subtasks" line. The normal-mode cursor highlights its row; an
 // expanded task's block (description, blockers, metadata, last update)
-// follows it, word-wrapped at the task's indent.
+// follows it, word-wrapped at the task's indent. A row holding the draft
+// shows the drafted status and owner in the unsaved color.
 func (m *Model) renderTasks(ch string) string {
 	th := m.theme
 	dim := th.Style(th.Dim)
@@ -204,7 +366,7 @@ func (m *Model) renderTasks(ch string) string {
 	var b strings.Builder
 	lineNum := 0
 	for i, r := range rs {
-		t := r.t
+		t, drafted := m.shownTask(ch, r.t)
 		mark := taskPending
 		switch t.Status {
 		case "in_progress":
@@ -258,7 +420,10 @@ func (m *Model) renderTasks(ch string) string {
 		if suffix != "" {
 			body += rowDim.Render(suffix)
 		}
-		if t.Status == "completed" {
+		switch {
+		case drafted:
+			body = th.Style(th.Unsaved).Render(body) // unsaved (ADR 0011 section 5)
+		case t.Status == "completed":
 			body = rowDim.Render(body)
 		}
 		pw := lipgloss.Width(prefix)

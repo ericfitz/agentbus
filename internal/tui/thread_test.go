@@ -54,7 +54,7 @@ func TestThreadsOrderCollapseAndExpandOneLevel(t *testing.T) {
 // A reply received live peeks just that reply (and its path) under a
 // collapsed thread; a newer reply replaces it; space toggles the cursor
 // message and drops the peek.
-func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
+func TestNewReplyPeeksThenRightShowsChildren(t *testing.T) {
 	f := newFixture(t)
 	a := f.agentSend(t, "dev", "A")
 	f.receive(t)
@@ -75,9 +75,9 @@ func TestNewReplyPeeksThenSpaceToggles(t *testing.T) {
 	}
 	f.key("shift+tab") // compose -> stream directly; cursor on the last row, A2
 	f.key("up")        // root A
-	f.key(" ")
+	f.key("right")
 	if got := contents(f.m.rows("dev")); !eq(got, []string{"A", ">A1", ">A2"}) {
-		t.Fatalf("space on the root shows direct children only: %v", got)
+		t.Fatalf("right on the root shows direct children only: %v", got)
 	}
 	f.key("down")
 	f.key("r")

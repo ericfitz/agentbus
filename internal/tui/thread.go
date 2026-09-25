@@ -166,13 +166,6 @@ func (m *Model) cursorRow() (row, bool) {
 	return rs[m.cursor], true
 }
 
-// toggleExpand shows or hides the direct replies of the cursor message.
-func (m *Model) toggleExpand() {
-	if r, ok := m.cursorRow(); ok {
-		m.setExpanded(r, !m.expanded[r.msg.Seq])
-	}
-}
-
 // rowAvail is the width left for a row's text after its tree prefix: two
 // columns per depth level plus the two-column marker.
 func (m *Model) rowAvail(depth int) int {

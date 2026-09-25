@@ -217,11 +217,20 @@ func (m Model) View() string {
 	}
 	parts = append(parts, m.renderCompose())
 	if m.toast != "" {
-		parts = append(parts, m.theme.Style(m.theme.Error).Render(iconError+m.toast))
+		parts = append(parts, m.toastLine())
 	}
 	parts = append(parts, m.renderStatusBar())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return lipgloss.NewStyle().Background(m.theme.BG).Foreground(m.theme.Text).Width(m.width).MaxHeight(m.height).Render(out)
+}
+
+// toastLine renders the toast: an error in red with the ✗ prefix, or a
+// hint (draft guidance) in the text color with no prefix.
+func (m Model) toastLine() string {
+	if m.toastHint {
+		return m.theme.Style(m.theme.Text).Render(m.toast)
+	}
+	return m.theme.Style(m.theme.Error).Render(iconError + m.toast)
 }
 
 // chanStyle is the color a channel's name is drawn in everywhere: task
@@ -607,7 +616,7 @@ func (m Model) overlaySize() (w, h int) {
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {
-		footer = m.theme.Style(m.theme.Error).Render(iconError+m.toast) + "\n" + footer
+		footer = m.toastLine() + "\n" + footer
 		h--
 	}
 	inner := lipgloss.JoinVertical(lipgloss.Left,

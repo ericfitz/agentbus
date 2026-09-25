@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 // fixture opens a bus with channels dev (ordinary) and dev-notes (memory), an
@@ -23,7 +24,13 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	cfg := testConfig(t)
+	return newFixtureWith(t, testConfig(t))
+}
+
+// newFixtureWith is newFixture on a caller-shaped config (e.g. a purge
+// window of zero).
+func newFixtureWith(t *testing.T, cfg config.Config) *fixture {
+	t.Helper()
 	ab, sam := agent(t, cfg, "Sam")
 	if _, err := ab.CreateChannel(sam, "dev", "ordinary"); err != nil {
 		t.Fatal(err)

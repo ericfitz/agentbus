@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -55,16 +56,16 @@ func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 	f.key(",")
 	f.streamHas(t, "Release v3 r3")
 	f.key(".")
-	f.streamHas(t, "Release v2 r2 of 3")
+	f.streamHas(t, "Release v2 r2 · 3 kept")
 	f.key(">")
-	f.streamHas(t, "Release v1 r1 of 3")
+	f.streamHas(t, "Release v1 r1 · 3 kept")
 	f.key(".")
-	f.streamHas(t, "Release v1 r1 of 3")
+	f.streamHas(t, "Release v1 r1 · 3 kept")
 	f.key("<")
-	f.streamHas(t, "Release v2 r2 of 3")
+	f.streamHas(t, "Release v2 r2 · 3 kept")
 	f.key(",")
 	f.key(",")
-	f.streamHas(t, "Release v3 r3 of 3")
+	f.streamHas(t, "Release v3 r3 · 3 kept")
 }
 
 // Any other key (here, moving the cursor away and back) returns the row to
@@ -72,7 +73,7 @@ func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 func TestMemoryVersionResetsOnOtherKeys(t *testing.T) {
 	f, _ := onMemory(t)
 	f.key(".")
-	f.streamHas(t, "Release v2 r2 of 3")
+	f.streamHas(t, "Release v2 r2 · 3 kept")
 	f.key("down")
 	f.key("up")
 	f.key("down")
@@ -81,7 +82,7 @@ func TestMemoryVersionResetsOnOtherKeys(t *testing.T) {
 	}
 	f.key("up")
 	f.streamHas(t, "Release v3 r3")
-	if strings.Contains(ansi.Strip(f.m.renderStream()), "of 3") {
+	if strings.Contains(ansi.Strip(f.m.renderStream()), "kept") {
 		t.Fatal("version view must reset to latest")
 	}
 }
@@ -106,5 +107,38 @@ func TestVersionKeysIgnoreOrdinaryRowsAndMIsGone(t *testing.T) {
 	f.key("m")
 	if f.m.mode != modeNormal {
 		t.Fatalf("m must not open an overlay, mode=%v", f.m.mode)
+	}
+}
+
+// TestMemoryVersionLabelUsesTheRealRevision (ADR 0011 decision 5): once the
+// tombstone purge has removed revision 1, the memory's one surviving row is
+// revision 2 and stepping reads "r2 · 1 kept", not "r1 of 1".
+func TestMemoryVersionLabelUsesTheRealRevision(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.TombstoneMinHours = -1 // every tombstone is old enough on the next tick (config is not validated here)
+	f := newFixtureWith(t, cfg)
+	first := f.agentSend(t, "dev-notes", "Release v1")
+	if _, err := f.ab.EditMemory(f.sam, bus.EditInput{ID: *first.MemoryID, Content: "Release v2"}); err != nil {
+		t.Fatal(err)
+	}
+	// Whichever of the two buses holds the maintenance lease runs the purge.
+	f.ab.Tick(context.Background())
+	f.c.b.Tick(context.Background())
+	revs, err := f.c.b.MemoryRevisions(f.c.as, *first.MemoryID)
+	if err != nil || len(revs) != 1 {
+		t.Fatalf("fixture: want one surviving revision, got %d (%v)", len(revs), err)
+	}
+	f.key("esc")
+	for i, c := range f.m.channels {
+		if c.Name == "dev-notes" {
+			f.run(f.m.selectChannel(i))
+		}
+	}
+	f.run(f.m.loadHistory("dev-notes", nil))
+	f.m.placeCursor(revs[0].Seq)
+	f.key(".")
+	f.streamHas(t, "Release v2 r2 · 1 kept")
+	if s := ansi.Strip(f.m.renderStream()); strings.Contains(s, "r1") {
+		t.Fatalf("the label must not count positions:\n%s", s)
 	}
 }

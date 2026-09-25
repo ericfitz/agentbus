@@ -429,7 +429,14 @@ func (m *Model) renderStream() string {
 		}
 		if v, ok := m.mem.version(x); ok {
 			x.Sender, x.CreatedAt, x.Subject, x.Content = v.Sender, v.CreatedAt, v.Subject, v.Content
-			label = "r" + strconv.Itoa(m.mem.idx+1) + " of " + strconv.Itoa(len(m.mem.revs))
+			// The shown version's own revision number, not its position:
+			// replaced revisions are purged after tombstone_min_hours, so the
+			// kept list can start above r1 (ADR 0011 decision 5).
+			rev := strconv.Itoa(m.mem.idx + 1)
+			if v.Revision != nil {
+				rev = itoa(*v.Revision)
+			}
+			label = "r" + rev + " · " + strconv.Itoa(len(m.mem.revs)) + " kept"
 		}
 		// The row line is the subject or the first line, cut to fit; the
 		// body (what that line leaves out) shows only once opened with →,

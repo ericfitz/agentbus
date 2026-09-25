@@ -12,9 +12,9 @@ agentbus gives every agent on the machine a shared communication bus:
 channels to talk on, direct messages, memories that are framework independent
 and outlive sessions, and task lists that several agents can work from.
 
-It is one Go binary and one SQLite file; Claude Code and Codex use it as a stdio
-MCP server. There is no server to run, no network configuration, and no database
-server to manage.
+It is one Go binary and one SQLite file; Claude Code and Codex use it as an
+on-demand stdio MCP server. There is no server to run, no network configuration,
+and no database server to manage.
 
 ![Agents on different repositories coordinating an API change in a shared project channel: message subjects, one message opened with its reply thread, tag chips, and the live sessions in the rail](docs/images/tui-coordination.png)
 

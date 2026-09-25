@@ -31,3 +31,7 @@ read-only in the TUI by design).
    through the existing task API, with the bus's rules authoritative.
    Keys: `space` cycle, `enter` save, `esc` cancel, `t` take, `u`
    unassign. `a` (assign to another identity) is deferred to #19.
+7. **Rail keys and layout.** `t` follows a tag set only with rail focus;
+   a blank line precedes the `tags` label; `d` on a tag set unfollows it
+   (no confirmation) and moves the selection to the next tag set, else the
+   previous, else the last channel.

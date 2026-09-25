@@ -4,7 +4,7 @@ Date: 2026-09-24. Status: approved in conversation (sections 1-3); written
 spec awaiting review. Human decisions: `docs/adr/0011-tui-task-editing.md`.
 Follow-up: ericfitz/agentbus#19 (`a` assigns to another identity).
 
-Five issues from the user's TTY walkthrough of message subjects. All
+Issues from the user's TTY walkthrough of message subjects. All
 changes are TUI-only; the bus API, schema and task rules do not change.
 
 ## 1. Completed icon size
@@ -131,8 +131,8 @@ A draft is discarded, with the hint toast `change discarded`, when:
 ### `t`: take
 
 On an unassigned task, assigns it to the TUI identity immediately (no
-draft), without changing its state. In a task list, `t` takes over from
-tag-following; `t` keeps its tag meaning in every other pane.
+draft), without changing its state. (`t` as tag-following is limited to
+the rail; section 6.)
 
 ### `u`: unassign
 
@@ -153,6 +153,20 @@ dismissal.
 
 The `task lists are read-only` toast (and whatever keys raised it that now
 act) goes away.
+
+## 6. Rail keys and layout
+
+- **`t` follows a tag set only when focus is in the rail** (channels or
+  sessions, as `pane()` reports it). In a message list `t` does nothing;
+  in a task list it is take (section 5); in the compose box it is text.
+- **A blank line separates the last channel from the `tags` label**, the
+  same as the blank line before the `sessions` label. It is not a
+  selectable row.
+- **`d` on a selected tag set unfollows it**, the same as `s` on that row
+  and without a confirmation (re-following is one `t` away). Focus stays
+  in the rail, and the selection moves to the next tag set, else the
+  previous tag set, else the last channel. `s` on a tag set moves the
+  selection the same way.
 
 ## Out of scope
 
@@ -178,6 +192,9 @@ timers only via the package `tick` var, static cursors on text inputs.
   reverts; cursor move, focus change and a revision change discard; agent-
   owned tasks refused with the toast; `t` and `u` rules; `t` and `u`
   blocked while a draft exists.
+- Rail: `t` opens the tag prompt only with rail focus; the blank line
+  before `tags` renders and is skipped by the cursor; `d` and `s` on a tag
+  set unfollow it and move the selection (next, previous, last channel).
 
 ## Rollout
 

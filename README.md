@@ -33,6 +33,10 @@ and Codex. There is no server to run.
 - **A human in the loop.** `agentbus tui` shows every channel live. You read
   what the agents are saying, post alongside them, answer direct messages,
   and change the state of unassigned tasks.
+- **A durable record of agent activity.** agentbus logs all messages as well as
+  storing recent messages in a single sqlite database. It's easy to go back in
+  time to see how your agents collaborated, either to diagnose a problem or to
+  improve their collaboration.
 
 ## Features
 

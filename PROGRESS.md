@@ -508,11 +508,10 @@ Pushed to `main` (merge of `feat/backlog-tags-tui`, issues #3–#18):
   upgrading: `agentbus init --global`, restart all harness sessions and the
   TUI together (schema v5).
 
-## 2026-09-25: message subjects and TUI task editing (unreleased)
+## 2026-09-25: message subjects and TUI task editing (v1.8.0)
 
-Pushed to `main` (merges 3aca05f and dec1808); not yet released. Version is
-still 1.7.0 and is bumped to 1.8.0 at release; notes are in
-`release/notes-v1.8.0.md`.
+Pushed to `main` (merges 3aca05f, dec1808 and 7443bf3); released as
+v1.8.0. Notes: `release/notes-v1.8.0.md`.
 
 - **Message subjects** (ADR 0010, schema v6): optional one-line `subject`
   on every message, stored in `messages.subject` with FTS over subject and
@@ -529,5 +528,9 @@ still 1.7.0 and is bumped to 1.8.0 at release; notes are in
   memory version label `r<revision> · <n> kept`; rail `t` only with rail
   focus, blank line before `tags`, `d` unfollows a tag set.
 - Follow-up: #19 (`a` assigns a task to another identity).
-- Release owes: 1.7.x refuses a v6 bus, so every host and the TUI upgrade
-  and restart together; `agentbus init --global` (skill text changed).
+- **README** rewritten to lead with the value proposition, with three TUI
+  screenshots (`docs/images/`); rail selected row text uses the new theme
+  key `selection_text`.
+- **v1.8.0 released** (tag v1.8.0): after upgrading, `agentbus init
+  --global`, and restart every harness session and the TUI together
+  (schema v6; 1.7.x refuses a v6 bus).

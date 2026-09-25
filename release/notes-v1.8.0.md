@@ -12,6 +12,8 @@
   together (existing embeddings are not recomputed).
 - Task rows carry the task's subject in the same column; `task_create`
   and `task_update` are unchanged. ADR 0010.
+- `agentbus wait` withholds a direct message's subject along with its
+  content, and `-filter` matches the subject or the content.
 
 ## TUI
 
@@ -71,3 +73,9 @@ refuse it.
    keeps running against the upgraded database.
 
 Existing non-task messages keep no subject and show their first line.
+
+## Documentation
+
+The README now leads with what agentbus is for (cross-repository
+coordination, sequenced deployments, handoffs between sessions and
+harnesses, a human in the loop) and shows the TUI in screenshots.

@@ -349,7 +349,7 @@ does.
 | `idle` | an ended session in the rail | sleeping symbol | U+F04B2 md-sleep |
 | `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
 | `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
-| `task_completed` | a completed task | ✅ | U+F046 fa-square-check |
+| `task_completed` | a completed task | ✅ | U+F14A fa-square-check |
 | `collapsed` | selected list item; a thread that can expand | ▶ | U+F0DA fa-caret-right |
 | `expanded` | a thread whose replies are shown | ▼ | U+F0D7 fa-caret-down |
 | `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |

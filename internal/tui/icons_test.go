@@ -164,6 +164,16 @@ func TestLoadIconsCustomOverridesSubset(t *testing.T) {
 	}
 }
 
+// TestNerdfontCompletedIconFillsTheCell: the completed glyph is U+F14A
+// (fa-square-check), drawn 600x600 in the Mono patches like the pending
+// (U+F096) and in-progress (U+F152) glyphs. FA4's U+F046 check_square_o is
+// 480x480 there (its check overhangs the box) and looked a size smaller.
+func TestNerdfontCompletedIconFillsTheCell(t *testing.T) {
+	if nerdIcons["task_completed"] != "" {
+		t.Fatalf("task_completed = %q, want U+F14A", nerdIcons["task_completed"])
+	}
+}
+
 func TestLoadIconsUnknownSetWarnsAndFallsBackToEmoji(t *testing.T) {
 	cfg := config.Default()
 	cfg.Icons = "fancy"

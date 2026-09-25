@@ -32,12 +32,16 @@ func (m *Model) loadTask(id int64) tea.Cmd {
 
 // taskDraft is the one unsaved state change space builds on a task row
 // (ADR 0011 decision 2): the task, and the status and owner its row shows
-// until enter saves or anything else discards it. id 0 means no draft.
+// until enter saves or anything else discards it. rev is the bus revision
+// the draft was taken from (fetched once, when the draft is started), the
+// discriminator onBatch uses to tell a genuinely newer revision from one
+// the draft already reflects. id 0 means no draft.
 type taskDraft struct {
 	ch     string
 	id     int64
 	status string
 	owner  string
+	rev    int64
 }
 
 const (
@@ -74,7 +78,10 @@ func (m *Model) shownTask(ch string, t bus.TaskSummary) (shown bus.TaskSummary, 
 // cycleTaskState (space) drafts the cursor task's next state: pending →
 // in progress → completed → pending, from whatever the row shows. A task
 // unassigned on the bus is drafted as the TUI's own while off pending; a
-// draft that lands back on the saved status and owner is dropped.
+// draft that lands back on the saved status and owner is dropped. Starting
+// a new draft (the cursor task is not the one already drafted) fetches the
+// task synchronously to pin the revision it was built on -- onBatch's
+// discriminator for a stale discard (ADR 0011 decision 2).
 func (m *Model) cycleTaskState() tea.Cmd {
 	t, ok := m.cursorTask()
 	if !ok {
@@ -84,8 +91,8 @@ func (m *Model) cycleTaskState() tea.Cmd {
 		return m.showToast(ownedToast(t.Owner))
 	}
 	ch := m.selName()
-	shown, _ := m.shownTask(ch, t)
-	d := taskDraft{ch: ch, id: t.ID, status: nextStatus[shown.Status], owner: shown.Owner}
+	shown, drafted := m.shownTask(ch, t)
+	d := taskDraft{ch: ch, id: t.ID, status: nextStatus[shown.Status], owner: shown.Owner, rev: m.draft.rev}
 	if t.Owner == "" {
 		d.owner = m.c.as
 		if d.status == "pending" {
@@ -96,6 +103,13 @@ func (m *Model) cycleTaskState() tea.Cmd {
 		m.draft = taskDraft{}
 		m.refreshStream()
 		return nil
+	}
+	if !drafted {
+		got, err := m.c.b.TaskGet(m.c.as, t.ID)
+		if err != nil {
+			return m.showToast("task: " + errText(err))
+		}
+		d.rev = got.Revision
 	}
 	m.draft = d
 	m.refreshStream()

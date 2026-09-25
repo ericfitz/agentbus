@@ -52,8 +52,8 @@ func TestThreadsOrderCollapseAndExpandOneLevel(t *testing.T) {
 }
 
 // A reply received live peeks just that reply (and its path) under a
-// collapsed thread; a newer reply replaces it; space toggles the cursor
-// message and drops the peek.
+// collapsed thread; a newer reply replaces it; right on the root drops the
+// peek and shows its direct children.
 func TestNewReplyPeeksThenRightShowsChildren(t *testing.T) {
 	f := newFixture(t)
 	a := f.agentSend(t, "dev", "A")

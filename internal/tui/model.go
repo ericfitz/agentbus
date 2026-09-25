@@ -977,16 +977,18 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 		}
 		if bus.IsTaskChannel(ch) {
 			cmds = append(cmds, m.loadTasks(ch))
-			// A revision of the drafted task on the bus discards the draft
-			// (ADR 0011 decision 2). Saves are synchronous and clear the
-			// draft first, so this is always someone else's change. Revision
-			// 1 is the task's own creation record, which a fresh "oldest"
-			// subscription backlog can still deliver after the draft was
-			// built on the tree it already describes; only revision 2+ (an
-			// actual edit) counts.
+			// A revision of the drafted task newer than the one it was
+			// taken from discards the draft (ADR 0011 decision 2). Comparing
+			// against m.draft.rev, not just matching the id, is what tells
+			// a genuine change from a message the draft already reflects:
+			// a fresh "oldest" subscription's backlog can replay the task's
+			// own earlier revisions (including its creation), and the TUI's
+			// own save produces a revision that arrives here asynchronously,
+			// possibly after a new draft has already started on the same
+			// task from that saved state.
 			if m.draft.id != 0 && ch == m.draft.ch {
 				for _, x := range ms {
-					if x.MemoryID != nil && *x.MemoryID == m.draft.id && x.Revision != nil && *x.Revision > 1 {
+					if x.MemoryID != nil && *x.MemoryID == m.draft.id && x.Revision != nil && *x.Revision > m.draft.rev {
 						cmds = append(cmds, m.dropDraft())
 						break
 					}

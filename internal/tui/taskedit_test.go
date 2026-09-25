@@ -292,3 +292,43 @@ func TestTakeAndUnassign(t *testing.T) {
 		t.Fatalf("t/u while a draft is pending change nothing: %+v", got)
 	}
 }
+
+// TestDraftSurvivesABacklogRevisionItAlreadyReflects: a task edited before
+// the draft is taken is already at the revision the draft was built from
+// (space fetches it fresh), so that edit's message finally arriving via a
+// backlogged "oldest" subscription must not look like a newer change.
+func TestDraftSurvivesABacklogRevisionItAlreadyReflects(t *testing.T) {
+	f := newFixture(t)
+	a := f.openTasks(t, "a")[0]
+	desc := "already there before the draft"
+	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: a.ID, Description: &desc}); err != nil {
+		t.Fatal(err)
+	}
+	f.key(" ") // drafts from the current, already-edited revision
+	if f.m.draft.id != a.ID {
+		t.Fatalf("draft = %+v", f.m.draft)
+	}
+	f.receive(t) // delivers the creation and the edit, both backlogged until now
+	if f.m.draft.id != a.ID {
+		t.Fatalf("a revision the draft already reflects must not discard it: %+v", f.m.draft)
+	}
+}
+
+// TestSecondDraftSurvivesTheFirstSavesOwnRevision: enter's own save
+// produces a revision that reaches the model asynchronously; a new draft
+// started right after, from that just-saved state, must not be discarded
+// when that revision finally arrives.
+func TestSecondDraftSurvivesTheFirstSavesOwnRevision(t *testing.T) {
+	f := newFixture(t)
+	a := f.openTasks(t, "a")[0]
+	f.key(" ")
+	f.key("enter") // claims: a is in_progress, owned by the TUI, at a new revision
+	f.key(" ")     // a second draft, taken from that just-saved revision
+	if f.m.draft.id != a.ID {
+		t.Fatalf("draft = %+v", f.m.draft)
+	}
+	f.receive(t) // delivers the claim's own revision, backlogged until now
+	if f.m.draft.id != a.ID {
+		t.Fatalf("the save's own revision must not discard the draft it enabled: %+v", f.m.draft)
+	}
+}

@@ -510,11 +510,19 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 		return m.toggleSubscribe()
 	case "t":
-		return m.tagPrompt()
-	case "d":
-		if m.sessSel < 0 && m.selected() != nil && !isTagPane(m.selName()) {
-			m.mode = modeConfirmChannel
+		// A rail key (ADR 0011 decision 7): from a message list it means
+		// nothing, and Task 6 gives it to take in a task list.
+		if p := m.pane(); p == paneChannels || p == paneSessions {
+			return m.tagPrompt()
 		}
+	case "d":
+		if m.sessSel >= 0 || m.selected() == nil {
+			return nil
+		}
+		if isTagPane(m.selName()) {
+			return m.unfollowTagPane()
+		}
+		m.mode = modeConfirmChannel
 	case "/":
 		return m.openSearch()
 	case ".", ">":

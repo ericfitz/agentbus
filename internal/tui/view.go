@@ -289,7 +289,7 @@ func (m Model) renderRails() string {
 		var line string
 		if isTagPane(c.Name) {
 			if !tagsShown {
-				l.WriteString(dim.Render("tags") + "\n")
+				l.WriteString("\n" + dim.Render("tags") + "\n") // a blank row before the label, like the one before sessions
 				tagsShown = true
 			}
 			line = m.tagChips(tagPaneSet(c.Name))
@@ -356,7 +356,7 @@ func (m Model) renderRails() string {
 	// rest, and a blank row separates the two lists.
 	extra := 0
 	if tagsShown {
-		extra = 1
+		extra = 2 // the blank separator and the "tags" label
 	}
 	total := m.stream.Height + 1
 	chanRows := min(len(m.channels)+1+extra, max(total/2, total-len(names)-2))

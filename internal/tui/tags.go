@@ -65,3 +65,27 @@ func (m *Model) tagPrompt() tea.Cmd {
 		return func() tea.Msg { return subscribedMsg{channel: tagPanePrefix + v, err: c.b.SubscribeTags(c.as, tags)} }
 	})
 }
+
+// unfollowTagPane (s or d on a tag set's rail row) unsubscribes the
+// selected set with no confirmation (re-following is one t away) and moves
+// the selection to the next tag set, else the previous one, else the last
+// channel. Tag panes sit at the end of m.channels, so once index i is
+// deleted the row now at i is the next set and the row at i-1 is whichever
+// of the other two exists. The status refresh that follows re-syncs the
+// rail by name.
+func (m *Model) unfollowTagPane() tea.Cmd {
+	ch := m.selected()
+	if ch == nil || !isTagPane(ch.Name) {
+		return nil
+	}
+	name := ch.Name // ch points into m.channels, which is edited below
+	if err := m.c.b.UnsubscribeTags(m.c.as, tagPaneSet(name)); err != nil {
+		return m.showToast("unsubscribe: " + errText(err))
+	}
+	m.channels = slices.Delete(m.channels, m.sel, m.sel+1)
+	return tea.Batch(
+		m.selectChannel(min(m.sel, len(m.channels)-1)),
+		m.showToast("unfollowed tags "+strings.TrimPrefix(name, tagPanePrefix)),
+		m.statusCmd(),
+	)
+}

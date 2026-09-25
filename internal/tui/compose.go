@@ -116,10 +116,7 @@ func (m *Model) toggleSubscribe() tea.Cmd {
 		return nil
 	}
 	if isTagPane(ch.Name) {
-		if err := m.c.b.UnsubscribeTags(m.c.as, tagPaneSet(ch.Name)); err != nil {
-			return m.showToast("unsubscribe: " + errText(err))
-		}
-		return tea.Batch(m.showToast("unsubscribed from tags "+strings.TrimPrefix(ch.Name, tagPanePrefix)), m.statusCmd())
+		return m.unfollowTagPane()
 	}
 	c := m.c
 	name := ch.Name

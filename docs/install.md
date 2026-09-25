@@ -232,19 +232,28 @@ separate process has no other way to learn it.
   health and config, `q` quits. Arrow keys never
   change pane: `↑`/`↓` move within the focused one, `→` opens the selected
   message's body if it's closed and has one, else shows its direct replies;
-  `←` hides shown replies (the whole subtree), else closes the body. `space`
-  shows / hides replies only. On a memory, `.`
-  (or `>`) shows the next older version and `,` (or `<`) the next newer one;
-  any other key returns it to the latest. `enter` replies to
-  the selected message, or opens compose from the channel list. Colors
-  come from the `theme` and `themes` config settings; see below. The first
-  TUI launch after upgrading subscribes to every existing inbox from its
-  oldest retained message, so retained direct messages show as unread once.
-  A `tasks/` channel shows its task tree (read-only): subtasks indented,
-  ❎ pending, ⏱️ in progress (with the owner's name beside it), ✅ completed
-  (dimmed); a blocked task keeps ❎ with `blocked by #n`. `t` follows a tag
-  set (a `tags` section lists yours; select one to see every chat message
-  carrying all of its tags; `s` on it unfollows).
+  `←` hides shown replies (the whole subtree), else closes the body. On a
+  memory, `.` (or `>`) shows the next older version and `,` (or `<`) the
+  next newer one, labeled `r<revision> · <n> kept`; any other key returns
+  it to the latest. `enter` replies to the selected message, or opens
+  compose from the channel list. Colors come from the `theme` and `themes`
+  config settings; see below. The first TUI launch after upgrading
+  subscribes to every existing inbox from its oldest retained message, so
+  retained direct messages show as unread once.
+  A `tasks/` channel shows its task tree: subtasks start hidden under
+  their parent (`N subtasks`), `→` opens a task's details, then its
+  subtasks, `←` hides its subtasks, then its details; ❎ pending, ⏱️ in
+  progress (with the owner's name beside it), ✅ completed (dimmed); a
+  blocked task keeps ❎ with `blocked by #n`. You can change tasks that are
+  unassigned or yours (the TUI's identity): `space` cycles the selected
+  task's state (not started, in progress, completed) as a draft shown in
+  the `unsaved` color, `enter` saves it (a move into in progress claims the
+  task), `esc` cancels it; moving the cursor or leaving the pane discards
+  it. `t` takes an unassigned task, `u` unassigns your not-started one. A
+  task owned by an agent cannot be changed here. From the channel or
+  session list, `t` follows a tag set (a `tags` section lists yours; select
+  one to see every chat message carrying all of its tags; `s` or `d` on it
+  unfollows, no confirmation).
 - `agentbus reset` deletes all bus data (messages, memories, channels,
   identities, cursors) after you type `yes` to confirm; configuration is
   kept. It warns first if any session is live, since those processes lose
@@ -291,7 +300,9 @@ before the TUI starts.
 | `health` | live heartbeat dot, ok states | `green` |
 | `warn` | warnings such as the text-only search badge | `yellow` |
 | `error` | errors and the delete confirmation | `red` |
-| `selection` | selected row background | `blue` |
+| `selection` | selected row background (focused pane) | `blue` |
+| `selection_inactive` | selected rail row background while the messages or compose pane has focus | `brightblack` |
+| `unsaved` | a task row whose drafted state is not saved yet (`space` in a task list; `enter` saves) | `yellow` |
 
 On the selected message row, dim text (timestamp, thread summary) switches
 to the `text` color so it stays readable on `selection`.
@@ -349,7 +360,7 @@ does.
 | `idle` | an ended session in the rail | sleeping symbol | U+F04B2 md-sleep |
 | `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
 | `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
-| `task_completed` | a completed task | ✅ | U+F046 fa-square-check |
+| `task_completed` | a completed task | ✅ | U+F14A fa-square-check |
 | `collapsed` | selected list item; a thread that can expand | ▶ | U+F0DA fa-caret-right |
 | `expanded` | a thread whose replies are shown | ▼ | U+F0D7 fa-caret-down |
 | `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |

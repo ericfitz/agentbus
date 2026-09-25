@@ -10,6 +10,25 @@ import (
 	"github.com/ericfitz/agentbus/internal/config"
 )
 
+// TestThemeSelectionInactiveAndUnsavedKeys (ADR 0011): the two new keys
+// default to brightblack and yellow, override like any other, and reach
+// the Health overlay's Sources.
+func TestThemeSelectionInactiveAndUnsavedKeys(t *testing.T) {
+	cfg := config.Default()
+	th := LoadTheme(cfg, io.Discard)
+	if th.SelInactive != lipgloss.Color("8") || th.Unsaved != lipgloss.Color("3") {
+		t.Fatalf("defaults: selection_inactive=%v unsaved=%v", th.SelInactive, th.Unsaved)
+	}
+	if th.SelBG(true) != th.Sel || th.SelBG(false) != th.SelInactive {
+		t.Fatalf("SelBG: focused=%v unfocused=%v", th.SelBG(true), th.SelBG(false))
+	}
+	cfg.Themes[0].SelectionInactive, cfg.Themes[0].Unsaved = "green", "default"
+	th = LoadTheme(cfg, io.Discard)
+	if th.SelInactive != lipgloss.Color("2") || th.Unsaved != (lipgloss.NoColor{}) || th.Sources["selection_inactive"] != "green" || th.Sources["unsaved"] != "default" {
+		t.Fatalf("overrides: %+v", th)
+	}
+}
+
 func TestParseColorAcceptsNamesIndicesAndDefault(t *testing.T) {
 	cases := map[string]lipgloss.TerminalColor{
 		"cyan":        lipgloss.Color("6"),

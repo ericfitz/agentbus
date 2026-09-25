@@ -83,25 +83,27 @@ func Default() Config {
 // time: the TUI substitutes DefaultTheme's value for any that is missing or
 // not a color (see ColorIndex).
 type Theme struct {
-	Name       string `json:"name"`
-	Background string `json:"background"`
-	Text       string `json:"text"`
-	Dim        string `json:"dim"`
-	Timestamp  string `json:"timestamp"`
-	Tag        string `json:"tag"`
-	Agent      string `json:"agent"`
-	User       string `json:"user"`
-	Memory     string `json:"memory"`
-	Tasks      string `json:"tasks"`
-	Health     string `json:"health"`
-	Warn       string `json:"warn"`
-	Error      string `json:"error"`
-	Selection  string `json:"selection"`
+	Name              string `json:"name"`
+	Background        string `json:"background"`
+	Text              string `json:"text"`
+	Dim               string `json:"dim"`
+	Timestamp         string `json:"timestamp"`
+	Tag               string `json:"tag"`
+	Agent             string `json:"agent"`
+	User              string `json:"user"`
+	Memory            string `json:"memory"`
+	Tasks             string `json:"tasks"`
+	Health            string `json:"health"`
+	Warn              string `json:"warn"`
+	Error             string `json:"error"`
+	Selection         string `json:"selection"`
+	SelectionInactive string `json:"selection_inactive"`
+	Unsaved           string `json:"unsaved"`
 }
 
 // DefaultTheme is the built-in "default" theme and the per-value fallback.
 func DefaultTheme() Theme {
-	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue"}
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue", SelectionInactive: "brightblack", Unsaved: "yellow"}
 }
 
 // Colors lists the theme's values as (key, value) pairs in a fixed order,
@@ -121,6 +123,8 @@ func (t Theme) Colors() [][2]string {
 		{"warn", t.Warn},
 		{"error", t.Error},
 		{"selection", t.Selection},
+		{"selection_inactive", t.SelectionInactive},
+		{"unsaved", t.Unsaved},
 	}
 }
 

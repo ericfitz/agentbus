@@ -217,11 +217,20 @@ func (m Model) View() string {
 	}
 	parts = append(parts, m.renderCompose())
 	if m.toast != "" {
-		parts = append(parts, m.theme.Style(m.theme.Error).Render(iconError+m.toast))
+		parts = append(parts, m.toastLine())
 	}
 	parts = append(parts, m.renderStatusBar())
 	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return lipgloss.NewStyle().Background(m.theme.BG).Foreground(m.theme.Text).Width(m.width).MaxHeight(m.height).Render(out)
+}
+
+// toastLine renders the toast: an error in red with the ✗ prefix, or a
+// hint (draft guidance) in the text color with no prefix.
+func (m Model) toastLine() string {
+	if m.toastHint {
+		return m.theme.Style(m.theme.Text).Render(m.toast)
+	}
+	return m.theme.Style(m.theme.Error).Render(iconError + m.toast)
 }
 
 // chanStyle is the color a channel's name is drawn in everywhere: task
@@ -275,6 +284,10 @@ func (m Model) renderRails() string {
 	dim := th.Style(th.Dim)
 	rail := m.railWidth()
 	trunc := lipgloss.NewStyle().MaxWidth(rail)
+	// Focus as pane() reports it: a rail row selected while the stream or
+	// compose has focus takes the inactive selection color, so the one blue
+	// row on screen is the one the arrow keys move.
+	focus := m.pane()
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
 	// tagsShown tracks whether the "tags" section header has been written
@@ -285,7 +298,7 @@ func (m Model) renderRails() string {
 		var line string
 		if isTagPane(c.Name) {
 			if !tagsShown {
-				l.WriteString(dim.Render("tags") + "\n")
+				l.WriteString("\n" + dim.Render("tags") + "\n") // a blank row before the label, like the one before sessions
 				tagsShown = true
 			}
 			line = m.tagChips(tagPaneSet(c.Name))
@@ -308,7 +321,7 @@ func (m Model) renderRails() string {
 		// While a session is selected, the channel list draws no highlighted
 		// row; the sessions list below highlights instead.
 		if m.sessSel < 0 && i == m.sel {
-			line = th.Highlight(markSel+line, rail)
+			line = th.Highlight(th.SelBG(focus == paneChannels), markSel+line, rail)
 		} else {
 			line = " " + line
 		}
@@ -342,7 +355,7 @@ func (m Model) renderRails() string {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
 		}
 		if i == m.sessSel {
-			row = th.Highlight(markSel+row, rail)
+			row = th.Highlight(th.SelBG(focus == paneSessions), markSel+row, rail)
 		} else {
 			row = " " + row
 		}
@@ -352,7 +365,7 @@ func (m Model) renderRails() string {
 	// rest, and a blank row separates the two lists.
 	extra := 0
 	if tagsShown {
-		extra = 1
+		extra = 2 // the blank separator and the "tags" label
 	}
 	total := m.stream.Height + 1
 	chanRows := min(len(m.channels)+1+extra, max(total/2, total-len(names)-2))
@@ -429,7 +442,14 @@ func (m *Model) renderStream() string {
 		}
 		if v, ok := m.mem.version(x); ok {
 			x.Sender, x.CreatedAt, x.Subject, x.Content = v.Sender, v.CreatedAt, v.Subject, v.Content
-			label = "r" + strconv.Itoa(m.mem.idx+1) + " of " + strconv.Itoa(len(m.mem.revs))
+			// The shown version's own revision number, not its position:
+			// replaced revisions are purged after tombstone_min_hours, so the
+			// kept list can start above r1 (ADR 0011 decision 5).
+			rev := strconv.Itoa(m.mem.idx + 1)
+			if v.Revision != nil {
+				rev = itoa(*v.Revision)
+			}
+			label = "r" + rev + " · " + strconv.Itoa(len(m.mem.revs)) + " kept"
 		}
 		// The row line is the subject or the first line, cut to fit; the
 		// body (what that line leaves out) shows only once opened with →,
@@ -473,7 +493,7 @@ func (m *Model) renderStream() string {
 		line = lipgloss.NewStyle().Width(w - pw).Render(line)
 		line = prefix + strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", pw))
 		if selected {
-			line = th.Highlight(line, w)
+			line = th.Highlight(th.Sel, line, w)
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum
@@ -596,7 +616,7 @@ func (m Model) overlaySize() (w, h int) {
 func (m Model) overlay(title string, border lipgloss.TerminalColor, body, footer string) string {
 	w, h := m.overlaySize()
 	if m.toast != "" {
-		footer = m.theme.Style(m.theme.Error).Render(iconError+m.toast) + "\n" + footer
+		footer = m.toastLine() + "\n" + footer
 		h--
 	}
 	inner := lipgloss.JoinVertical(lipgloss.Left,

@@ -48,13 +48,21 @@ func TestTaskChannelRendersTree(t *testing.T) {
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
 
+	// Children start collapsed: a's row (▶, its child hidden), the hidden
+	// count, then b.
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], markSel+" "+taskPending+"#") || strings.TrimSpace(lines[1]) != "1 subtask" {
+		t.Fatalf("collapsed tree = %q", lines)
+	}
+	f.key("tab")   // cursor on b
+	f.key("up")    // a
+	f.key("right") // a has no details, so → shows its child
+	lines = strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	if len(lines) < 3 {
 		t.Fatalf("want at least 3 lines, got %d: %q", len(lines), lines)
 	}
-	// "a" is bare (no description/metadata/blockers): no triangle, so its row
-	// gets the two-space no-details mark in place of markSel/markOpen (#16).
-	if !strings.HasPrefix(lines[0], "  "+taskPending+"#") || !strings.Contains(lines[0], "a") {
+	// a's child is shown and nothing is hidden, so a carries ▼.
+	if !strings.HasPrefix(lines[0], markOpen+" "+taskPending+"#") || !strings.Contains(lines[0], "a") {
 		t.Fatalf("line0 = %q", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], "  "+"  "+taskInProgress+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
@@ -78,7 +86,11 @@ func TestTaskChannelRailIcon(t *testing.T) {
 	}
 }
 
-func TestTaskChannelIsReadOnly(t *testing.T) {
+// TestTaskChannelHasNoCompose: a task list has no compose line, so i and r
+// do nothing there (no toast: the read-only toast is gone, ADR 0011
+// decision 6), enter without a draft does nothing, tab never reaches
+// compose, and d still asks before deleting the channel.
+func TestTaskChannelHasNoCompose(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
 	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
@@ -89,11 +101,8 @@ func TestTaskChannelIsReadOnly(t *testing.T) {
 
 	for _, k := range []string{"i", "enter", "r"} {
 		f.key(k)
-		if f.m.mode != modeNormal {
-			t.Fatalf("key %q left mode %v", k, f.m.mode)
-		}
-		if f.m.toast != tasksReadOnlyToast {
-			t.Fatalf("key %q toast = %q, want %q", k, f.m.toast, tasksReadOnlyToast)
+		if f.m.mode != modeNormal || f.m.toast != "" {
+			t.Fatalf("key %q: mode %v toast %q", k, f.m.mode, f.m.toast)
 		}
 	}
 
@@ -235,6 +244,36 @@ func TestTasksMsgClampsCursorWhenTaskDeleted(t *testing.T) {
 	}
 }
 
+// TestTasksMsgResetsCursorWhenListGoesEmpty: if the selected channel's tree
+// comes back empty (e.g. its last task is deleted), the cursor must reset to
+// -1, not sit on a stale index -- otherwise pane() (cursor >= 0) reports the
+// stream focused on a pane with nothing in it.
+func TestTasksMsgResetsCursorWhenListGoesEmpty(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	f.key("tab") // cursor lands on the only task
+	if f.m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", f.m.cursor)
+	}
+
+	f.send(tasksMsg{ch: "tasks/work", tasks: nil})
+
+	if f.m.cursor != -1 {
+		t.Fatalf("cursor = %d, want -1 on an empty list", f.m.cursor)
+	}
+	if f.m.pane() == paneStream {
+		t.Fatalf("pane() must not report the stream on an empty list, got %v", f.m.pane())
+	}
+}
+
 // taskTree creates the tree the cursor/expand tests share: "a" (a
 // description and metadata, so it has details), "a1" (a's child, bare, no
 // details), and "b" (blocked by a1, so it has details too).
@@ -286,6 +325,10 @@ func TestTaskCursorMovesOverTasks(t *testing.T) {
 	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
 		t.Fatalf("expanding a moved the cursor: %+v", got)
 	}
+	f.key("right") // details are open: the second → shows a's child
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
+		t.Fatalf("showing a's children moved the cursor: %+v", got)
+	}
 	f.key("down")
 	if got, ok := f.m.cursorTask(); !ok || got.ID != a1.ID {
 		t.Fatalf("down from a = %+v, want a1", got)
@@ -308,8 +351,8 @@ func TestTaskExpandCollapse(t *testing.T) {
 	if !strings.HasPrefix(lines[0], markSel+" ") {
 		t.Fatalf("a should show %q: %q", markSel, lines[0])
 	}
-	if strings.HasPrefix(lines[1], markSel+" ") || strings.Contains(lines[1], markSel) {
-		t.Fatalf("a1 (no details) should show no triangle: %q", lines[1])
+	if strings.TrimSpace(lines[1]) != "1 subtask" {
+		t.Fatalf("a1 is hidden; a's summary line follows a: %q", lines[1])
 	}
 	if !strings.HasPrefix(lines[2], markSel+" ") {
 		t.Fatalf("b (has a blocker) should show %q: %q", markSel, lines[2])
@@ -323,8 +366,8 @@ func TestTaskExpandCollapse(t *testing.T) {
 	}
 	f.run(cmd)
 	expanded := ansi.Strip(f.m.renderStream())
-	if !strings.Contains(expanded, ansi.Strip(markOpen)) {
-		t.Fatalf("a should show %q once expanded:\n%s", markOpen, expanded)
+	if lines := strings.Split(expanded, "\n"); !strings.HasPrefix(lines[0], markSel+" ") {
+		t.Fatalf("a keeps %q while its child is hidden, even with details open: %q", markSel, lines[0])
 	}
 	if !strings.Contains(expanded, "desc a") {
 		t.Fatalf("expanded block should show the description:\n%s", expanded)
@@ -342,7 +385,12 @@ func TestTaskExpandCollapse(t *testing.T) {
 		t.Fatalf("left should hide the block again:\n%s", collapsed)
 	}
 
-	f.key("down") // cursor on a1, no details
+	f.key("right") // details again
+	f.key("right") // then a's child
+	f.key("down")  // cursor on a1, no details
+	if got, ok := f.m.cursorTask(); !ok || got.Subject != "a1" {
+		t.Fatalf("cursor = %+v, want a1", got)
+	}
 	if cmd := f.m.expandTask(); cmd != nil {
 		t.Fatal("right on a task with no details should do nothing")
 	}
@@ -357,6 +405,7 @@ func TestTaskExpansionSurvivesRevision(t *testing.T) {
 	f.key("up")
 	f.key("up") // cursor on a
 	f.run(f.m.expandTask())
+	f.key("right") // and a's child, so nothing is hidden and a shows ▼
 
 	desc2 := "desc a2"
 	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: a.ID, Description: &desc2}); err != nil {
@@ -417,6 +466,8 @@ func TestTaskIndentIsCapped(t *testing.T) {
 	}
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
+	f.m.revealTask("tasks/work", parent) // the deepest task: every ancestor's children shown
+	f.m.refreshStream()
 
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	deepest := lines[len(lines)-1]

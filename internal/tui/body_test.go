@@ -88,8 +88,8 @@ func TestRightOpensBodyThenRepliesLeftClosesRepliesThenBody(t *testing.T) {
 		t.Fatalf("second ← closes the body:\n%s", s)
 	}
 	f.key(" ")
-	if got := contents(f.m.rows("dev")); !eq(got, []string{"step one", ">A1"}) || strings.Contains(f.stream(), "step one") {
-		t.Fatalf("space toggles the replies only: %v\n%s", got, f.stream())
+	if got := contents(f.m.rows("dev")); !eq(got, []string{"step one"}) || strings.Contains(f.stream(), "step one") {
+		t.Fatalf("space no longer shows or hides replies (ADR 0011 decision 4): %v\n%s", got, f.stream())
 	}
 }
 
@@ -153,12 +153,12 @@ func TestBodyStaysOpenAcrossMemoryVersions(t *testing.T) {
 	f.key("right")
 	f.streamHas(t, "Release v2", "notes two")
 	f.key(".")
-	f.streamHas(t, "Release v1", "notes one", "r1 of 2")
+	f.streamHas(t, "Release v1", "notes one", "r1 · 2 kept")
 	if s := f.stream(); strings.Contains(s, "notes two") || strings.Contains(s, "Release v2") {
 		t.Fatalf("the selected version only:\n%s", s)
 	}
 	f.key(",")
-	f.streamHas(t, "Release v2", "notes two", "r2 of 2")
+	f.streamHas(t, "Release v2", "notes two", "r2 · 2 kept")
 }
 
 // The merged DM pane and tag panes collapse rows too.

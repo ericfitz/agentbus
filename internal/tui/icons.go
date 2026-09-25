@@ -41,7 +41,7 @@ var nerdIcons = map[string]string{
 	"idle":             "\U000f04b2", // md-sleep "zZ"; fa-face-sleeping is Pro-only
 	"task_pending":     "",          // fa-square regular (nf fa-square_o)
 	"task_in_progress": "",          // fa-square-caret-right regular (nf fa-toggle_right)
-	"task_completed":   "",          // fa-square-check regular (nf fa-check_square_o)
+	"task_completed":   "\uf14a",     // fa-square-check solid (nf fa-square_check); FA4's check_square_o U+F046 is drawn 20% smaller in Mono patches
 	"collapsed":        "",          // fa-caret-right
 	"expanded":         "",          // fa-caret-down
 	"error":            "",          // fa-circle-exclamation (nf fa-exclamation_circle)

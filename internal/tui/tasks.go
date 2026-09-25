@@ -2,6 +2,7 @@ package tui
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -9,10 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
-
-// tasksReadOnlyToast is shown when a key that would send or compose is
-// pressed with a task channel selected: tasks/ channels are read-only here.
-const tasksReadOnlyToast = "task lists are read-only here"
 
 // loadTasks fetches ch's current task tree.
 func (m *Model) loadTasks(ch string) tea.Cmd {
@@ -33,13 +30,309 @@ func (m *Model) loadTask(id int64) tea.Cmd {
 	}
 }
 
+// taskDraft is the one unsaved state change space builds on a task row
+// (ADR 0011 decision 2): the task, and the status and owner its row shows
+// until enter saves or anything else discards it. rev is the bus revision
+// the draft was taken from (fetched once, when the draft is started), the
+// discriminator onBatch uses to tell a genuinely newer revision from one
+// the draft already reflects. id 0 means no draft.
+type taskDraft struct {
+	ch     string
+	id     int64
+	status string
+	owner  string
+	rev    int64
+}
+
+const (
+	draftHintToast       = "enter saves · esc cancels"
+	draftDiscardedToast  = "change discarded"
+	unassignRefusedToast = "only a not-started task can be unassigned"
+	staleTaskToast       = "task changed; reloading"
+)
+
+// ownedToast is the refusal for a task some other identity owns: the bus
+// has no user/agent kind, so only the TUI's own identity counts as the
+// user (ADR 0011 decision 1).
+func ownedToast(owner string) string {
+	return "owned by " + owner + "; only unassigned tasks or yours can be changed here"
+}
+
+// nextStatus is space's cycle.
+var nextStatus = map[string]string{"pending": "in_progress", "in_progress": "completed", "completed": "pending"}
+
+// taskEditable reports whether the TUI may change t: unassigned, or its own.
+func (m *Model) taskEditable(t bus.TaskSummary) bool {
+	return t.Owner == "" || t.Owner == m.c.as
+}
+
+// shownTask is t as its row shows it, with the draft applied when t holds
+// it; drafted reports which.
+func (m *Model) shownTask(ch string, t bus.TaskSummary) (shown bus.TaskSummary, drafted bool) {
+	if m.draft.id == t.ID && m.draft.ch == ch {
+		t.Status, t.Owner = m.draft.status, m.draft.owner
+		return t, true
+	}
+	return t, false
+}
+
+// cycleTaskState (space) drafts the cursor task's next state: pending →
+// in progress → completed → pending, from whatever the row shows. A task
+// unassigned on the bus is drafted as the TUI's own while off pending; a
+// draft that lands back on the saved status and owner is dropped. Starting
+// a new draft (the cursor task is not the one already drafted) fetches the
+// task synchronously to pin the revision it was built on -- onBatch's
+// discriminator for a stale discard (ADR 0011 decision 2). If that fetch
+// shows a status or owner the row hadn't caught up to yet, the row is
+// stale: no draft starts, an error toast says so, and the tree reloads.
+func (m *Model) cycleTaskState() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	ch := m.selName()
+	shown, drafted := m.shownTask(ch, t)
+	d := taskDraft{ch: ch, id: t.ID, status: nextStatus[shown.Status], owner: shown.Owner, rev: m.draft.rev}
+	if t.Owner == "" {
+		d.owner = m.c.as
+		if d.status == "pending" {
+			d.owner = ""
+		}
+	}
+	if d.status == t.Status && d.owner == t.Owner {
+		m.draft = taskDraft{}
+		m.refreshStream()
+		return nil
+	}
+	if !drafted {
+		got, err := m.c.b.TaskGet(m.c.as, t.ID)
+		if err != nil {
+			return m.showToast("task: " + errText(err))
+		}
+		if got.Status != t.Status || got.Owner != t.Owner {
+			return tea.Batch(m.showToast(staleTaskToast), m.loadTasks(ch))
+		}
+		d.rev = got.Revision
+	}
+	m.draft = d
+	m.refreshStream()
+	return m.showHint(draftHintToast)
+}
+
+// saveDraft (enter) writes the draft as the TUI's identity: into in
+// progress is a claim (TaskClaim, so the lease follows the TUI's
+// heartbeat like an agent's), anything else a task_update carrying the
+// drafted status and owner (both, so the saved task matches the row: a
+// bare status pending would make the bus drop the assignment). The call
+// is synchronous, like toggleSubscribe's, so no receive batch can race it.
+// A refusal shows the bus's message and keeps the draft for esc.
+func (m *Model) saveDraft() tea.Cmd {
+	d := m.draft
+	var err error
+	if d.status == "in_progress" {
+		_, err = m.c.b.TaskClaim(m.c.as, d.id, 0, "")
+	} else {
+		status, owner := d.status, d.owner
+		_, err = m.c.b.TaskUpdate(m.c.as, bus.TaskPatch{ID: d.id, Status: &status, Owner: &owner})
+	}
+	if err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	m.draft = taskDraft{}
+	return m.loadTasks(d.ch)
+}
+
+// dropDraft discards the draft with the "change discarded" hint.
+func (m *Model) dropDraft() tea.Cmd {
+	m.draft = taskDraft{}
+	m.refreshStream()
+	return m.showHint(draftDiscardedToast)
+}
+
+// dropStaleDraft discards the draft once its row is no longer the cursor
+// row of the focused task pane: the cursor moved, focus left, the channel
+// changed, or the task vanished from the tree (ADR 0011 decision 2). Update
+// runs it after every message.
+func (m *Model) dropStaleDraft() tea.Cmd {
+	if m.draft.id == 0 {
+		return nil
+	}
+	if t, ok := m.cursorTask(); ok && m.pane() == paneStream && m.selName() == m.draft.ch && t.ID == m.draft.id {
+		return nil
+	}
+	return m.dropDraft()
+}
+
+// takeTask (t in a task list) assigns an unassigned cursor task to the TUI
+// at once, without changing its state.
+func (m *Model) takeTask() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if m.draft.id != 0 {
+		return m.showHint(draftHintToast)
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	if t.Owner != "" {
+		return nil // already yours
+	}
+	as := m.c.as
+	if _, err := m.c.b.TaskUpdate(as, bus.TaskPatch{ID: t.ID, Owner: &as}); err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	return m.loadTasks(m.selName())
+}
+
+// unassignTask (u in a task list) clears the owner of the TUI's own
+// not-started cursor task at once.
+func (m *Model) unassignTask() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if m.draft.id != 0 {
+		return m.showHint(draftHintToast)
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	if t.Owner == "" {
+		return nil
+	}
+	if t.Status != "pending" {
+		return m.showToast(unassignRefusedToast)
+	}
+	none := ""
+	if _, err := m.c.b.TaskUpdate(m.c.as, bus.TaskPatch{ID: t.ID, Owner: &none}); err != nil {
+		return m.showToast("task: " + errText(err))
+	}
+	return m.loadTasks(m.selName())
+}
+
+// taskRow is one visible row of a task tree.
+type taskRow struct {
+	t      bus.TaskSummary
+	hidden int  // descendants not shown under this row (a summary line follows)
+	open   bool // at least one direct child is shown
+}
+
+// taskRows projects ch's tree (TaskList's order: a parent before its
+// children) onto the rows shown. Children start collapsed (ADR 0011
+// decision 3): a task is shown only when its parent is shown with its
+// children expanded (m.taskExpanded); otherwise the nearest shown ancestor
+// counts it as hidden. A task whose parent is not in the list is a root.
+func (m *Model) taskRows(ch string) []taskRow {
+	var out []taskRow
+	at := map[int64]int{}    // shown task id -> its row index
+	under := map[int64]int{} // hidden task id -> the row index counting it
+	for _, t := range m.tasks[ch] {
+		pi, shown := at[t.Parent]
+		hi, hidden := under[t.Parent]
+		switch {
+		case shown && !m.taskExpanded[t.Parent]:
+			out[pi].hidden++
+			under[t.ID] = pi
+			continue
+		case shown:
+			out[pi].open = true
+		case hidden:
+			out[hi].hidden++
+			under[t.ID] = hi
+			continue
+		}
+		at[t.ID] = len(out)
+		out = append(out, taskRow{t: t})
+	}
+	return out
+}
+
+// taskIndex is id's row index in taskRows(ch), or -1 while it is hidden or
+// absent.
+func (m *Model) taskIndex(ch string, id int64) int {
+	for i, r := range m.taskRows(ch) {
+		if r.t.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// revealTask shows the children of every ancestor of id so its row is
+// visible (a search jump or pending cursor into a collapsed subtree).
+func (m *Model) revealTask(ch string, id int64) {
+	byID := make(map[int64]bus.TaskSummary, len(m.tasks[ch]))
+	for _, t := range m.tasks[ch] {
+		byID[t.ID] = t
+	}
+	p := byID[id].Parent
+	for n := 0; p != 0 && n < len(byID); n++ { // bounded: the bus forbids cycles, this never trusts it
+		m.taskExpanded[p] = true
+		p = byID[p].Parent
+	}
+}
+
+// cursorTaskRow returns the visible row under the cursor in the selected
+// task channel.
+func (m *Model) cursorTaskRow() (taskRow, bool) {
+	rs := m.taskRows(m.selName())
+	if m.cursor < 0 || m.cursor >= len(rs) {
+		return taskRow{}, false
+	}
+	return rs[m.cursor], true
+}
+
 // cursorTask returns the task at the cursor in the selected task channel.
 func (m *Model) cursorTask() (bus.TaskSummary, bool) {
-	ts := m.tasks[m.selName()]
-	if m.cursor < 0 || m.cursor >= len(ts) {
-		return bus.TaskSummary{}, false
+	r, ok := m.cursorTaskRow()
+	return r.t, ok
+}
+
+// openTask (→) opens the cursor task's details when it has any and they
+// are closed; otherwise it shows the task's direct children.
+func (m *Model) openTask() tea.Cmd {
+	r, ok := m.cursorTaskRow()
+	if !ok {
+		return nil
 	}
-	return ts[m.cursor], true
+	if r.t.HasDetails && !m.taskOpen[r.t.ID] {
+		return m.expandTask()
+	}
+	if r.hidden > 0 {
+		m.taskExpanded[r.t.ID] = true
+		m.refreshStream()
+		m.scrollCursorIntoView()
+	}
+	return nil
+}
+
+// closeTask (←) hides the cursor task's shown children, the whole subtree
+// (so the next → shows direct children only); otherwise it closes the
+// task's details.
+func (m *Model) closeTask() {
+	r, ok := m.cursorTaskRow()
+	if !ok {
+		return
+	}
+	if !r.open {
+		m.collapseTask()
+		return
+	}
+	under := map[int64]bool{r.t.ID: true}
+	for _, t := range m.tasks[m.selName()] { // tree order: a parent precedes its children
+		if under[t.Parent] {
+			under[t.ID] = true
+			delete(m.taskExpanded, t.ID)
+		}
+	}
+	delete(m.taskExpanded, r.t.ID)
+	m.refreshStream()
+	m.scrollCursorIntoView()
 }
 
 // expandTask shows the cursor task's detail block, fetching it with
@@ -66,29 +359,34 @@ func (m *Model) collapseTask() {
 }
 
 // renderTasks draws ch's task tree in place of the revision stream: one row
-// per task in the tree order TaskList returns, indented by depth (capped at
-// six levels), a collapsed/expanded mark for a task with details, a status
-// mark, then the row's suffixes: an in-progress task's owner with the rail
-// icon and color, a pending task's assignee as a dim arrow, blockers, and
-// the lease. Completed rows are dimmed whole. The normal-mode cursor
-// highlights its row; an expanded task's block (description, blockers,
-// metadata, last update) follows it, word-wrapped at the task's indent.
+// per visible task (taskRows; children start collapsed), indented by depth
+// (capped at six levels), a tree mark, a status mark, then the row's
+// suffixes: an in-progress task's owner with the rail icon and color, a
+// pending task's assignee as a dim arrow, blockers, and the lease. Completed
+// rows are dimmed whole. The tree mark is ▶ when anything is hidden (closed
+// details, hidden children), ▼ when details or children are open with
+// nothing hidden, blank otherwise; a row with hidden children is followed
+// by a dim "N subtasks" line. The normal-mode cursor highlights its row; an
+// expanded task's block (description, blockers, metadata, last update)
+// follows it, word-wrapped at the task's indent. A row holding the draft
+// shows the drafted status and owner in the unsaved color.
 func (m *Model) renderTasks(ch string) string {
 	th := m.theme
 	dim := th.Style(th.Dim)
-	ts := m.tasks[ch]
+	rs := m.taskRows(ch)
 	m.cursorLine = -1
-	if len(ts) == 0 {
+	if len(rs) == 0 {
 		return dim.Render("no tasks yet in " + ch)
 	}
 	w := max(m.stream.Width, 20)
-	byID := make(map[int64]bus.TaskSummary, len(ts))
-	for _, t := range ts {
+	byID := make(map[int64]bus.TaskSummary, len(m.tasks[ch]))
+	for _, t := range m.tasks[ch] {
 		byID[t.ID] = t
 	}
 	var b strings.Builder
 	lineNum := 0
-	for i, t := range ts {
+	for i, r := range rs {
+		t, drafted := m.shownTask(ch, r.t)
 		mark := taskPending
 		switch t.Status {
 		case "in_progress":
@@ -102,12 +400,13 @@ func (m *Model) renderTasks(ch string) string {
 			rowDim = th.Style(th.Text)
 		}
 		indent := strings.Repeat("  ", min(t.Depth, 6))
+		detailsOpen := t.HasDetails && m.taskOpen[t.ID]
 		var treeMark string
 		switch {
-		case t.HasDetails && m.taskOpen[t.ID]:
-			treeMark = rowDim.Render(markOpen + " ")
-		case t.HasDetails:
+		case (t.HasDetails && !detailsOpen) || r.hidden > 0:
 			treeMark = rowDim.Render(markSel + " ")
+		case detailsOpen || r.open:
+			treeMark = rowDim.Render(markOpen + " ")
 		default:
 			treeMark = "  "
 		}
@@ -141,22 +440,31 @@ func (m *Model) renderTasks(ch string) string {
 		if suffix != "" {
 			body += rowDim.Render(suffix)
 		}
-		if t.Status == "completed" {
+		switch {
+		case drafted:
+			body = th.Style(th.Unsaved).Render(body) // unsaved (ADR 0011 section 5)
+		case t.Status == "completed":
 			body = rowDim.Render(body)
 		}
 		pw := lipgloss.Width(prefix)
 		line := prefix + body
+		if r.hidden > 0 {
+			summary := strconv.Itoa(r.hidden) + " subtasks"
+			if r.hidden == 1 {
+				summary = "1 subtask"
+			}
+			line += "\n" + strings.Repeat(" ", pw) + rowDim.Render(summary)
+		}
+		line = lipgloss.NewStyle().MaxWidth(w).Render(line)
 		if selected {
-			line = th.Highlight(lipgloss.NewStyle().MaxWidth(w).Render(line), w)
-		} else {
-			line = lipgloss.NewStyle().MaxWidth(w).Render(line)
+			line = th.Highlight(th.Sel, line, w)
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum
 		}
 		b.WriteString(line + "\n")
-		lineNum++
-		if t.HasDetails && m.taskOpen[t.ID] {
+		lineNum += strings.Count(line, "\n") + 1
+		if detailsOpen {
 			block := m.renderTaskBlock(t, byID, pw+2, w)
 			b.WriteString(block + "\n")
 			lineNum += strings.Count(block, "\n") + 1

@@ -64,23 +64,24 @@ type Model struct {
 	height int
 	mode   mode
 
-	channels   []bus.Channel
-	dms        []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
-	sel        int
-	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
-	msgs       map[string][]bus.Message
-	tasks      map[string][]bus.TaskSummary // task channel name -> its current tree
-	taskOpen   map[int64]bool               // task id -> its detail block is expanded
-	taskDetail map[int64]bus.Task           // task id -> its full task_get result, once loaded
-	gaps       map[string][]bus.Gap
-	loaded     map[string]bool
-	seen       map[string]int64
-	divider    int64
-	cursor     int             // index into rows(selName()), the visible display order; -1 for none
-	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
-	expanded   map[int64]bool  // message seq -> its direct replies are shown
-	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
-	bodyOpen   map[int64]bool  // message seq -> its body (subject line and full content) is shown
+	channels     []bus.Channel
+	dms          []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
+	sel          int
+	sessSel      int // index into sessionNames(); -1 unless the sessions pane is the selection source
+	msgs         map[string][]bus.Message
+	tasks        map[string][]bus.TaskSummary // task channel name -> its current tree
+	taskOpen     map[int64]bool               // task id -> its detail block is expanded
+	taskExpanded map[int64]bool               // task id -> its direct children are shown (children start collapsed)
+	taskDetail   map[int64]bus.Task           // task id -> its full task_get result, once loaded
+	gaps         map[string][]bus.Gap
+	loaded       map[string]bool
+	seen         map[string]int64
+	divider      int64
+	cursor       int             // index into rows(selName()), the visible display order (taskRows(selName()) on a task channel); -1 for none
+	cursorLine   int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
+	expanded     map[int64]bool  // message seq -> its direct replies are shown
+	peek         map[int64]int64 // thread root seq -> the one reply shown while collapsed
+	bodyOpen     map[int64]bool  // message seq -> its body (subject line and full content) is shown
 
 	// pendingTaskCursorCh/ID: a task_get/task_list jump target picked by
 	// placeCursor before ch's tree had loaded, e.g. a search jump into a
@@ -105,6 +106,8 @@ type Model struct {
 
 	toast      string
 	toastSeq   int
+	toastHint  bool      // the toast is a hint (text color, no error prefix), not an error
+	draft      taskDraft // the one unsaved task state change; id 0 for none
 	lastNotice string
 
 	search     searchState
@@ -140,6 +143,7 @@ func New(c *client, th Theme) Model {
 		msgs:         map[string][]bus.Message{},
 		tasks:        map[string][]bus.TaskSummary{},
 		taskOpen:     map[int64]bool{},
+		taskExpanded: map[int64]bool{},
 		taskDetail:   map[int64]bus.Task{},
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
@@ -205,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded[msg.channel] = true
 		// A prepend, or another inbox's page in a merged DM pane, shifts
 		// indices; keep the cursor on the same message. On a task channel
-		// m.cursor indexes m.tasks(selName()), not rows(selName()) -- tasksMsg
+		// m.cursor indexes taskRows(selName()), not rows(selName()) -- tasksMsg
 		// owns that cursor (see placeTaskCursor/pendingTaskCursorID), so it's
 		// left untouched here.
 		var cursorSeq int64
@@ -250,8 +254,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cursorID int64
 		if msg.ch == m.selName() {
-			if ts := m.tasks[msg.ch]; m.cursor >= 0 && m.cursor < len(ts) {
-				cursorID = ts[m.cursor].ID
+			if t, ok := m.cursorTask(); ok {
+				cursorID = t.ID
 			}
 		}
 		if msg.ch == m.pendingTaskCursorCh {
@@ -262,14 +266,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tasks[msg.ch] = msg.tasks
 		if cursorID != 0 {
-			for i, t := range msg.tasks {
-				if t.ID == cursorID {
-					m.cursor = i
-				}
+			// A pending jump target may sit under collapsed parents.
+			m.revealTask(msg.ch, cursorID)
+			if i := m.taskIndex(msg.ch, cursorID); i >= 0 {
+				m.cursor = i
 			}
 		}
-		if msg.ch == m.selName() && len(msg.tasks) > 0 {
-			m.cursor = min(m.cursor, len(msg.tasks)-1)
+		if msg.ch == m.selName() {
+			if len(msg.tasks) > 0 {
+				m.cursor = min(m.cursor, m.paneLen(msg.ch)-1)
+			} else {
+				m.cursor = -1
+			}
 		}
 		for _, t := range msg.tasks {
 			if m.taskOpen[t.ID] {
@@ -333,6 +341,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeHelp:
 		cmds = append(cmds, m.updateHelp(msg))
 	}
+	// A draft lives only on the cursor row of the focused task pane (ADR
+	// 0011 decision 2): whatever the message above did, if that is no longer
+	// where the draft is, the draft goes.
+	if cmd := m.dropStaleDraft(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -359,7 +373,7 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 		return m.scrollStream(msg)
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -400,18 +414,22 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		return tea.Quit
 	case "i":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil // no compose in a task list
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
 		}
 		m.mode = modeInsert
 		return m.compose.Focus()
-	// enter performs the pane's action: reply to the cursor message in the
-	// stream, compose to the selected channel otherwise.
+	// enter performs the pane's action: save the task draft in a task list,
+	// reply to the cursor message in the stream, compose to the selected
+	// channel otherwise.
 	case "enter":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			if m.draft.id != 0 {
+				return m.saveDraft()
+			}
+			return nil
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -426,6 +444,11 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.mode = modeInsert
 		return m.compose.Focus()
 	case "esc":
+		if m.draft.id != 0 {
+			m.draft = taskDraft{} // cancel the draft, and only the draft
+			m.refreshStream()
+			return nil
+		}
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
@@ -433,7 +456,8 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	// rail: down past the last channel enters the sessions, up from the first
 	// session returns to the last channel. right opens the cursor message's
 	// body, then its direct replies; left hides its whole subtree, then its
-	// body.
+	// body. In a task list right opens the task's details, then its
+	// children; left hides its children (whole subtree), then its details.
 	case "down":
 		switch m.pane() {
 		case paneStream:
@@ -460,12 +484,12 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 	case "right":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.expandTask()
+			return m.openTask()
 		}
 		m.openCursor()
 	case "left":
 		if bus.IsTaskChannel(m.selName()) {
-			m.collapseTask()
+			m.closeTask()
 		} else {
 			m.closeCursor()
 		}
@@ -481,10 +505,14 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.follow = true
 		m.stream.GotoBottom()
 	case " ":
-		m.toggleExpand()
+		// Not a show/hide key anywhere (ADR 0011 decision 4): the arrows do
+		// that; in a task list space cycles the state.
+		if bus.IsTaskChannel(m.selName()) {
+			return m.cycleTaskState()
+		}
 	case "r":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.showToast(tasksReadOnlyToast)
+			return nil // no compose in a task list
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -510,11 +538,27 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 		return m.toggleSubscribe()
 	case "t":
-		return m.tagPrompt()
-	case "d":
-		if m.sessSel < 0 && m.selected() != nil && !isTagPane(m.selName()) {
-			m.mode = modeConfirmChannel
+		// Rail: follow a tag set. Task list: take (ADR 0011 decision 7).
+		switch m.pane() {
+		case paneChannels, paneSessions:
+			return m.tagPrompt()
+		case paneStream:
+			if bus.IsTaskChannel(m.selName()) {
+				return m.takeTask()
+			}
 		}
+	case "u":
+		if bus.IsTaskChannel(m.selName()) {
+			return m.unassignTask()
+		}
+	case "d":
+		if m.sessSel >= 0 || m.selected() == nil {
+			return nil
+		}
+		if isTagPane(m.selName()) {
+			return m.unfollowTagPane()
+		}
+		m.mode = modeConfirmChannel
 	case "/":
 		return m.openSearch()
 	case ".", ">":
@@ -623,21 +667,21 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	return m.showSelected()
 }
 
-// paneLen is the stream pane's cursor bound for ch: the task count for a
-// task channel (renderTasks draws one row per task, not per raw revision in
-// m.msgs, which has no cursor of its own), else the row count rows(ch)
-// shows (fewer than paneMsgs(ch) when a thread's replies are collapsed).
+// paneLen is the stream pane's cursor bound for ch: the visible task rows
+// of a task channel (renderTasks draws one row per shown task, not per raw
+// revision in m.msgs), else the row count rows(ch) shows (fewer than
+// paneMsgs(ch) when a thread's replies are collapsed).
 func (m *Model) paneLen(ch string) int {
 	if bus.IsTaskChannel(ch) {
-		return len(m.tasks[ch])
+		return len(m.taskRows(ch))
 	}
 	return len(m.rows(ch))
 }
 
 // moveCursor moves the normal-mode stream cursor and scrolls to keep it
 // visible (refreshStream renders the cursor row highlighted). paneLen bounds
-// it to the task count on a task channel (renderTasks draws one row per
-// task, not per raw revision in m.msgs) and the visible row count otherwise.
+// it to the visible task rows on a task channel (taskRows(ch), children
+// collapsed by default) and the visible row count otherwise.
 func (m *Model) moveCursor(d int) tea.Cmd {
 	n := m.paneLen(m.selName())
 	if n == 0 {
@@ -653,8 +697,8 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
 // it is not loaded) and scrolls just enough to bring it into view. On a task
-// channel the cursor indexes m.tasks[ch] (see renderTasks), not rows(ch), so
-// this resolves to the task-channel case instead.
+// channel the cursor indexes taskRows(ch), not rows(ch), so this resolves to
+// the task-channel case instead.
 func (m *Model) placeCursor(seq int64) {
 	ch := m.selName()
 	if bus.IsTaskChannel(ch) {
@@ -674,10 +718,11 @@ func (m *Model) placeCursor(seq int64) {
 // placeTaskCursor is placeCursor's task-channel case: seq is a raw
 // revision's seq (e.g. a search hit), resolved to its task via that
 // revision's MemoryID (m.msgs[ch] carries it; jumpTo adds the hit there
-// before calling placeCursor), then to that task's index in m.tasks[ch]. If
-// ch's tree hasn't loaded yet, the id is remembered in pendingTaskCursorID
-// for the tasksMsg that follows (every jump into a task channel triggers a
-// loadTasks) to place once it arrives.
+// before calling placeCursor), then to that task's row index in
+// taskRows(ch) (revealTask expands any collapsed ancestors first so the
+// row is shown). If ch's tree hasn't loaded yet, the id is remembered in
+// pendingTaskCursorID for the tasksMsg that follows (every jump into a
+// task channel triggers a loadTasks) to place once it arrives.
 func (m *Model) placeTaskCursor(ch string, seq int64) {
 	var id int64
 	for _, x := range m.msgs[ch] {
@@ -688,11 +733,8 @@ func (m *Model) placeTaskCursor(ch string, seq int64) {
 	}
 	m.cursor = -1
 	if id != 0 {
-		for i, t := range m.tasks[ch] {
-			if t.ID == id {
-				m.cursor = i
-			}
-		}
+		m.revealTask(ch, id)
+		m.cursor = m.taskIndex(ch, id)
 	}
 	if m.cursor < 0 && id != 0 {
 		m.pendingTaskCursorCh, m.pendingTaskCursorID = ch, id
@@ -940,6 +982,23 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 		}
 		if bus.IsTaskChannel(ch) {
 			cmds = append(cmds, m.loadTasks(ch))
+			// A revision of the drafted task newer than the one it was
+			// taken from discards the draft (ADR 0011 decision 2). Comparing
+			// against m.draft.rev, not just matching the id, is what tells
+			// a genuine change from a message the draft already reflects:
+			// a fresh "oldest" subscription's backlog can replay the task's
+			// own earlier revisions (including its creation), and the TUI's
+			// own save produces a revision that arrives here asynchronously,
+			// possibly after a new draft has already started on the same
+			// task from that saved state.
+			if m.draft.id != 0 && ch == m.draft.ch {
+				for _, x := range ms {
+					if x.MemoryID != nil && *x.MemoryID == m.draft.id && x.Revision != nil && *x.Revision > m.draft.rev {
+						cmds = append(cmds, m.dropDraft())
+						break
+					}
+				}
+			}
 		}
 	}
 	for _, g := range res.Gaps {
@@ -1107,12 +1166,21 @@ func (m *Model) loadHistory(ch string, before *int64) tea.Cmd {
 	}
 }
 
+// showToast shows s as an error (red, ✗ prefix) for toastFor.
 func (m *Model) showToast(s string) tea.Cmd {
 	m.toast = s
+	m.toastHint = false
 	m.toastSeq++
 	m.layout()
 	seq := m.toastSeq
 	return tick(toastFor, func(time.Time) tea.Msg { return toastClearMsg{seq: seq} })
+}
+
+// showHint is showToast in the hint style: the text color, no prefix.
+func (m *Model) showHint(s string) tea.Cmd {
+	cmd := m.showToast(s)
+	m.toastHint = true
+	return cmd
 }
 
 // errText renders a bus error as "code: message" and anything else as-is.

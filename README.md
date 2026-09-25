@@ -76,8 +76,9 @@ them, so a task whose owner dies or whose lease runs out returns to the
 queue. Tasks are ordered, may nest under a parent, and may depend on other
 tasks (`blocked_by`). A task list is a memory channel named `tasks/<name>`,
 by convention `tasks/<repo>`, which `agentbus init` creates; the machine-wide
-list `tasks` exists on every bus. `agentbus tui` renders a list as a
-read-only tree.
+list `tasks` exists on every bus. `agentbus tui` shows a list as a tree
+and lets you change the state and ownership of tasks that are unassigned
+or your own.
 
 Use a list for multi-step work, for work another agent or a later session
 may pick up, and for plans that must outlive a session; use chat for

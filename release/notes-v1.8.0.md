@@ -17,17 +17,43 @@
 
 - Message rows collapse to the header plus one line: the subject, or the
   content's first line cut to the pane width. This applies to channels,
-  DM inboxes, the merged DM pane and tag panes; the task pane is
-  unchanged.
+  DM inboxes, the merged DM pane and tag panes.
 - `→` opens the cursor message's body (subject line and full content),
-  then its direct replies; `←` hides its replies, then its body. `space`
-  still toggles the replies only. `▶` marks anything hidden, `▼` an open
-  body.
+  then its direct replies; `←` hides its replies, then its body. `▶`
+  marks anything hidden, `▼` an open body. `space` no longer shows or
+  hides replies; the arrow keys do that everywhere.
 - Stepping memory versions (`.`/`>` and `,`/`<`) shows each version's
-  subject and keeps the body open.
+  subject and keeps the body open. The label is now `r<revision> · <n>
+  kept`: the real revision number and how many revisions survive the
+  tombstone purge.
 - Search hit rows show the subject when there is one.
 - Compose is unchanged: messages sent from the TUI have no subject and
   show their first line.
+- Task lists nest like threads: subtasks start hidden under their parent
+  with an `N subtasks` line; `→` opens a task's details, then its
+  subtasks; `←` hides its subtasks, then its details. A search jump
+  expands the target's ancestors.
+- Task lists are no longer read-only. On a task that is unassigned or
+  yours (the TUI's identity), `space` cycles the state (not started, in
+  progress, completed) as a draft shown in the new `unsaved` color,
+  `enter` saves it (into in progress claims the task, so the lease follows
+  the TUI's heartbeat), `esc` cancels it; moving the cursor, leaving the
+  pane, switching channels, or a new revision of the task on the bus
+  discards it. `t` takes an unassigned task; `u` unassigns your
+  not-started task. The bus's rules are authoritative: a refusal shows
+  its message and keeps the draft. Tasks owned by agents cannot be changed
+  from the TUI (ADR 0011).
+- `t` follows a tag set only from the channel or session list. A blank
+  line separates the channels from the `tags` section. `d` on a tag set
+  unfollows it like `s`, with no confirmation, and the selection moves to
+  the next set, else the previous, else the last channel.
+- The rail's selected channel or session row uses the new theme key
+  `selection_inactive` (default `brightblack`) while the messages or
+  compose pane has focus, so only the focused pane's row is `selection`
+  blue. New theme key `unsaved` (default `yellow`) colors a drafted task
+  row.
+- The `nerdfont` icon set's completed task glyph is U+F14A
+  (`fa-square-check`), the same size as the pending and in-progress ones.
 
 ## Upgrading
 

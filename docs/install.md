@@ -291,7 +291,9 @@ before the TUI starts.
 | `health` | live heartbeat dot, ok states | `green` |
 | `warn` | warnings such as the text-only search badge | `yellow` |
 | `error` | errors and the delete confirmation | `red` |
-| `selection` | selected row background | `blue` |
+| `selection` | selected row background (focused pane) | `blue` |
+| `selection_inactive` | selected rail row background while the messages or compose pane has focus | `brightblack` |
+| `unsaved` | a task row whose drafted state is not saved yet (`space` in a task list; `enter` saves) | `yellow` |
 
 On the selected message row, dim text (timestamp, thread summary) switches
 to the `text` color so it stays readable on `selection`.

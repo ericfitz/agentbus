@@ -17,7 +17,7 @@ import (
 // terminal default are representable in v1, on purpose (see
 // config.ColorIndex).
 type Theme struct {
-	BG, Text, Dim, Stamp, Tag, Agent, User, Mem, Tasks, Health, Warn, Error, Sel lipgloss.TerminalColor
+	BG, Text, Dim, Stamp, Tag, Agent, User, Mem, Tasks, Health, Warn, Error, Sel, SelInactive, Unsaved lipgloss.TerminalColor
 	// Name is the config theme applied and Sources the resolved value per
 	// color key ("cyan", "default", ...), for the Health overlay.
 	Name    string
@@ -98,6 +98,10 @@ func (t *Theme) set(key string, c lipgloss.TerminalColor) {
 		t.Error = c
 	case "selection":
 		t.Sel = c
+	case "selection_inactive":
+		t.SelInactive = c
+	case "unsaved":
+		t.Unsaved = c
 	}
 }
 
@@ -106,13 +110,24 @@ func (t Theme) Style(c lipgloss.TerminalColor) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
 
-// Highlight renders line on the selection background. Styled segments
-// inside the line end with a reset that would drop the background for the
-// rest of that line, so the background is re-applied after every reset.
-func (t Theme) Highlight(line string, width int) string {
-	bg := lipgloss.NewStyle().Background(t.Sel)
-	if pre, _, ok := strings.Cut(bg.Render("\x00"), "\x00"); ok && pre != "" {
+// Highlight renders line on background bg (Sel for a focused selection and
+// the stream cursor, SelInactive for a rail selection without focus).
+// Styled segments inside the line end with a reset that would drop the
+// background for the rest of that line, so it is re-applied after every
+// reset.
+func (t Theme) Highlight(bg lipgloss.TerminalColor, line string, width int) string {
+	style := lipgloss.NewStyle().Background(bg)
+	if pre, _, ok := strings.Cut(style.Render("\x00"), "\x00"); ok && pre != "" {
 		line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+pre)
 	}
-	return bg.Width(width).Render(line)
+	return style.Width(width).Render(line)
+}
+
+// SelBG is a rail selection's background: Sel while that rail has focus,
+// SelInactive while focus is in the stream or compose (ADR 0011 section 3).
+func (t Theme) SelBG(focused bool) lipgloss.TerminalColor {
+	if focused {
+		return t.Sel
+	}
+	return t.SelInactive
 }

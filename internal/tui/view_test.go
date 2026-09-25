@@ -177,11 +177,59 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 		t.Fatalf("segments after a reset lost the selection background: %q", first)
 	}
 	rail := strings.SplitN(f.m.renderRails(), "\n", 3)[1]
-	if !strings.Contains(rail, markSel) || !strings.Contains(rail, "44m") {
-		t.Fatalf("selected channel row lost the background: %q", rail)
+	if !strings.Contains(rail, markSel) || !strings.Contains(rail, "100m") || strings.Contains(rail, "44m") {
+		t.Fatalf("selected channel row must keep a background, the inactive one while the stream has focus: %q", rail)
 	}
 	if f.m.theme.Sel == f.m.theme.Dim {
 		t.Fatal("selection background must differ from the dim text color")
+	}
+}
+
+// TestRailSelectionUsesInactiveColorWithoutFocus (ADR 0011 section 3): the
+// rail's selected channel row is on the selection color (blue, 44m) while
+// the rail has focus and on selection_inactive (brightblack, 100m) while
+// the stream does; the stream cursor stays on selection. Same for the
+// sessions pane's selected row.
+func TestRailSelectionUsesInactiveColorWithoutFocus(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello from sam")
+	f.receive(t)
+	f.key("esc") // compose -> channel list: the rail has focus
+	selectedRow := func() string {
+		for _, l := range strings.Split(f.m.renderRails(), "\n") {
+			if strings.Contains(l, markSel) {
+				return l
+			}
+		}
+		return ""
+	}
+	if row := selectedRow(); !strings.Contains(row, "44m") || strings.Contains(row, "100m") {
+		t.Fatalf("focused rail row must use selection: %q", row)
+	}
+	f.key("tab") // stream
+	if f.m.pane() != paneStream {
+		t.Fatalf("pane = %v, want stream", f.m.pane())
+	}
+	if row := selectedRow(); !strings.Contains(row, "100m") || strings.Contains(row, "44m") {
+		t.Fatalf("unfocused rail row must use selection_inactive: %q", row)
+	}
+	if first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]; !strings.Contains(first, "44m") {
+		t.Fatalf("stream cursor keeps selection: %q", first)
+	}
+	f.key("home")
+	f.toSessions()
+	if f.m.pane() != paneSessions {
+		t.Fatalf("pane = %v, want sessions", f.m.pane())
+	}
+	if row := selectedRow(); !strings.Contains(row, "44m") {
+		t.Fatalf("focused session row must use selection: %q", row)
+	}
+	f.key("tab")
+	if row := selectedRow(); !strings.Contains(row, "100m") || strings.Contains(row, "44m") {
+		t.Fatalf("unfocused session row must use selection_inactive: %q", row)
 	}
 }
 

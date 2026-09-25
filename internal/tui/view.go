@@ -275,6 +275,10 @@ func (m Model) renderRails() string {
 	dim := th.Style(th.Dim)
 	rail := m.railWidth()
 	trunc := lipgloss.NewStyle().MaxWidth(rail)
+	// Focus as pane() reports it: a rail row selected while the stream or
+	// compose has focus takes the inactive selection color, so the one blue
+	// row on screen is the one the arrow keys move.
+	focus := m.pane()
 	var l strings.Builder
 	l.WriteString(dim.Render("channels") + "\n")
 	// tagsShown tracks whether the "tags" section header has been written
@@ -308,7 +312,7 @@ func (m Model) renderRails() string {
 		// While a session is selected, the channel list draws no highlighted
 		// row; the sessions list below highlights instead.
 		if m.sessSel < 0 && i == m.sel {
-			line = th.Highlight(markSel+line, rail)
+			line = th.Highlight(th.SelBG(focus == paneChannels), markSel+line, rail)
 		} else {
 			line = " " + line
 		}
@@ -342,7 +346,7 @@ func (m Model) renderRails() string {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
 		}
 		if i == m.sessSel {
-			row = th.Highlight(markSel+row, rail)
+			row = th.Highlight(th.SelBG(focus == paneSessions), markSel+row, rail)
 		} else {
 			row = " " + row
 		}
@@ -480,7 +484,7 @@ func (m *Model) renderStream() string {
 		line = lipgloss.NewStyle().Width(w - pw).Render(line)
 		line = prefix + strings.ReplaceAll(line, "\n", "\n"+strings.Repeat(" ", pw))
 		if selected {
-			line = th.Highlight(line, w)
+			line = th.Highlight(th.Sel, line, w)
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum

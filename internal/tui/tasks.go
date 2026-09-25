@@ -147,7 +147,7 @@ func (m *Model) renderTasks(ch string) string {
 		pw := lipgloss.Width(prefix)
 		line := prefix + body
 		if selected {
-			line = th.Highlight(lipgloss.NewStyle().MaxWidth(w).Render(line), w)
+			line = th.Highlight(th.Sel, lipgloss.NewStyle().MaxWidth(w).Render(line), w)
 		} else {
 			line = lipgloss.NewStyle().MaxWidth(w).Render(line)
 		}

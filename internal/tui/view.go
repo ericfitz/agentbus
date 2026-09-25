@@ -321,7 +321,7 @@ func (m Model) renderRails() string {
 		// While a session is selected, the channel list draws no highlighted
 		// row; the sessions list below highlights instead.
 		if m.sessSel < 0 && i == m.sel {
-			line = th.Highlight(th.SelBG(focus == paneChannels), markSel+line, rail)
+			line = th.RailSel(focus == paneChannels, markSel+line, rail)
 		} else {
 			line = " " + line
 		}
@@ -355,7 +355,7 @@ func (m Model) renderRails() string {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
 		}
 		if i == m.sessSel {
-			row = th.Highlight(th.SelBG(focus == paneSessions), markSel+row, rail)
+			row = th.RailSel(focus == paneSessions, markSel+row, rail)
 		} else {
 			row = " " + row
 		}

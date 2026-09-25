@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/config"
 )
 
@@ -17,7 +18,7 @@ import (
 // terminal default are representable in v1, on purpose (see
 // config.ColorIndex).
 type Theme struct {
-	BG, Text, Dim, Stamp, Tag, Agent, User, Mem, Tasks, Health, Warn, Error, Sel, SelInactive, Unsaved lipgloss.TerminalColor
+	BG, Text, Dim, Stamp, Tag, Agent, User, Mem, Tasks, Health, Warn, Error, Sel, SelInactive, SelText, Unsaved lipgloss.TerminalColor
 	// Name is the config theme applied and Sources the resolved value per
 	// color key ("cyan", "default", ...), for the Health overlay.
 	Name    string
@@ -100,6 +101,8 @@ func (t *Theme) set(key string, c lipgloss.TerminalColor) {
 		t.Sel = c
 	case "selection_inactive":
 		t.SelInactive = c
+	case "selection_text":
+		t.SelText = c
 	case "unsaved":
 		t.Unsaved = c
 	}
@@ -130,4 +133,17 @@ func (t Theme) SelBG(focused bool) lipgloss.TerminalColor {
 		return t.Sel
 	}
 	return t.SelInactive
+}
+
+// RailSel renders a rail's selected row (channel or session). While its
+// pane has focus, the row's per-segment colors (cyan agent names, magenta
+// memory, yellow tasks) are unreadable on the Sel background, so the text
+// is stripped to plain and recolored in SelText before the background is
+// applied; glyphs and content are unchanged, only color. Without focus the
+// row keeps its original colors on SelInactive.
+func (t Theme) RailSel(focused bool, line string, width int) string {
+	if focused {
+		line = t.Style(t.SelText).Render(ansi.Strip(line))
+	}
+	return t.Highlight(t.SelBG(focused), line, width)
 }

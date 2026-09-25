@@ -13,7 +13,7 @@ import (
 func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
-	f.m.height = 68 // tall enough that the whole body (plus #15's version line and #17's icons line) fits without scrolling
+	f.m.height = 69 // tall enough that the whole body (plus #15's version line, #17's icons line, and the selection_text theme key) fits without scrolling
 	f.key("esc")
 	f.key("h")
 	if f.m.mode != modeHealth {

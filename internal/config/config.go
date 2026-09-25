@@ -98,12 +98,13 @@ type Theme struct {
 	Error             string `json:"error"`
 	Selection         string `json:"selection"`
 	SelectionInactive string `json:"selection_inactive"`
+	SelectionText     string `json:"selection_text"`
 	Unsaved           string `json:"unsaved"`
 }
 
 // DefaultTheme is the built-in "default" theme and the per-value fallback.
 func DefaultTheme() Theme {
-	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue", SelectionInactive: "brightblack", Unsaved: "yellow"}
+	return Theme{Name: "default", Background: "default", Text: "default", Dim: "brightblack", Timestamp: "brightblack", Tag: "brightblack", Agent: "cyan", User: "yellow", Memory: "magenta", Tasks: "yellow", Health: "green", Warn: "yellow", Error: "red", Selection: "blue", SelectionInactive: "brightblack", SelectionText: "black", Unsaved: "yellow"}
 }
 
 // Colors lists the theme's values as (key, value) pairs in a fixed order,
@@ -124,6 +125,7 @@ func (t Theme) Colors() [][2]string {
 		{"error", t.Error},
 		{"selection", t.Selection},
 		{"selection_inactive", t.SelectionInactive},
+		{"selection_text", t.SelectionText},
 		{"unsaved", t.Unsaved},
 	}
 }

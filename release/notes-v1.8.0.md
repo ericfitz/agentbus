@@ -50,8 +50,10 @@
 - The rail's selected channel or session row uses the new theme key
   `selection_inactive` (default `brightblack`) while the messages or
   compose pane has focus, so only the focused pane's row is `selection`
-  blue. New theme key `unsaved` (default `yellow`) colors a drafted task
-  row.
+  blue. While focused, the row's text uses the new theme key
+  `selection_text` (default `black`) instead of its per-segment colors, so
+  it stays readable on `selection` blue. New theme key `unsaved` (default
+  `yellow`) colors a drafted task row.
 - The `nerdfont` icon set's completed task glyph is U+F14A
   (`fa-square-check`), the same size as the pending and in-progress ones.
 

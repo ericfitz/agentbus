@@ -29,6 +29,21 @@ func TestThemeSelectionInactiveAndUnsavedKeys(t *testing.T) {
 	}
 }
 
+// TestThemeSelectionTextKey: selection_text defaults to black and overrides
+// like any other key, and reaches the Health overlay's Sources.
+func TestThemeSelectionTextKey(t *testing.T) {
+	cfg := config.Default()
+	th := LoadTheme(cfg, io.Discard)
+	if th.SelText != lipgloss.Color("0") {
+		t.Fatalf("default: selection_text=%v", th.SelText)
+	}
+	cfg.Themes[0].SelectionText = "white"
+	th = LoadTheme(cfg, io.Discard)
+	if th.SelText != lipgloss.Color("7") || th.Sources["selection_text"] != "white" {
+		t.Fatalf("override: %+v", th)
+	}
+}
+
 func TestParseColorAcceptsNamesIndicesAndDefault(t *testing.T) {
 	cases := map[string]lipgloss.TerminalColor{
 		"cyan":        lipgloss.Color("6"),

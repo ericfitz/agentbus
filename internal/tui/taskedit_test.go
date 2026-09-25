@@ -332,3 +332,29 @@ func TestSecondDraftSurvivesTheFirstSavesOwnRevision(t *testing.T) {
 		t.Fatalf("the save's own revision must not discard the draft it enabled: %+v", f.m.draft)
 	}
 }
+
+// TestSpaceRefusesAStaleRow: Sam claims the row's task on the bus after the
+// tree loaded, but that change's batch is never delivered to the TUI, so
+// the row still shows it unassigned and pending. Space's synchronous
+// TaskGet (starting a new draft) sees Sam's claim and must refuse to draft
+// from a row that stale: no draft, an error toast, and a reload so the row
+// catches up.
+func TestSpaceRefusesAStaleRow(t *testing.T) {
+	f := newFixture(t)
+	a := f.openTasks(t, "a")[0]
+	if _, err := f.ab.TaskClaim(f.sam, a.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	f.key(" ") // no receive(): the tree still shows a unassigned and pending
+
+	if f.m.draft.id != 0 {
+		t.Fatalf("a stale row must not draft: %+v", f.m.draft)
+	}
+	if f.m.toast != staleTaskToast || f.m.toastHint {
+		t.Fatalf("toast = %q hint=%v, want the stale-row error toast", f.m.toast, f.m.toastHint)
+	}
+	if got, ok := f.m.cursorTask(); !ok || got.Owner != f.sam || got.Status != "in_progress" {
+		t.Fatalf("the reload must show the row's real state: %+v", got)
+	}
+}

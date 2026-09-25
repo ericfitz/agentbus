@@ -48,6 +48,7 @@ const (
 	draftHintToast       = "enter saves · esc cancels"
 	draftDiscardedToast  = "change discarded"
 	unassignRefusedToast = "only a not-started task can be unassigned"
+	staleTaskToast       = "task changed; reloading"
 )
 
 // ownedToast is the refusal for a task some other identity owns: the bus
@@ -81,7 +82,9 @@ func (m *Model) shownTask(ch string, t bus.TaskSummary) (shown bus.TaskSummary, 
 // draft that lands back on the saved status and owner is dropped. Starting
 // a new draft (the cursor task is not the one already drafted) fetches the
 // task synchronously to pin the revision it was built on -- onBatch's
-// discriminator for a stale discard (ADR 0011 decision 2).
+// discriminator for a stale discard (ADR 0011 decision 2). If that fetch
+// shows a status or owner the row hadn't caught up to yet, the row is
+// stale: no draft starts, an error toast says so, and the tree reloads.
 func (m *Model) cycleTaskState() tea.Cmd {
 	t, ok := m.cursorTask()
 	if !ok {
@@ -108,6 +111,9 @@ func (m *Model) cycleTaskState() tea.Cmd {
 		got, err := m.c.b.TaskGet(m.c.as, t.ID)
 		if err != nil {
 			return m.showToast("task: " + errText(err))
+		}
+		if got.Status != t.Status || got.Owner != t.Owner {
+			return tea.Batch(m.showToast(staleTaskToast), m.loadTasks(ch))
 		}
 		d.rev = got.Revision
 	}

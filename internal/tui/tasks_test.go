@@ -244,6 +244,36 @@ func TestTasksMsgClampsCursorWhenTaskDeleted(t *testing.T) {
 	}
 }
 
+// TestTasksMsgResetsCursorWhenListGoesEmpty: if the selected channel's tree
+// comes back empty (e.g. its last task is deleted), the cursor must reset to
+// -1, not sit on a stale index -- otherwise pane() (cursor >= 0) reports the
+// stream focused on a pane with nothing in it.
+func TestTasksMsgResetsCursorWhenListGoesEmpty(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	f.key("tab") // cursor lands on the only task
+	if f.m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", f.m.cursor)
+	}
+
+	f.send(tasksMsg{ch: "tasks/work", tasks: nil})
+
+	if f.m.cursor != -1 {
+		t.Fatalf("cursor = %d, want -1 on an empty list", f.m.cursor)
+	}
+	if f.m.pane() == paneStream {
+		t.Fatalf("pane() must not report the stream on an empty list, got %v", f.m.pane())
+	}
+}
+
 // taskTree creates the tree the cursor/expand tests share: "a" (a
 // description and metadata, so it has details), "a1" (a's child, bare, no
 // details), and "b" (blocked by a1, so it has details too).

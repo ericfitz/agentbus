@@ -77,7 +77,7 @@ type Model struct {
 	loaded       map[string]bool
 	seen         map[string]int64
 	divider      int64
-	cursor       int             // index into rows(selName()), the visible display order; -1 for none
+	cursor       int             // index into rows(selName()), the visible display order (taskRows(selName()) on a task channel); -1 for none
 	cursorLine   int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
 	expanded     map[int64]bool  // message seq -> its direct replies are shown
 	peek         map[int64]int64 // thread root seq -> the one reply shown while collapsed
@@ -209,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded[msg.channel] = true
 		// A prepend, or another inbox's page in a merged DM pane, shifts
 		// indices; keep the cursor on the same message. On a task channel
-		// m.cursor indexes m.tasks(selName()), not rows(selName()) -- tasksMsg
+		// m.cursor indexes taskRows(selName()), not rows(selName()) -- tasksMsg
 		// owns that cursor (see placeTaskCursor/pendingTaskCursorID), so it's
 		// left untouched here.
 		var cursorSeq int64
@@ -272,8 +272,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = i
 			}
 		}
-		if msg.ch == m.selName() && len(msg.tasks) > 0 {
-			m.cursor = min(m.cursor, m.paneLen(msg.ch)-1)
+		if msg.ch == m.selName() {
+			if len(msg.tasks) > 0 {
+				m.cursor = min(m.cursor, m.paneLen(msg.ch)-1)
+			} else {
+				m.cursor = -1
+			}
 		}
 		for _, t := range msg.tasks {
 			if m.taskOpen[t.ID] {
@@ -676,8 +680,8 @@ func (m *Model) paneLen(ch string) int {
 
 // moveCursor moves the normal-mode stream cursor and scrolls to keep it
 // visible (refreshStream renders the cursor row highlighted). paneLen bounds
-// it to the task count on a task channel (renderTasks draws one row per
-// task, not per raw revision in m.msgs) and the visible row count otherwise.
+// it to the visible task rows on a task channel (taskRows(ch), children
+// collapsed by default) and the visible row count otherwise.
 func (m *Model) moveCursor(d int) tea.Cmd {
 	n := m.paneLen(m.selName())
 	if n == 0 {
@@ -693,8 +697,8 @@ func (m *Model) moveCursor(d int) tea.Cmd {
 
 // placeCursor puts the normal-mode cursor on the message with seq (no-op if
 // it is not loaded) and scrolls just enough to bring it into view. On a task
-// channel the cursor indexes m.tasks[ch] (see renderTasks), not rows(ch), so
-// this resolves to the task-channel case instead.
+// channel the cursor indexes taskRows(ch), not rows(ch), so this resolves to
+// the task-channel case instead.
 func (m *Model) placeCursor(seq int64) {
 	ch := m.selName()
 	if bus.IsTaskChannel(ch) {
@@ -714,10 +718,11 @@ func (m *Model) placeCursor(seq int64) {
 // placeTaskCursor is placeCursor's task-channel case: seq is a raw
 // revision's seq (e.g. a search hit), resolved to its task via that
 // revision's MemoryID (m.msgs[ch] carries it; jumpTo adds the hit there
-// before calling placeCursor), then to that task's index in m.tasks[ch]. If
-// ch's tree hasn't loaded yet, the id is remembered in pendingTaskCursorID
-// for the tasksMsg that follows (every jump into a task channel triggers a
-// loadTasks) to place once it arrives.
+// before calling placeCursor), then to that task's row index in
+// taskRows(ch) (revealTask expands any collapsed ancestors first so the
+// row is shown). If ch's tree hasn't loaded yet, the id is remembered in
+// pendingTaskCursorID for the tasksMsg that follows (every jump into a
+// task channel triggers a loadTasks) to place once it arrives.
 func (m *Model) placeTaskCursor(ch string, seq int64) {
 	var id int64
 	for _, x := range m.msgs[ch] {

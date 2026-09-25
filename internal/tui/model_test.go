@@ -106,9 +106,9 @@ func (f *fixture) key(k string) {
 		f.send(tea.KeyMsg{Type: tea.KeyEnter})
 	case " ":
 		// Runes carries the literal space so a textarea's default keybinding
-		// (insert whatever Runes holds) types it; normal-mode " " (toggle
-		// expand) matches on the key's Type/String, not Runes, so this is
-		// safe there too.
+		// (insert whatever Runes holds) types it; normal-mode " " (cycle a
+		// task's state) matches on the key's Type/String, not Runes, so this
+		// is safe there too.
 		f.send(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
 	case "esc":
 		f.send(tea.KeyMsg{Type: tea.KeyEsc})

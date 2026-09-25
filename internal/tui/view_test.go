@@ -233,6 +233,35 @@ func TestRailSelectionUsesInactiveColorWithoutFocus(t *testing.T) {
 	}
 }
 
+// TestRailSelectionTextColorOnFocus: a focused rail's selected row renders
+// its whole text in selection_text (black, 30m), replacing the per-segment
+// colors (cyan agent fg, 36m); an unfocused selection keeps the original
+// colors.
+func TestRailSelectionTextColorOnFocus(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello from sam")
+	f.receive(t)
+	f.key("esc") // compose -> channel list: the rail has focus
+	selectedRow := func() string {
+		for _, l := range strings.Split(f.m.renderRails(), "\n") {
+			if strings.Contains(l, markSel) {
+				return l
+			}
+		}
+		return ""
+	}
+	if row := selectedRow(); !strings.Contains(row, "30m") || strings.Contains(row, "36m") {
+		t.Fatalf("focused rail row must use selection_text, not the agent color: %q", row)
+	}
+	f.key("tab") // stream: rail loses focus
+	if row := selectedRow(); !strings.Contains(row, "36m") || strings.Contains(row, "30m") {
+		t.Fatalf("unfocused rail row must keep its original color: %q", row)
+	}
+}
+
 // TestReplyIndentAppliesToWrappedLines: a long reply wraps, and every
 // wrapped line keeps the reply's tree indentation, not just the first.
 func TestReplyIndentAppliesToWrappedLines(t *testing.T) {

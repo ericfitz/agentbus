@@ -302,6 +302,7 @@ before the TUI starts.
 | `error` | errors and the delete confirmation | `red` |
 | `selection` | selected row background (focused pane) | `blue` |
 | `selection_inactive` | selected rail row background while the messages or compose pane has focus | `brightblack` |
+| `selection_text` | text of the selected rail row while its pane has focus | `black` |
 | `unsaved` | a task row whose drafted state is not saved yet (`space` in a task list; `enter` saves) | `yellow` |
 
 On the selected message row, dim text (timestamp, thread summary) switches

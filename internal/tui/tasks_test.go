@@ -48,13 +48,21 @@ func TestTaskChannelRendersTree(t *testing.T) {
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
 
+	// Children start collapsed: a's row (▶, its child hidden), the hidden
+	// count, then b.
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], markSel+" "+taskPending+"#") || strings.TrimSpace(lines[1]) != "1 subtask" {
+		t.Fatalf("collapsed tree = %q", lines)
+	}
+	f.key("tab")   // cursor on b
+	f.key("up")    // a
+	f.key("right") // a has no details, so → shows its child
+	lines = strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	if len(lines) < 3 {
 		t.Fatalf("want at least 3 lines, got %d: %q", len(lines), lines)
 	}
-	// "a" is bare (no description/metadata/blockers): no triangle, so its row
-	// gets the two-space no-details mark in place of markSel/markOpen (#16).
-	if !strings.HasPrefix(lines[0], "  "+taskPending+"#") || !strings.Contains(lines[0], "a") {
+	// a's child is shown and nothing is hidden, so a carries ▼.
+	if !strings.HasPrefix(lines[0], markOpen+" "+taskPending+"#") || !strings.Contains(lines[0], "a") {
 		t.Fatalf("line0 = %q", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], "  "+"  "+taskInProgress+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
@@ -286,6 +294,10 @@ func TestTaskCursorMovesOverTasks(t *testing.T) {
 	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
 		t.Fatalf("expanding a moved the cursor: %+v", got)
 	}
+	f.key("right") // details are open: the second → shows a's child
+	if got, ok := f.m.cursorTask(); !ok || got.ID != a.ID {
+		t.Fatalf("showing a's children moved the cursor: %+v", got)
+	}
 	f.key("down")
 	if got, ok := f.m.cursorTask(); !ok || got.ID != a1.ID {
 		t.Fatalf("down from a = %+v, want a1", got)
@@ -308,8 +320,8 @@ func TestTaskExpandCollapse(t *testing.T) {
 	if !strings.HasPrefix(lines[0], markSel+" ") {
 		t.Fatalf("a should show %q: %q", markSel, lines[0])
 	}
-	if strings.HasPrefix(lines[1], markSel+" ") || strings.Contains(lines[1], markSel) {
-		t.Fatalf("a1 (no details) should show no triangle: %q", lines[1])
+	if strings.TrimSpace(lines[1]) != "1 subtask" {
+		t.Fatalf("a1 is hidden; a's summary line follows a: %q", lines[1])
 	}
 	if !strings.HasPrefix(lines[2], markSel+" ") {
 		t.Fatalf("b (has a blocker) should show %q: %q", markSel, lines[2])
@@ -323,8 +335,8 @@ func TestTaskExpandCollapse(t *testing.T) {
 	}
 	f.run(cmd)
 	expanded := ansi.Strip(f.m.renderStream())
-	if !strings.Contains(expanded, ansi.Strip(markOpen)) {
-		t.Fatalf("a should show %q once expanded:\n%s", markOpen, expanded)
+	if lines := strings.Split(expanded, "\n"); !strings.HasPrefix(lines[0], markSel+" ") {
+		t.Fatalf("a keeps %q while its child is hidden, even with details open: %q", markSel, lines[0])
 	}
 	if !strings.Contains(expanded, "desc a") {
 		t.Fatalf("expanded block should show the description:\n%s", expanded)
@@ -342,7 +354,12 @@ func TestTaskExpandCollapse(t *testing.T) {
 		t.Fatalf("left should hide the block again:\n%s", collapsed)
 	}
 
-	f.key("down") // cursor on a1, no details
+	f.key("right") // details again
+	f.key("right") // then a's child
+	f.key("down")  // cursor on a1, no details
+	if got, ok := f.m.cursorTask(); !ok || got.Subject != "a1" {
+		t.Fatalf("cursor = %+v, want a1", got)
+	}
 	if cmd := f.m.expandTask(); cmd != nil {
 		t.Fatal("right on a task with no details should do nothing")
 	}
@@ -357,6 +374,7 @@ func TestTaskExpansionSurvivesRevision(t *testing.T) {
 	f.key("up")
 	f.key("up") // cursor on a
 	f.run(f.m.expandTask())
+	f.key("right") // and a's child, so nothing is hidden and a shows ▼
 
 	desc2 := "desc a2"
 	if _, err := f.ab.TaskUpdate(f.sam, bus.TaskPatch{ID: a.ID, Description: &desc2}); err != nil {
@@ -417,6 +435,8 @@ func TestTaskIndentIsCapped(t *testing.T) {
 	}
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
+	f.m.revealTask("tasks/work", parent) // the deepest task: every ancestor's children shown
+	f.m.refreshStream()
 
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	deepest := lines[len(lines)-1]

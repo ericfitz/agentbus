@@ -64,23 +64,24 @@ type Model struct {
 	height int
 	mode   mode
 
-	channels   []bus.Channel
-	dms        []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
-	sel        int
-	sessSel    int // index into sessionNames(); -1 unless the sessions pane is the selection source
-	msgs       map[string][]bus.Message
-	tasks      map[string][]bus.TaskSummary // task channel name -> its current tree
-	taskOpen   map[int64]bool               // task id -> its detail block is expanded
-	taskDetail map[int64]bus.Task           // task id -> its full task_get result, once loaded
-	gaps       map[string][]bus.Gap
-	loaded     map[string]bool
-	seen       map[string]int64
-	divider    int64
-	cursor     int             // index into rows(selName()), the visible display order; -1 for none
-	cursorLine int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
-	expanded   map[int64]bool  // message seq -> its direct replies are shown
-	peek       map[int64]int64 // thread root seq -> the one reply shown while collapsed
-	bodyOpen   map[int64]bool  // message seq -> its body (subject line and full content) is shown
+	channels     []bus.Channel
+	dms          []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
+	sel          int
+	sessSel      int // index into sessionNames(); -1 unless the sessions pane is the selection source
+	msgs         map[string][]bus.Message
+	tasks        map[string][]bus.TaskSummary // task channel name -> its current tree
+	taskOpen     map[int64]bool               // task id -> its detail block is expanded
+	taskExpanded map[int64]bool               // task id -> its direct children are shown (children start collapsed)
+	taskDetail   map[int64]bus.Task           // task id -> its full task_get result, once loaded
+	gaps         map[string][]bus.Gap
+	loaded       map[string]bool
+	seen         map[string]int64
+	divider      int64
+	cursor       int             // index into rows(selName()), the visible display order; -1 for none
+	cursorLine   int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
+	expanded     map[int64]bool  // message seq -> its direct replies are shown
+	peek         map[int64]int64 // thread root seq -> the one reply shown while collapsed
+	bodyOpen     map[int64]bool  // message seq -> its body (subject line and full content) is shown
 
 	// pendingTaskCursorCh/ID: a task_get/task_list jump target picked by
 	// placeCursor before ch's tree had loaded, e.g. a search jump into a
@@ -140,6 +141,7 @@ func New(c *client, th Theme) Model {
 		msgs:         map[string][]bus.Message{},
 		tasks:        map[string][]bus.TaskSummary{},
 		taskOpen:     map[int64]bool{},
+		taskExpanded: map[int64]bool{},
 		taskDetail:   map[int64]bus.Task{},
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
@@ -250,8 +252,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cursorID int64
 		if msg.ch == m.selName() {
-			if ts := m.tasks[msg.ch]; m.cursor >= 0 && m.cursor < len(ts) {
-				cursorID = ts[m.cursor].ID
+			if t, ok := m.cursorTask(); ok {
+				cursorID = t.ID
 			}
 		}
 		if msg.ch == m.pendingTaskCursorCh {
@@ -262,14 +264,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.tasks[msg.ch] = msg.tasks
 		if cursorID != 0 {
-			for i, t := range msg.tasks {
-				if t.ID == cursorID {
-					m.cursor = i
-				}
+			// A pending jump target may sit under collapsed parents.
+			m.revealTask(msg.ch, cursorID)
+			if i := m.taskIndex(msg.ch, cursorID); i >= 0 {
+				m.cursor = i
 			}
 		}
 		if msg.ch == m.selName() && len(msg.tasks) > 0 {
-			m.cursor = min(m.cursor, len(msg.tasks)-1)
+			m.cursor = min(m.cursor, m.paneLen(msg.ch)-1)
 		}
 		for _, t := range msg.tasks {
 			if m.taskOpen[t.ID] {
@@ -433,7 +435,8 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	// rail: down past the last channel enters the sessions, up from the first
 	// session returns to the last channel. right opens the cursor message's
 	// body, then its direct replies; left hides its whole subtree, then its
-	// body.
+	// body. In a task list right opens the task's details, then its
+	// children; left hides its children (whole subtree), then its details.
 	case "down":
 		switch m.pane() {
 		case paneStream:
@@ -460,12 +463,12 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		}
 	case "right":
 		if bus.IsTaskChannel(m.selName()) {
-			return m.expandTask()
+			return m.openTask()
 		}
 		m.openCursor()
 	case "left":
 		if bus.IsTaskChannel(m.selName()) {
-			m.collapseTask()
+			m.closeTask()
 		} else {
 			m.closeCursor()
 		}
@@ -631,13 +634,13 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	return m.showSelected()
 }
 
-// paneLen is the stream pane's cursor bound for ch: the task count for a
-// task channel (renderTasks draws one row per task, not per raw revision in
-// m.msgs, which has no cursor of its own), else the row count rows(ch)
-// shows (fewer than paneMsgs(ch) when a thread's replies are collapsed).
+// paneLen is the stream pane's cursor bound for ch: the visible task rows
+// of a task channel (renderTasks draws one row per shown task, not per raw
+// revision in m.msgs), else the row count rows(ch) shows (fewer than
+// paneMsgs(ch) when a thread's replies are collapsed).
 func (m *Model) paneLen(ch string) int {
 	if bus.IsTaskChannel(ch) {
-		return len(m.tasks[ch])
+		return len(m.taskRows(ch))
 	}
 	return len(m.rows(ch))
 }
@@ -696,11 +699,8 @@ func (m *Model) placeTaskCursor(ch string, seq int64) {
 	}
 	m.cursor = -1
 	if id != 0 {
-		for i, t := range m.tasks[ch] {
-			if t.ID == id {
-				m.cursor = i
-			}
-		}
+		m.revealTask(ch, id)
+		m.cursor = m.taskIndex(ch, id)
 	}
 	if m.cursor < 0 && id != 0 {
 		m.pendingTaskCursorCh, m.pendingTaskCursorID = ch, id

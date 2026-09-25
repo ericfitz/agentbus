@@ -55,7 +55,7 @@ func (m Model) helpLines() []string {
 		{"↑", "recall the last sent message"},
 		{"ctrl+u", "clear"},
 		{"", ""},
-		{"(task lists)", "tasks/ channels show the task tree; read-only"},
+		{"(task lists)", "tasks/ channels show the task tree: → opens a task's details, then its subtasks; ← hides its subtasks, then its details; read-only"},
 		{"(tags)", "the tags rail section shows chat messages carrying every tag of a set; read-only"},
 	}
 	key, dim := m.theme.Style(m.theme.Agent), m.theme.Style(m.theme.Dim)

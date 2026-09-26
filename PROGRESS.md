@@ -534,3 +534,12 @@ v1.8.0. Notes: `release/notes-v1.8.0.md`.
 - **v1.8.0 released** (tag v1.8.0): after upgrading, `agentbus init
   --global`, and restart every harness session and the TUI together
   (schema v6; 1.7.x refuses a v6 bus).
+
+## 2026-09-26: TUI tag panes include DMs and memories (v1.8.1)
+
+- A TUI tag pane drew only from chat channels, so a tag used only on
+  `dm/*` and `memory/*` (e.g. `aws`) showed nothing. It now merges chat,
+  memory, and DM channels (`tagPaneSources` in `internal/tui/tags.go`);
+  task lists stay excluded. Agent-side tag delivery is unchanged. ADR 0009
+  amendment 2026-09-26 (human decision).
+- **v1.8.1 released** (tag v1.8.1): no schema change; restart the TUI.

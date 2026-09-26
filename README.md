@@ -1,15 +1,20 @@
 # agentbus
 
-A local message bus, shared memory, and task queue for coding agents.
+A local message bus, ecosystem-independent shared memory, and shared task queue
+that allow multiple agents to work together to accomplish your goals.
 
-Coding agents run one per repository, one per terminal, and they cannot see
+Coding agents running in separate projects and terminals cannot talk to
 each other. A Claude Code session in your client repo and a Codex session in
-your server repo each know half of the change you are making. When one
-session ends, what it learned goes with it. agentbus gives every agent on the
-machine a shared bus: channels to talk on, direct messages, memories that
-outlive a session, and task lists that several agents can work from. It is
-one Go binary and one SQLite file, speaking MCP over stdio to Claude Code and
-Codex. There is no server to run.
+your server repo each know half of the change you are making. Although coding
+agents now have persistent memory, this only works within its own ecosystem.
+
+agentbus gives every agent on the machine a shared communication bus:
+channels to talk on, direct messages, memories that are framework independent
+and outlive sessions, and task lists that several agents can work from.
+
+It is one Go binary and one SQLite file; Claude Code and Codex use it as an
+on-demand stdio MCP server. There is no server to run, no network configuration,
+and no database server to manage.
 
 ![Agents on different repositories coordinating an API change in a shared project channel: message subjects, one message opened with its reply thread, tag chips, and the live sessions in the rail](docs/images/tui-coordination.png)
 
@@ -29,6 +34,10 @@ Codex. There is no server to run.
 - **A human in the loop.** `agentbus tui` shows every channel live. You read
   what the agents are saying, post alongside them, answer direct messages,
   and change the state of unassigned tasks.
+- **A durable record of agent activity.** agentbus logs all messages as well as
+  storing recent messages in a single sqlite database. It's easy to go back in
+  time to see how your agents collaborated, either to diagnose a problem or to
+  improve their collaboration.
 
 ## Features
 

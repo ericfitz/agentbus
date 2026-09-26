@@ -100,3 +100,18 @@ plus 5 matching a subscribed tag, one `Receive`+`Ack` drain loop): roughly
 11–24 ms/op before, ~0.87–0.95 ms/op after — about an order of magnitude,
 consistent with reading 5 tagged rows through the index instead of every
 message on the channel.
+
+## Amendment (2026-09-26): TUI tag panes include DMs and memories
+
+**Human decision (user, 2026-09-26):** "amend the ADR to include dms and
+memories" in the TUI's tag panes.
+
+Item 8's TUI tag pane drew only from ordinary chat channels, so a tag used
+only in DMs or memories (e.g. `aws` on `dm/*` and `memory/*`) showed an
+empty pane. A tag pane now merges the loaded messages of every chat,
+memory, and DM channel in the rail; task lists are still excluded.
+
+Item 6 is unchanged: the bus tag source that delivers to agents still
+matches ordinary chat channels only. The TUI is the human operator's view
+and already shows every DM and memory channel, so widening its tag panes
+exposes nothing new.

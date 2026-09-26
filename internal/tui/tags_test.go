@@ -40,11 +40,14 @@ func TestTagRailSectionListsSetsAndPaneShowsMatches(t *testing.T) {
 	if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: "dev-notes", Content: "memory", Tags: []string{"agentbus", "bug"}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: "dm/Sam", Content: "direct", Tags: []string{"agentbus", "bug"}}); err != nil {
+		t.Fatal(err)
+	}
 	f.receive(t)
 	f.selectTagPane(t, tagPanePrefix+"agentbus,bug")
 	s := ansi.Strip(f.m.renderStream())
-	if !strings.Contains(s, "match") || strings.Contains(s, "partial") || strings.Contains(s, "memory") {
-		t.Fatalf("tag pane shows chat messages carrying every tag:\n%s", s)
+	if !strings.Contains(s, "match") || strings.Contains(s, "partial") || !strings.Contains(s, "memory") || !strings.Contains(s, "direct") {
+		t.Fatalf("tag pane shows chat, memory, and DM messages carrying every tag:\n%s", s)
 	}
 	if !strings.Contains(s, "Sam"+iconArrow+iconChat+"dev") {
 		t.Fatalf("rows keep the #3 header:\n%s", s)

@@ -20,16 +20,29 @@ func isTagPane(ch string) bool { return strings.HasPrefix(ch, tagPanePrefix) }
 
 func tagPaneSet(ch string) []string { return strings.Split(strings.TrimPrefix(ch, tagPanePrefix), ",") }
 
-// tagPaneMsgs is the loaded messages of every chat channel in the rail
-// that carry all of the pane's tags, ascending by seq.
+// tagPaneSources is the channels a tag pane draws from: every chat,
+// memory, and DM channel in the rail (ADR 0009 amendment 2026-09-26);
+// never task lists or other tag panes.
+func (m *Model) tagPaneSources() []string {
+	var out []string
+	for _, c := range m.channels {
+		if c.Kind == "ordinary" || c.Kind == "memory" {
+			out = append(out, c.Name)
+		}
+	}
+	for _, d := range m.dms {
+		out = append(out, d.Name)
+	}
+	return out
+}
+
+// tagPaneMsgs is the loaded messages of every tagPaneSources channel that
+// carry all of the pane's tags, ascending by seq.
 func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 	set := tagPaneSet(ch)
 	var out []bus.Message
-	for _, c := range m.channels {
-		if c.Kind != "ordinary" {
-			continue
-		}
-		for _, x := range m.msgs[c.Name] {
+	for _, c := range m.tagPaneSources() {
+		for _, x := range m.msgs[c] {
 			all := true
 			for _, t := range set {
 				if !slices.Contains(x.Tags, t) {

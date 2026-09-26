@@ -941,12 +941,12 @@ func (m *Model) showSelected() tea.Cmd {
 			}
 		}
 	}
-	// A tag pane is drawn from the chat channels' loaded messages, so it
-	// needs their latest pages; one page per chat channel on first visit.
+	// A tag pane is drawn from its source channels' loaded messages, so it
+	// needs their latest pages; one page per source channel on first visit.
 	if isTagPane(ch) {
-		for _, c := range m.channels {
-			if c.Kind == "ordinary" && !m.loaded[c.Name] {
-				cmds = append(cmds, m.loadHistory(c.Name, nil))
+		for _, c := range m.tagPaneSources() {
+			if !m.loaded[c] {
+				cmds = append(cmds, m.loadHistory(c, nil))
 			}
 		}
 	}
@@ -1109,7 +1109,7 @@ func (m *Model) setChannels(chans []bus.Channel, tags [][]string, from string) t
 	m.channels = channels
 	// Tag sets are rail entries too (a "tags" section under the channels):
 	// synthetic, never subscribed on the bus, drawn as chips, rendered from
-	// the messages already loaded for the chat channels.
+	// the messages already loaded for chat, memory, and DM channels.
 	for _, set := range tags {
 		m.channels = append(m.channels, bus.Channel{Name: tagPanePrefix + strings.Join(set, ","), Kind: "tags"})
 	}

@@ -47,6 +47,10 @@ model asks.
   lets the agent stop; the command always exits 0.
 - The reason names the count and channels, never message content (direct
   messages stay out of hook logs).
+- The hook checks the identity `agentbus identity` would print for the
+  working directory. A second session in the same repository registered
+  under a suffixed name is checked as the first identity, the same
+  limitation `agentbus wait` without `-as` has.
 - On a machine with Claude Code configured, Grok also runs the hooks in
   `~/.claude/settings.json`, so a Grok session may see the reason twice.
   Harmless; not worked around.

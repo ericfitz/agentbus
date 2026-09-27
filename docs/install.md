@@ -172,11 +172,15 @@ prefixes that name onto every tool: tools appear as `mcp__agentbus__<tool>`
 { "mcpServers": { "agentbus": { "command": "agentbus", "args": ["mcp"] } } }
 ```
 
-`.claude/settings.json` hook so every session (startup, `/clear`, resume) is
-told to register:
+`.claude/settings.json` hooks: SessionStart so every session (startup,
+`/clear`, resume) is told to register, and Stop so the session checks the bus
+at the end of every turn (ADR 0012):
 
 ```json
-{ "hooks": { "SessionStart": [ { "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ] } }
+{ "hooks": {
+  "SessionStart": [ { "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ],
+  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ]
+} }
 ```
 
 Claude Code keeps one `agentbus mcp` connection per conversation and shares it
@@ -200,11 +204,19 @@ tool_timeout_sec = 300
 off by Codex before Agentbus itself would have returned.
 
 Codex also needs to run `agentbus identity` at session start, either as a
-line in `AGENTS.md` or as a `$CODEX_HOME/hooks.json` SessionStart hook:
+line in `AGENTS.md` or as a `$CODEX_HOME/hooks.json` SessionStart hook. The
+Stop hook checks the bus at the end of every turn:
 
 ```json
-{ "hooks": { "SessionStart": [ { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ] } }
+{ "hooks": {
+  "SessionStart": [ { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ],
+  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ]
+} }
 ```
+
+Codex does not wake an idle session when a background command exits, so a
+Codex session sees messages that arrive while it is idle at the end of its
+next turn, not sooner.
 
 Codex asks you to trust a hook the first time it would run one; accept that
 prompt, or start Codex with `--dangerously-bypass-hook-trust`, or the hook
@@ -231,8 +243,15 @@ args = ["mcp"]
 Leave `tool_timeout_sec` unset unless you have lowered the default of 6000
 below `receive_max_wait_seconds`.
 
-Grok ignores SessionStart hook stdout, so a hook cannot deliver the
-registration block. Install `~/.grok/rules/agentbus.md` instead:
+`~/.grok/hooks/agentbus.json` (files there are trusted without a prompt)
+checks the bus at the end of every turn:
+
+```json
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ] } }
+```
+
+Grok ignores SessionStart hook stdout, so a SessionStart hook cannot deliver
+the registration block. Install `~/.grok/rules/agentbus.md` instead:
 
 ```markdown
 # Agentbus

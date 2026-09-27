@@ -558,3 +558,12 @@ Pushed to `main` (`feat/grokbuild`):
 - Repo `agentbus init` treats an `agentbus` entry in `~/.grok/config.toml`
   as the MCP server being configured.
 - After upgrading: `agentbus init --global`, then restart Grok. No schema change.
+
+## 2026-09-27: Grok init drops the SessionStart hook
+
+Pushed to `main` (`fix/grok-no-hook`):
+
+- Review of the Grok Build init found that Grok ignores SessionStart hook
+  stdout, so `~/.grok/hooks/agentbus.json` did nothing. `init --global` no
+  longer writes it; the user rule `~/.grok/rules/agentbus.md` carries the
+  instruction. The hook never shipped in a release, so nothing to clean up.

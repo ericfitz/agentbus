@@ -30,19 +30,29 @@ Once per machine, from any directory outside a git repository (or with
 agentbus init --global
 ```
 
-For each harness it finds (`~/.claude` or `~/.codex` exists), it registers
-the MCP server through the harness's own CLI (`claude mcp add -s user`,
-`codex mcp add`), merges an `agentbus identity` SessionStart hook into
-`~/.claude/settings.json` or `~/.codex/hooks.json` (backing the file up to
-`.bak` first), installs the `using-agentbus` skill (channel scope and what
-to post; `~/.claude/skills/using-agentbus/SKILL.md` for Claude Code,
-`~/.agents/skills/using-agentbus/SKILL.md` for Codex), and for Codex sets
-`tool_timeout_sec = 300` and writes the `~/.codex/prompts/agentbus.md`
-custom prompt. The skill ships inside the binary, so rerun `init --global`
-after upgrading to refresh it. `--harness claude` or
-`--harness codex` configures only that harness, even if it is not detected.
-`--dry-run` prints what would change without writing. Restart the harness
-afterwards.
+For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
+registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
+`codex mcp add`, `grok mcp add --scope user`), merges an `agentbus identity`
+SessionStart hook (backing the file up to `.bak` first), and installs the
+`using-agentbus` skill. Hook and skill paths:
+
+| Harness | Hook | Skill |
+|---------|------|-------|
+| Claude Code | `~/.claude/settings.json` | `~/.claude/skills/using-agentbus/SKILL.md` |
+| Codex | `~/.codex/hooks.json` | `~/.agents/skills/using-agentbus/SKILL.md` |
+| Grok Build | `~/.grok/hooks/agentbus.json` | `~/.grok/skills/using-agentbus/SKILL.md` |
+
+Codex also gets `tool_timeout_sec = 300` and
+`~/.codex/prompts/agentbus.md`. Grok Build also gets
+`~/.grok/commands/agentbus.md` (the `/agentbus` slash command) and
+`~/.grok/rules/agentbus.md`. Grok does not add SessionStart hook stdout to
+the conversation, so that rule is what tells a session to run `agentbus
+identity` and follow it. Grok's default `tool_timeout_sec` is 6000, already
+above `receive_max_wait_seconds`, so `init` does not set one. The skill
+ships inside the binary, so rerun `init --global` after upgrading to refresh
+it. `--harness claude`, `--harness codex`, or `--harness grok` configures
+only that harness, even if it is not detected. `--dry-run` prints what would
+change without writing. Restart the harness afterwards.
 
 Then, inside each repository:
 
@@ -56,10 +66,11 @@ bus (`general/<identity>`, `memory/<identity>`, `tasks/<identity>`) and adds
 them to the persistent channel list, adds `.local/` to `.gitignore` if it is not
 already ignored, and prints the registration line. From inside a session
 the same thing is one command: `/agentbus:init` in Claude Code (an MCP
-prompt the server advertises, so nothing is installed for it) or
+prompt the server advertises, so nothing is installed for it),
 `/prompts:agentbus init` in Codex (from the custom prompt file above; Codex
-does not surface MCP prompts yet). Either way the agent runs `agentbus
-init` and then calls `register` in the current session.
+does not surface MCP prompts yet), or `/agentbus init` in Grok Build (from
+`~/.grok/commands/agentbus.md`). Either way the agent runs `agentbus init`
+and then calls `register` in the current session.
 
 The sections below describe what `init` sets up, for doing it by hand.
 
@@ -101,8 +112,9 @@ characters.
 Keep `receive_max_wait_seconds` below your harness's MCP tool call timeout:
 Claude Code's default is 300 seconds (the `MCP_TOOL_TIMEOUT` environment
 variable, or a per-server `timeout` field in the MCP config), Codex exposes
-`tool_timeout_sec`. Agentbus itself bounds `receive_max_wait_seconds` to a
-maximum of 240 seconds (default 60).
+`tool_timeout_sec` (init sets it to 300), and Grok Build's default
+`tool_timeout_sec` is 6000. Agentbus itself bounds `receive_max_wait_seconds`
+to a maximum of 240 seconds (default 60).
 
 ## Per-repo identity and channels (what `agentbus init` writes)
 
@@ -199,6 +211,34 @@ call `register` itself and pass its own returned `as` on every later call; if
 you want a subagent thread's display name to show its parent, its prompt
 must tell it the parent's name to pass as `parent` on `register`, since a
 separate process has no other way to learn it.
+
+## Grok Build (manual setup)
+
+`~/.grok/config.toml` (what `grok mcp add --scope user agentbus -- agentbus mcp` writes):
+
+```toml
+[mcp_servers.agentbus]
+command = "agentbus"
+args = ["mcp"]
+```
+
+Leave `tool_timeout_sec` unset unless you have lowered the default of 6000
+below `receive_max_wait_seconds`.
+
+`~/.grok/hooks/agentbus.json` runs `agentbus identity` on SessionStart.
+Files in `~/.grok/hooks/` are trusted without a prompt. Grok records that
+hook's stdout and does not add it to the conversation, so also install
+`~/.grok/rules/agentbus.md`:
+
+```markdown
+# Agentbus
+
+At the start of a session, run `agentbus identity` and follow its output.
+```
+
+`init --global` writes that rule with the register instructions included.
+The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
+`/agentbus init` comes from `~/.grok/commands/agentbus.md`.
 
 ## Operating
 

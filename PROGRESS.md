@@ -543,3 +543,18 @@ v1.8.0. Notes: `release/notes-v1.8.0.md`.
   task lists stay excluded. Agent-side tag delivery is unchanged. ADR 0009
   amendment 2026-09-26 (human decision).
 - **v1.8.1 released** (tag v1.8.1): no schema change; restart the TUI.
+
+## 2026-09-26: Grok Build init
+
+Pushed to `main` (`feat/grokbuild`):
+
+- `agentbus init --global` configures Grok Build when `~/.grok` exists, or
+  with `--harness grok`: user-scoped MCP server (`grok mcp add --scope user`),
+  SessionStart hook `~/.grok/hooks/agentbus.json`, skill
+  `~/.grok/skills/using-agentbus/SKILL.md`, `/agentbus` command, and user
+  rule `~/.grok/rules/agentbus.md`. Grok does not inject SessionStart stdout,
+  so the rule tells the session to run `agentbus identity`. Grok's default
+  `tool_timeout_sec` is 6000, so init does not set one.
+- Repo `agentbus init` treats an `agentbus` entry in `~/.grok/config.toml`
+  as the MCP server being configured.
+- After upgrading: `agentbus init --global`, then restart Grok. No schema change.

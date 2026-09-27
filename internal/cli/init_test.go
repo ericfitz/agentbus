@@ -72,10 +72,13 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	f := &fakeHarness{home: home}
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".grok", "hooks"), 0o755)
 	// Pre-existing settings with an unrelated hook must survive the merge.
 	settings := filepath.Join(home, ".claude", "settings.json")
 	_ = os.WriteFile(settings, []byte(`{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hi"}]}],"Stop":[]}}`), 0o644)
 	_ = os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644)
+	grokHooks := filepath.Join(home, ".grok", "hooks", "agentbus.json")
+	_ = os.WriteFile(grokHooks, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo grok"}]}]}}`), 0o644)
 
 	var out bytes.Buffer
 	if err := Init(initOpts(t, home, f), &out); err != nil {
@@ -86,6 +89,8 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 		"claude mcp add -s user agentbus -- agentbus mcp",
 		"codex mcp remove agentbus",
 		"codex mcp add agentbus -- agentbus mcp",
+		"grok mcp remove --scope user agentbus",
+		"grok mcp add --scope user agentbus -- agentbus mcp",
 	}
 	if strings.Join(f.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls:\n%s", strings.Join(f.calls, "\n"))
@@ -103,6 +108,9 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	if got := sessionStartCommands(readJSON(t, filepath.Join(home, ".codex", "hooks.json"))); len(got) != 1 || got[0] != "agentbus identity" {
 		t.Fatalf("codex hooks = %v", got)
 	}
+	if got := sessionStartCommands(readJSON(t, grokHooks)); len(got) != 2 || got[0] != "echo grok" || got[1] != "agentbus identity" {
+		t.Fatalf("grok hooks = %v", got)
+	}
 	toml, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if !strings.Contains(string(toml), "[mcp_servers.agentbus]\ntool_timeout_sec = 300\n") || !strings.HasPrefix(string(toml), "model = \"gpt-5\"") {
 		t.Fatalf("config.toml:\n%s", toml)
@@ -112,11 +120,19 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("codex prompt: %v\n%s", err, prompt)
 	}
 	// The using-agentbus skill lands in each harness's personal skills dir.
-	for _, p := range []string{".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
+	for _, p := range []string{".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/skills/using-agentbus/SKILL.md"} {
 		skill, err := os.ReadFile(filepath.Join(home, p))
 		if err != nil || !strings.HasPrefix(string(skill), "---\nname: using-agentbus\n") || !strings.Contains(string(skill), "memory/<repo>") || !strings.Contains(string(skill), "`subject`") {
 			t.Fatalf("skill %s: %v\n%s", p, err, skill)
 		}
+	}
+	command, err := os.ReadFile(filepath.Join(home, ".grok", "commands", "agentbus.md"))
+	if err != nil || !strings.Contains(string(command), "$ARGUMENTS") || !strings.Contains(string(command), "agentbus init") {
+		t.Fatalf("grok command: %v\n%s", err, command)
+	}
+	rule, err := os.ReadFile(filepath.Join(home, ".grok", "rules", "agentbus.md"))
+	if err != nil || !strings.Contains(string(rule), "agentbus identity") || !strings.Contains(string(rule), "using-agentbus") {
+		t.Fatalf("grok rule: %v\n%s", err, rule)
 	}
 
 	// Second run: hooks and timeout are not duplicated.
@@ -126,6 +142,9 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 	if got := sessionStartCommands(readJSON(t, settings)); len(got) != 2 {
 		t.Fatalf("hook duplicated on rerun: %v", got)
+	}
+	if got := sessionStartCommands(readJSON(t, grokHooks)); len(got) != 2 {
+		t.Fatalf("grok hook duplicated on rerun: %v", got)
 	}
 	toml, _ = os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if strings.Count(string(toml), "tool_timeout_sec") != 1 {
@@ -148,9 +167,12 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 		t.Fatal("codex configured without ~/.codex and without --harness codex")
 	}
 	for _, c := range f.calls {
-		if strings.HasPrefix(c, "codex") {
-			t.Fatal("codex CLI invoked:", c)
+		if strings.HasPrefix(c, "codex") || strings.HasPrefix(c, "grok") {
+			t.Fatal("unconfigured harness CLI invoked:", c)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok")); err == nil {
+		t.Fatal("grok configured without ~/.grok and without --harness grok")
 	}
 
 	// --harness codex forces it even without the directory, and skips claude.
@@ -168,6 +190,22 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 			t.Fatal("claude CLI invoked under --harness codex:", c)
 		}
 	}
+
+	// --harness grok forces it even without the directory, and skips the others.
+	f.calls = nil
+	out.Reset()
+	o.Harness = "grok"
+	if err := Init(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok", "rules", "agentbus.md")); err != nil {
+		t.Fatal("--harness grok did not write the user rule:", err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "claude") || strings.HasPrefix(c, "codex") {
+			t.Fatal("other harness CLI invoked under --harness grok:", c)
+		}
+	}
 	o.Harness = "vim"
 	if err := Init(o, &out); err == nil {
 		t.Fatal("bad --harness accepted")
@@ -177,6 +215,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
 	o.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
@@ -184,7 +223,7 @@ func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 	if err := Init(o, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 0 || !strings.Contains(out.String(), `"mcpServers"`) {
+	if len(f.calls) != 0 || !strings.Contains(out.String(), `"mcpServers"`) || !strings.Contains(out.String(), "~/.grok/config.toml") {
 		t.Fatalf("calls=%v out:\n%s", f.calls, out.String())
 	}
 }
@@ -193,6 +232,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
 	o.DryRun = true
@@ -203,7 +243,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatal("dry run invoked CLIs:", f.calls)
 	}
-	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md"} {
+	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/hooks/agentbus.json", ".grok/skills/using-agentbus/SKILL.md", ".grok/commands/agentbus.md", ".grok/rules/agentbus.md"} {
 		if _, err := os.Stat(filepath.Join(home, p)); err == nil {
 			t.Fatal("dry run wrote", p)
 		}
@@ -264,8 +304,17 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatalf("rerun did not create channels for the existing identity: %v", got)
 	}
 
-	// No MCP entry anywhere: warn, but still do the repo work.
+	// A Grok user config counts as the MCP server being configured.
 	_ = os.Remove(filepath.Join(home, ".claude.json"))
+	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
+	_ = os.WriteFile(filepath.Join(home, ".grok", "config.toml"), []byte("[mcp_servers.agentbus]\ncommand = \"agentbus\"\n"), 0o644)
+	out.Reset()
+	if err := Init(o, &out); err != nil || strings.Contains(out.String(), "warning") {
+		t.Fatalf("warned although Grok MCP is configured: %v\n%s", err, out.String())
+	}
+
+	// No MCP entry anywhere: warn, but still do the repo work.
+	_ = os.RemoveAll(filepath.Join(home, ".grok"))
 	out.Reset()
 	if err := Init(o, &out); err != nil || !strings.Contains(out.String(), "agentbus init --global") {
 		t.Fatalf("expected the not-configured warning: %v\n%s", err, out.String())

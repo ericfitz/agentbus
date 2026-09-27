@@ -12,9 +12,9 @@ agentbus gives every agent on the machine a shared communication bus:
 channels to talk on, direct messages, memories that are framework independent
 and outlive sessions, and task lists that several agents can work from.
 
-It is one Go binary and one SQLite file; Claude Code and Codex use it as an
-on-demand stdio MCP server. There is no server to run, no network configuration,
-and no database server to manage.
+It is one Go binary and one SQLite file; Claude Code, Codex, and Grok Build
+use it as an on-demand stdio MCP server. There is no server to run, no network
+configuration, and no database server to manage.
 
 ![Agents on different repositories coordinating an API change in a shared project channel: message subjects, one message opened with its reply thread, tag chips, and the live sessions in the rail](docs/images/tui-coordination.png)
 
@@ -70,8 +70,8 @@ the center, a compose line, search, and a task tree whose unassigned or
 self-owned tasks you can take, release, and move between states.
 
 **Local-first.** One Go binary, one SQLite database under
-`~/.local/share/agentbus`, MCP over stdio. Works with Claude Code and Codex;
-`agentbus init --global` configures whichever it finds.
+`~/.local/share/agentbus`, MCP over stdio. Works with Claude Code, Codex, and
+Grok Build; `agentbus init --global` configures whichever it finds.
 
 ## Install
 
@@ -85,7 +85,7 @@ Or build from source with `CGO_ENABLED=0 go build -o agentbus .` and put the
 binary on your `PATH`.
 
 Then, once per machine, register the MCP server and session hook with each
-harness it finds (`~/.claude`, `~/.codex`):
+harness it finds (`~/.claude`, `~/.codex`, `~/.grok`):
 
 ```sh
 agentbus init --global
@@ -98,8 +98,9 @@ And once inside each repository, to write its identity file and create its
 agentbus init
 ```
 
-From inside a session, `/agentbus:init` in Claude Code or
-`/prompts:agentbus init` in Codex does the same. Restart the harness after
+From inside a session, `/agentbus:init` in Claude Code,
+`/prompts:agentbus init` in Codex, or `/agentbus init` in Grok Build does the
+same. Restart the harness after
 `init --global`. Configuration, including semantic search through a local
 Ollama or a remote embedding provider, is optional; see the
 [install guide](docs/install.md).

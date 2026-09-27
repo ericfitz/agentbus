@@ -31,19 +31,32 @@ const InitPrompt = `Set up Agentbus for this repository:
 ` + protocol + `If the command reports that the MCP server is not configured yet, tell the
 user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
 
-// codexPrompt is written to ~/.codex/prompts/agentbus.md so Codex users get
-// /prompts:agentbus init; Codex does not surface MCP prompts (openai/codex
-// issue 5059), so this file is the stopgap until it does.
+// codexPrompt is the in-session agentbus command. Codex does not surface
+// MCP prompts (openai/codex issue 5059), so init writes it to
+// ~/.codex/prompts/agentbus.md (/prompts:agentbus). Grok Build gets the same
+// text at ~/.grok/commands/agentbus.md, the /agentbus slash command; its
+// command files follow Claude's $ARGUMENTS placeholder.
 const codexPrompt = "# Agentbus\n\nThe user asked for: agentbus $ARGUMENTS\n\n" +
 	"For `init`:\n" + InitPrompt + "\n\n" +
 	"For anything else, run `agentbus $ARGUMENTS` in a shell and report the output.\n"
+
+// grokRule is written to ~/.grok/rules/agentbus.md. Grok loads every file
+// there into the session. A SessionStart hook's stdout is not added to the
+// conversation, so this rule is what tells the agent to run `agentbus identity`.
+const grokRule = "# Agentbus\n\n" +
+	"At the start of a session, run `agentbus identity` and follow its output.\n" +
+	"Register with the name it prints, and pass the returned \"as\" on every\n" +
+	"later Agentbus call. The using-agentbus skill is the full protocol. If\n" +
+	"the command reports that the MCP server is not configured, tell the user\n" +
+	"to run `agentbus init --global` and restart Grok.\n"
 
 const hookCommand = "agentbus identity"
 
 // skillMD is the using-agentbus skill, installed by `init --global` into
 // each harness's personal skills directory so it ships with the binary it
-// describes: ~/.claude/skills for Claude Code and ~/.agents/skills for
-// Codex (also read by Copilot CLI and Gemini CLI).
+// describes: ~/.claude/skills for Claude Code, ~/.agents/skills for Codex
+// (also read by Copilot CLI, Gemini CLI, and Grok), and ~/.grok/skills for
+// Grok Build.
 //
 //go:embed skills/using-agentbus/SKILL.md
 var skillMD []byte
@@ -54,7 +67,7 @@ var skillPath = filepath.Join("skills", "using-agentbus", "SKILL.md")
 // InitOptions configures Init. Zero values mean "detect".
 type InitOptions struct {
 	Global  bool          // force the machine-level bootstrap even inside a repo
-	Harness string        // "", "claude", or "codex": force one harness
+	Harness string        // "", "claude", "codex", or "grok": force one harness
 	DryRun  bool          // print actions, write nothing
 	Home    string        // home directory; defaults to os.UserHomeDir
 	Cwd     string        // working directory; defaults to os.Getwd
@@ -93,9 +106,9 @@ func Init(o InitOptions, out io.Writer) error {
 		}
 	}
 	switch o.Harness {
-	case "", "claude", "codex":
+	case "", "claude", "codex", "grok":
 	default:
-		return fmt.Errorf("--harness must be claude or codex, got %q", o.Harness)
+		return fmt.Errorf("--harness must be claude, codex, or grok, got %q", o.Harness)
 	}
 	in := &initer{InitOptions: o, out: out}
 	if root := gitRoot(o.Cwd); root != "" && !o.Global {
@@ -168,6 +181,7 @@ func (in *initer) wants(h, dir string) bool {
 func (in *initer) global() error {
 	claudeDir := filepath.Join(in.Home, ".claude")
 	codexDir := filepath.Join(in.Home, ".codex")
+	grokDir := filepath.Join(in.Home, ".grok")
 	did := false
 	if in.wants("claude", claudeDir) {
 		did = true
@@ -181,8 +195,14 @@ func (in *initer) global() error {
 			return err
 		}
 	}
+	if in.wants("grok", grokDir) {
+		did = true
+		if err := in.grok(grokDir); err != nil {
+			return err
+		}
+	}
 	if !did {
-		in.say("no harness found (no %s or %s); use --harness claude|codex to force one", claudeDir, codexDir)
+		in.say("no harness found (no %s, %s, or %s); use --harness claude|codex|grok to force one", claudeDir, codexDir, grokDir)
 		return nil
 	}
 	in.say("done: restart the harness, then run `agentbus init` inside each repository")
@@ -221,6 +241,29 @@ func (in *initer) codex(dir string) error {
 	}
 	in.say("  Codex asks you to trust the SessionStart hook the first time it runs; accept it")
 	return nil
+}
+
+func (in *initer) grok(dir string) error {
+	in.say("Grok Build:")
+	// Default tool_timeout_sec is 6000, already above receive_max_wait_seconds.
+	if err := in.mcpEntry("grok",
+		[]string{"mcp", "remove", "--scope", "user", "agentbus"},
+		[]string{"mcp", "add", "--scope", "user", "agentbus", "--", "agentbus", "mcp"},
+		"[mcp_servers.agentbus]\n  command = \"agentbus\"\n  args = [\"mcp\"]\n  in ~/.grok/config.toml"); err != nil {
+		return err
+	}
+	// ~/.grok/hooks/*.json is always trusted. SessionStart stdout is not
+	// injected; grokRule carries the same instruction into the session.
+	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), ""); err != nil {
+		return err
+	}
+	if err := in.write(filepath.Join(dir, skillPath), skillMD); err != nil {
+		return err
+	}
+	if err := in.write(filepath.Join(dir, "commands", "agentbus.md"), []byte(codexPrompt)); err != nil {
+		return err
+	}
+	return in.write(filepath.Join(dir, "rules", "agentbus.md"), []byte(grokRule))
 }
 
 // mcpEntry registers the MCP server through the harness's own CLI so the
@@ -332,7 +375,7 @@ func hasHookCommand(entry any, cmd string) bool {
 // prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
-		in.say("warning: no agentbus MCP entry found in ~/.claude.json or ~/.codex/config.toml; run `agentbus init --global` first")
+		in.say("warning: no agentbus MCP entry found in ~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml; run `agentbus init --global` first")
 	}
 	idPath := filepath.Join(root, ".local", "agentbus.json")
 	if _, err := os.Stat(idPath); err == nil {
@@ -419,7 +462,11 @@ func (in *initer) gitignore(path string) error {
 
 // mcpConfigured is a cheap check that some harness knows about agentbus.
 func (in *initer) mcpConfigured() bool {
-	for _, p := range []string{filepath.Join(in.Home, ".claude.json"), filepath.Join(in.Home, ".codex", "config.toml")} {
+	for _, p := range []string{
+		filepath.Join(in.Home, ".claude.json"),
+		filepath.Join(in.Home, ".codex", "config.toml"),
+		filepath.Join(in.Home, ".grok", "config.toml"),
+	} {
 		if body, err := os.ReadFile(p); err == nil && strings.Contains(string(body), "agentbus") {
 			return true
 		}

@@ -36,6 +36,23 @@ func TestWaitReturnsUndeliveredWithoutAdvancingCursor(t *testing.T) {
 	}
 }
 
+// A batch receive handed out but the agent has not acked yet must not wake
+// the waiter (or the Stop hook) again; only later messages do.
+func TestWaitSkipsPendingBatch(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "seen"})
+	if r, _ := b.Receive(kim, ReceiveInput{}); len(r.Messages) != 1 || r.Batch == "" {
+		t.Fatalf("receive: %+v", r)
+	}
+	if got, err := b.Wait(kim, nil, false, nil, 10*time.Millisecond); err != nil || len(got) != 0 {
+		t.Fatalf("pending batch woke the waiter: %v %v", got, err)
+	}
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "new"})
+	if got, err := b.Wait(kim, nil, false, nil, time.Second); err != nil || len(got) != 1 || got[0].Content != "new" {
+		t.Fatalf("want only the new message: %v %v", got, err)
+	}
+}
+
 func TestWaitMatchSkipsRejectedMessages(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "noise"})

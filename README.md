@@ -141,9 +141,13 @@ follow, with a worked example.
   between rail, messages, and compose; `→`/`←` open and close a message body,
   its replies, or a task's details and subtasks; `/` searches. The full key
   reference is in the [install guide](docs/install.md#operating).
+- `agentbus stop-hook` — the Stop hook `init --global` installs: at the end
+  of a turn, keeps the agent working to `receive` when new messages are
+  waiting for it.
 - `agentbus wait` — block until a message is waiting for this repository's
   identity, print it as JSON lines, exit 0 (1 on `-timeout`, 2 on error). It
-  never acks, so the next `receive` returns the same batch. Run it with
+  never acks, so the next `receive` returns the same batch. A batch
+  `receive` already handed out does not wake it. Run it with
   `Bash(run_in_background: true)` to park an agent for one wake-up. Flags:
   `-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake
   only for a matching subject or content, plus any direct message or tag

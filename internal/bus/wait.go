@@ -7,7 +7,9 @@ import (
 
 // Wait blocks until at least one undelivered message is available for as on
 // its subscribed channels (all of them when channels is empty), then returns
-// those messages. It is read-only: cursors, pending batches, activity, and
+// those messages. Messages already handed out in a pending (unacked) receive
+// batch do not count: the agent has seen them, so they must not wake it
+// again (ADR 0012). It is read-only: cursors, pending batches, activity, and
 // sessions are untouched, so a following Receive returns the same messages.
 // It does not require as to be registered by this process, only subscribed.
 // match, when non-nil, decides which messages count; messages it rejects are
@@ -45,23 +47,24 @@ func (b *Bus) Wait(as string, channels []string, includeOwn bool, match func(Mes
 	}
 }
 
-// peek selects, without side effects, the messages Receive would deliver
-// next for as: everything past each subscription's cursor, the tag source
-// (receive's tags/ row) included. skipBelow raises the floor per channel
-// for messages a caller has already rejected.
+// peek selects, without side effects, the messages as has not been handed
+// yet: everything past each subscription's cursor and pending batch, the tag
+// source (receive's tags/ row) included. skipBelow raises the floor per
+// channel for messages a caller has already rejected.
 func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[string]int64) ([]Message, error) {
-	rows, err := b.db.Query("SELECT channel, cursor_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
+	rows, err := b.db.Query("SELECT channel, cursor_seq, pending_end_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
 	if err != nil {
 		return nil, internal(err)
 	}
 	type sub struct {
 		channel string
 		cursor  int64
+		pending int64 // end of the unacked batch receive handed out; 0 when none
 	}
 	var subs []sub
 	for rows.Next() {
 		var s sub
-		if err := rows.Scan(&s.channel, &s.cursor); err != nil {
+		if err := rows.Scan(&s.channel, &s.cursor, &s.pending); err != nil {
 			_ = rows.Close()
 			return nil, internal(err)
 		}
@@ -84,7 +87,7 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 	var sets []tagSet
 	direct := map[string]bool{}
 	for _, s := range subs {
-		floor := max(s.cursor, skipBelow[s.channel])
+		floor := max(s.cursor, s.pending, skipBelow[s.channel])
 		if s.channel == tagSource {
 			if sets, err = b.tagSets(b.db, as); err != nil {
 				return nil, err

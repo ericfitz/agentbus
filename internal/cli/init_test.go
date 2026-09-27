@@ -54,10 +54,12 @@ func readJSON(t *testing.T, path string) map[string]any {
 	return m
 }
 
-func sessionStartCommands(m map[string]any) []string {
+func sessionStartCommands(m map[string]any) []string { return hookCommands(m, "SessionStart") }
+
+func hookCommands(m map[string]any, event string) []string {
 	var out []string
 	hooks, _ := m["hooks"].(map[string]any)
-	starts, _ := hooks["SessionStart"].([]any)
+	starts, _ := hooks[event].([]any)
 	for _, s := range starts {
 		inner, _ := s.(map[string]any)["hooks"].([]any)
 		for _, h := range inner {
@@ -106,8 +108,16 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	if got := sessionStartCommands(readJSON(t, filepath.Join(home, ".codex", "hooks.json"))); len(got) != 1 || got[0] != "agentbus identity" {
 		t.Fatalf("codex hooks = %v", got)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".grok", "hooks")); err == nil {
-		t.Fatal("grok hook written; Grok ignores SessionStart stdout")
+	// Every harness gets the Stop hook; Grok gets no SessionStart hook
+	// because it ignores that event's stdout.
+	grokHooks := readJSON(t, filepath.Join(home, ".grok", "hooks", "agentbus.json"))
+	if got := sessionStartCommands(grokHooks); len(got) != 0 {
+		t.Fatalf("grok SessionStart hooks = %v", got)
+	}
+	for name, cfg := range map[string]map[string]any{"claude": m, "codex": readJSON(t, filepath.Join(home, ".codex", "hooks.json")), "grok": grokHooks} {
+		if got := hookCommands(cfg, "Stop"); len(got) != 1 || got[0] != "agentbus stop-hook" {
+			t.Fatalf("%s Stop hooks = %v", name, got)
+		}
 	}
 	toml, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if !strings.Contains(string(toml), "[mcp_servers.agentbus]\ntool_timeout_sec = 300\n") || !strings.HasPrefix(string(toml), "model = \"gpt-5\"") {
@@ -140,6 +150,9 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 	if got := sessionStartCommands(readJSON(t, settings)); len(got) != 2 {
 		t.Fatalf("hook duplicated on rerun: %v", got)
+	}
+	if got := hookCommands(readJSON(t, settings), "Stop"); len(got) != 1 {
+		t.Fatalf("Stop hook duplicated on rerun: %v", got)
 	}
 	toml, _ = os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if strings.Count(string(toml), "tool_timeout_sec") != 1 {
@@ -238,7 +251,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatal("dry run invoked CLIs:", f.calls)
 	}
-	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/skills/using-agentbus/SKILL.md", ".grok/commands/agentbus.md", ".grok/rules/agentbus.md"} {
+	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".grok/hooks/agentbus.json", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/skills/using-agentbus/SKILL.md", ".grok/commands/agentbus.md", ".grok/rules/agentbus.md"} {
 		if _, err := os.Stat(filepath.Join(home, p)); err == nil {
 			t.Fatal("dry run wrote", p)
 		}

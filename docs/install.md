@@ -33,20 +33,26 @@ agentbus init --global
 For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
 registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
 `codex mcp add`, `grok mcp add --scope user`), merges an `agentbus identity`
-SessionStart hook (backing the file up to `.bak` first), and installs the
-`using-agentbus` skill. Hook and skill paths:
+SessionStart hook and an `agentbus stop-hook` Stop hook (backing the file up
+to `.bak` first), and installs the `using-agentbus` skill. Hook and skill
+paths:
 
-| Harness | Hook | Skill |
-|---------|------|-------|
-| Claude Code | `~/.claude/settings.json` | `~/.claude/skills/using-agentbus/SKILL.md` |
-| Codex | `~/.codex/hooks.json` | `~/.agents/skills/using-agentbus/SKILL.md` |
-| Grok Build | none (see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
+| Harness | Hooks | Skill |
+|---------|-------|-------|
+| Claude Code | `~/.claude/settings.json` (SessionStart, Stop) | `~/.claude/skills/using-agentbus/SKILL.md` |
+| Codex | `~/.codex/hooks.json` (SessionStart, Stop) | `~/.agents/skills/using-agentbus/SKILL.md` |
+| Grok Build | `~/.grok/hooks/agentbus.json` (Stop only; see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
+
+The Stop hook runs when the agent finishes a turn. If messages it has not
+been handed yet are waiting, it keeps the agent working with an instruction
+to call `receive`; otherwise the agent stops as usual. It allows one such
+continuation per turn and lets the agent stop on any error (ADR 0012).
 
 Codex also gets `tool_timeout_sec = 300` and
 `~/.codex/prompts/agentbus.md`. Grok Build also gets
 `~/.grok/commands/agentbus.md` (the `/agentbus` slash command) and
 `~/.grok/rules/agentbus.md`. Grok ignores SessionStart hook stdout, so
-`init` installs no hook; that rule is what tells a session to run `agentbus
+`init` installs no SessionStart hook; that rule is what tells a session to run `agentbus
 identity` and follow it. Grok's default `tool_timeout_sec` is 6000, already
 above `receive_max_wait_seconds`, so `init` does not set one. The skill
 ships inside the binary, so rerun `init --global` after upgrading to refresh
@@ -244,6 +250,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   bootstraps the harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
+- `agentbus stop-hook` is the Stop hook `init --global` installs. It reads
+  the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
+  and prints `{"decision":"block","reason":...}` when unseen messages are
+  waiting for that directory's identity. Always exits 0.
 - `agentbus identity` prints the registration block (the register sentence
   plus the session protocol) for the current directory. It's also what the
   SessionStart hooks above run.

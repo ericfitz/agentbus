@@ -50,7 +50,10 @@ const grokRule = "# Agentbus\n\n" +
 	"the command reports that the MCP server is not configured, tell the user\n" +
 	"to run `agentbus init --global` and restart Grok.\n"
 
-const hookCommand = "agentbus identity"
+const (
+	hookCommand     = "agentbus identity"
+	stopHookCommand = "agentbus stop-hook"
+)
 
 // skillMD is the using-agentbus skill, installed by `init --global` into
 // each harness's personal skills directory so it ships with the binary it
@@ -215,7 +218,10 @@ func (in *initer) claude(dir string) error {
 		`{ "mcpServers": { "agentbus": { "command": "agentbus", "args": ["mcp"] } } }`+" in ~/.claude.json"); err != nil {
 		return err
 	}
-	if err := in.hook(filepath.Join(dir, "settings.json"), ""); err != nil {
+	if err := in.hook(filepath.Join(dir, "settings.json"), "SessionStart", hookCommand, ""); err != nil {
+		return err
+	}
+	if err := in.hook(filepath.Join(dir, "settings.json"), "Stop", stopHookCommand, ""); err != nil {
 		return err
 	}
 	return in.write(filepath.Join(dir, skillPath), skillMD)
@@ -230,7 +236,10 @@ func (in *initer) codex(dir string) error {
 	if err := in.codexTimeout(filepath.Join(dir, "config.toml")); err != nil {
 		return err
 	}
-	if err := in.hook(filepath.Join(dir, "hooks.json"), "startup|resume|clear"); err != nil {
+	if err := in.hook(filepath.Join(dir, "hooks.json"), "SessionStart", hookCommand, "startup|resume|clear"); err != nil {
+		return err
+	}
+	if err := in.hook(filepath.Join(dir, "hooks.json"), "Stop", stopHookCommand, ""); err != nil {
 		return err
 	}
 	if err := in.write(filepath.Join(dir, "prompts", "agentbus.md"), []byte(codexPrompt)); err != nil {
@@ -239,7 +248,7 @@ func (in *initer) codex(dir string) error {
 	if err := in.write(filepath.Join(in.Home, ".agents", skillPath), skillMD); err != nil {
 		return err
 	}
-	in.say("  Codex asks you to trust the SessionStart hook the first time it runs; accept it")
+	in.say("  Codex asks you to trust the SessionStart and Stop hooks the first time they run; accept them")
 	return nil
 }
 
@@ -253,6 +262,10 @@ func (in *initer) grok(dir string) error {
 		return err
 	}
 	// No SessionStart hook: Grok ignores its stdout, so grokRule does that job.
+	// Grok does read Stop hook stdout, and ~/.grok/hooks/*.json is trusted.
+	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), "Stop", stopHookCommand, ""); err != nil {
+		return err
+	}
 	if err := in.write(filepath.Join(dir, skillPath), skillMD); err != nil {
 		return err
 	}
@@ -317,10 +330,10 @@ func (in *initer) codexTimeout(path string) error {
 	return in.write(path, []byte(strings.Join(out, "\n")))
 }
 
-// hook merges a SessionStart hook running `agentbus identity` into a
-// Claude Code settings.json or Codex hooks.json, leaving everything else
-// in the file alone (Go's encoder re-sorts object keys, nothing more).
-func (in *initer) hook(path, matcher string) error {
+// hook merges an event hook running cmd into a Claude Code settings.json,
+// Codex hooks.json, or Grok hooks file, leaving everything else in the file
+// alone (Go's encoder re-sorts object keys, nothing more).
+func (in *initer) hook(path, event, cmd, matcher string) error {
 	root := map[string]any{}
 	if body, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(body, &root); err != nil {
@@ -333,18 +346,18 @@ func (in *initer) hook(path, matcher string) error {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	starts, _ := hooks["SessionStart"].([]any)
-	for _, s := range starts {
-		if hasHookCommand(s, hookCommand) {
-			in.say("  SessionStart hook already present in %s", path)
+	entries, _ := hooks[event].([]any)
+	for _, s := range entries {
+		if hasHookCommand(s, cmd) {
+			in.say("  %s hook already present in %s", event, path)
 			return nil
 		}
 	}
-	entry := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": hookCommand}}}
+	entry := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd}}}
 	if matcher != "" {
 		entry["matcher"] = matcher
 	}
-	hooks["SessionStart"] = append(starts, entry)
+	hooks[event] = append(entries, entry)
 	root["hooks"] = hooks
 	data, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {

@@ -72,13 +72,11 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	f := &fakeHarness{home: home}
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
-	_ = os.MkdirAll(filepath.Join(home, ".grok", "hooks"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	// Pre-existing settings with an unrelated hook must survive the merge.
 	settings := filepath.Join(home, ".claude", "settings.json")
 	_ = os.WriteFile(settings, []byte(`{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hi"}]}],"Stop":[]}}`), 0o644)
 	_ = os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644)
-	grokHooks := filepath.Join(home, ".grok", "hooks", "agentbus.json")
-	_ = os.WriteFile(grokHooks, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo grok"}]}]}}`), 0o644)
 
 	var out bytes.Buffer
 	if err := Init(initOpts(t, home, f), &out); err != nil {
@@ -108,8 +106,8 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	if got := sessionStartCommands(readJSON(t, filepath.Join(home, ".codex", "hooks.json"))); len(got) != 1 || got[0] != "agentbus identity" {
 		t.Fatalf("codex hooks = %v", got)
 	}
-	if got := sessionStartCommands(readJSON(t, grokHooks)); len(got) != 2 || got[0] != "echo grok" || got[1] != "agentbus identity" {
-		t.Fatalf("grok hooks = %v", got)
+	if _, err := os.Stat(filepath.Join(home, ".grok", "hooks")); err == nil {
+		t.Fatal("grok hook written; Grok ignores SessionStart stdout")
 	}
 	toml, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if !strings.Contains(string(toml), "[mcp_servers.agentbus]\ntool_timeout_sec = 300\n") || !strings.HasPrefix(string(toml), "model = \"gpt-5\"") {
@@ -142,9 +140,6 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 	if got := sessionStartCommands(readJSON(t, settings)); len(got) != 2 {
 		t.Fatalf("hook duplicated on rerun: %v", got)
-	}
-	if got := sessionStartCommands(readJSON(t, grokHooks)); len(got) != 2 {
-		t.Fatalf("grok hook duplicated on rerun: %v", got)
 	}
 	toml, _ = os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if strings.Count(string(toml), "tool_timeout_sec") != 1 {
@@ -243,7 +238,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatal("dry run invoked CLIs:", f.calls)
 	}
-	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/hooks/agentbus.json", ".grok/skills/using-agentbus/SKILL.md", ".grok/commands/agentbus.md", ".grok/rules/agentbus.md"} {
+	for _, p := range []string{".claude/settings.json", ".codex/hooks.json", ".codex/prompts/agentbus.md", ".claude/skills/using-agentbus/SKILL.md", ".agents/skills/using-agentbus/SKILL.md", ".grok/skills/using-agentbus/SKILL.md", ".grok/commands/agentbus.md", ".grok/rules/agentbus.md"} {
 		if _, err := os.Stat(filepath.Join(home, p)); err == nil {
 			t.Fatal("dry run wrote", p)
 		}

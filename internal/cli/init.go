@@ -41,8 +41,8 @@ const codexPrompt = "# Agentbus\n\nThe user asked for: agentbus $ARGUMENTS\n\n" 
 	"For anything else, run `agentbus $ARGUMENTS` in a shell and report the output.\n"
 
 // grokRule is written to ~/.grok/rules/agentbus.md. Grok loads every file
-// there into the session. A SessionStart hook's stdout is not added to the
-// conversation, so this rule is what tells the agent to run `agentbus identity`.
+// there into the session. Grok ignores SessionStart hook stdout, so this rule,
+// not a hook, is what tells the agent to run `agentbus identity`.
 const grokRule = "# Agentbus\n\n" +
 	"At the start of a session, run `agentbus identity` and follow its output.\n" +
 	"Register with the name it prints, and pass the returned \"as\" on every\n" +
@@ -252,11 +252,7 @@ func (in *initer) grok(dir string) error {
 		"[mcp_servers.agentbus]\n  command = \"agentbus\"\n  args = [\"mcp\"]\n  in ~/.grok/config.toml"); err != nil {
 		return err
 	}
-	// ~/.grok/hooks/*.json is always trusted. SessionStart stdout is not
-	// injected; grokRule carries the same instruction into the session.
-	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), ""); err != nil {
-		return err
-	}
+	// No SessionStart hook: Grok ignores its stdout, so grokRule does that job.
 	if err := in.write(filepath.Join(dir, skillPath), skillMD); err != nil {
 		return err
 	}

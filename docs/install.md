@@ -40,13 +40,13 @@ SessionStart hook (backing the file up to `.bak` first), and installs the
 |---------|------|-------|
 | Claude Code | `~/.claude/settings.json` | `~/.claude/skills/using-agentbus/SKILL.md` |
 | Codex | `~/.codex/hooks.json` | `~/.agents/skills/using-agentbus/SKILL.md` |
-| Grok Build | `~/.grok/hooks/agentbus.json` | `~/.grok/skills/using-agentbus/SKILL.md` |
+| Grok Build | none (see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
 
 Codex also gets `tool_timeout_sec = 300` and
 `~/.codex/prompts/agentbus.md`. Grok Build also gets
 `~/.grok/commands/agentbus.md` (the `/agentbus` slash command) and
-`~/.grok/rules/agentbus.md`. Grok does not add SessionStart hook stdout to
-the conversation, so that rule is what tells a session to run `agentbus
+`~/.grok/rules/agentbus.md`. Grok ignores SessionStart hook stdout, so
+`init` installs no hook; that rule is what tells a session to run `agentbus
 identity` and follow it. Grok's default `tool_timeout_sec` is 6000, already
 above `receive_max_wait_seconds`, so `init` does not set one. The skill
 ships inside the binary, so rerun `init --global` after upgrading to refresh
@@ -225,10 +225,8 @@ args = ["mcp"]
 Leave `tool_timeout_sec` unset unless you have lowered the default of 6000
 below `receive_max_wait_seconds`.
 
-`~/.grok/hooks/agentbus.json` runs `agentbus identity` on SessionStart.
-Files in `~/.grok/hooks/` are trusted without a prompt. Grok records that
-hook's stdout and does not add it to the conversation, so also install
-`~/.grok/rules/agentbus.md`:
+Grok ignores SessionStart hook stdout, so a hook cannot deliver the
+registration block. Install `~/.grok/rules/agentbus.md` instead:
 
 ```markdown
 # Agentbus

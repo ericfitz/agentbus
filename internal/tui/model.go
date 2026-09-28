@@ -79,6 +79,7 @@ type Model struct {
 	divider      int64
 	cursor       int             // index into rows(selName()), the visible display order (taskRows(selName()) on a task channel); -1 for none
 	cursorLine   int             // rendered line index of the cursor row's first line, from renderStream; -1 with no cursor
+	cursorEnd    int             // rendered line index just past the cursor row's block (body, shown replies or subtasks, details), from renderStream
 	expanded     map[int64]bool  // message seq -> its direct replies are shown
 	peek         map[int64]int64 // thread root seq -> the one reply shown while collapsed
 	bodyOpen     map[int64]bool  // message seq -> its body (subject line and full content) is shown
@@ -295,6 +296,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.taskDetail[msg.task.ID] = msg.task
 		m.refreshStream()
+		if t, ok := m.cursorTask(); ok && t.ID == msg.task.ID && m.taskOpen[t.ID] {
+			m.scrollOpenedIntoView()
+		}
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
 			m.toast = ""
@@ -757,6 +761,19 @@ func (m *Model) scrollCursorIntoView() {
 	case m.cursorLine >= m.stream.YOffset+m.stream.Height:
 		m.stream.SetYOffset(m.cursorLine - m.stream.Height + 1)
 	}
+}
+
+// scrollOpenedIntoView scrolls up just enough to show what → revealed
+// under the cursor (cursorLine through cursorEnd), keeping the cursor's
+// header on screen when the block is taller than the pane.
+func (m *Model) scrollOpenedIntoView() {
+	if m.cursor < 0 || m.cursorLine < 0 || m.stream.Height <= 0 {
+		return
+	}
+	if m.cursorEnd > m.stream.YOffset+m.stream.Height {
+		m.stream.SetYOffset(min(m.cursorLine, m.cursorEnd-m.stream.Height))
+	}
+	m.scrollCursorIntoView()
 }
 
 func (m *Model) scrollStream(msg tea.Msg) tea.Cmd {

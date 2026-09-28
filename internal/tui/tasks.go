@@ -306,7 +306,7 @@ func (m *Model) openTask() tea.Cmd {
 	if r.hidden > 0 {
 		m.taskExpanded[r.t.ID] = true
 		m.refreshStream()
-		m.scrollCursorIntoView()
+		m.scrollOpenedIntoView()
 	}
 	return nil
 }
@@ -345,6 +345,7 @@ func (m *Model) expandTask() tea.Cmd {
 	}
 	m.taskOpen[t.ID] = true
 	m.refreshStream()
+	m.scrollOpenedIntoView()
 	return m.loadTask(t.ID)
 }
 
@@ -385,8 +386,12 @@ func (m *Model) renderTasks(ch string) string {
 	}
 	var b strings.Builder
 	lineNum := 0
+	cursorDepth := -1 // the cursor task's depth while its shown subtasks follow
 	for i, r := range rs {
 		t, drafted := m.shownTask(ch, r.t)
+		if cursorDepth >= 0 && t.Depth <= cursorDepth {
+			cursorDepth = -1
+		}
 		mark := taskPending
 		switch t.Status {
 		case "in_progress":
@@ -461,6 +466,7 @@ func (m *Model) renderTasks(ch string) string {
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum
+			cursorDepth = t.Depth
 		}
 		b.WriteString(line + "\n")
 		lineNum += strings.Count(line, "\n") + 1
@@ -468,6 +474,9 @@ func (m *Model) renderTasks(ch string) string {
 			block := m.renderTaskBlock(t, byID, pw+2, w)
 			b.WriteString(block + "\n")
 			lineNum += strings.Count(block, "\n") + 1
+		}
+		if cursorDepth >= 0 {
+			m.cursorEnd = lineNum
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

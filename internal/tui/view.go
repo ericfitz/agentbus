@@ -433,7 +433,11 @@ func (m *Model) renderStream() string {
 		lineNum++
 	}
 	newShown := m.divider < 0
+	cursorDepth := -1 // the cursor row's depth while its shown replies follow
 	for i, r := range m.rows(ch) {
+		if cursorDepth >= 0 && r.depth <= cursorDepth {
+			cursorDepth = -1
+		}
 		x := r.msg
 		if !newShown && r.depth == 0 && r.newest > m.divider {
 			b.WriteString(divider("new") + "\n")
@@ -510,9 +514,13 @@ func (m *Model) renderStream() string {
 		}
 		if i == m.cursor {
 			m.cursorLine = lineNum
+			cursorDepth = r.depth
 		}
 		b.WriteString(line + "\n")
 		lineNum += strings.Count(line, "\n") + 1
+		if cursorDepth >= 0 {
+			m.cursorEnd = lineNum
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

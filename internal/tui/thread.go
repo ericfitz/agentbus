@@ -185,7 +185,7 @@ func (m *Model) openCursor() {
 	if _, hasBody := rowLine(r.msg, m.rowAvail(r.depth)); hasBody && !m.bodyOpen[r.msg.Seq] {
 		m.bodyOpen[r.msg.Seq] = true
 		m.refreshStream()
-		m.scrollCursorIntoView()
+		m.scrollOpenedIntoView()
 		return
 	}
 	m.setExpanded(r, true)
@@ -234,5 +234,9 @@ func (m *Model) setExpanded(r row, v bool) {
 	}
 	delete(m.peek, r.root)
 	m.refreshStream()
-	m.scrollCursorIntoView()
+	if v {
+		m.scrollOpenedIntoView()
+	} else {
+		m.scrollCursorIntoView()
+	}
 }

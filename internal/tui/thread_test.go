@@ -116,3 +116,30 @@ func TestLeftCollapsesTheWholeSubtree(t *testing.T) {
 		t.Fatalf("expand after a full collapse shows direct children only: %v", got)
 	}
 }
+
+// Expanding the last thread at the bottom of the pane must scroll up to
+// show the replies it revealed, not just keep its header on screen.
+func TestExpandScrollsRevealedRepliesIntoView(t *testing.T) {
+	f := newFixture(t)
+	for i := 0; i < 30; i++ {
+		f.agentSend(t, "dev", "filler")
+	}
+	a := f.agentSend(t, "dev", "A")
+	for i := 0; i < 3; i++ {
+		f.agentReply(t, "dev", a.Seq, "reply")
+	}
+	f.run(f.m.loadHistory("dev", nil))
+	f.m.height = 20
+	f.m.layout()
+	f.key("shift+tab") // into the message pane; the cursor starts on the last row, A
+	if r, ok := f.m.cursorRow(); !ok || r.msg.Seq != a.Seq {
+		t.Fatalf("cursor not on A: %+v", r)
+	}
+	f.key("right")
+	if got := len(f.m.rows("dev")); got != 34 {
+		t.Fatalf("right did not expand A's replies: %d rows", got)
+	}
+	if bottom := f.m.stream.YOffset + f.m.stream.Height; f.m.cursorEnd > bottom || f.m.cursorLine < f.m.stream.YOffset {
+		t.Fatalf("expanded thread not in view: lines %d..%d, window %d..%d", f.m.cursorLine, f.m.cursorEnd, f.m.stream.YOffset, bottom)
+	}
+}

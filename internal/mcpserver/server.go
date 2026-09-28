@@ -24,7 +24,7 @@ import (
 
 // Version is the release version. Release builds override it with
 // -ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>".
-var Version = "1.9.0"
+var Version = "1.10.0"
 
 type registerIn struct {
 	Name    string `json:"name" jsonschema:"persistent identity name, for example Sam"`

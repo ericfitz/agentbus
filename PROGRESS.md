@@ -583,3 +583,17 @@ Pushed to `main` (`fix/grok-no-hook`):
 - **v1.9.0 released** (tag v1.9.0), with the Grok Build init above: no
   schema change. After upgrading: `agentbus init --global`, then restart
   every harness session.
+
+## 2026-09-28: Per-effort task lists and expiry (v1.10.0)
+
+- Task lists are per effort (`tasks/<effort>`); no default `tasks` list and
+  `init` no longer creates `tasks/<repo>`. `register` ignores task entries
+  in `.local/agentbus.json` (reported in `ignored_channels`).
+- Maintenance tick deletes a task list after 30 days without change (TUI
+  idle marker at 7 days) and memories not accessed for 1 year; periods
+  configurable (`task_idle_hours`, `task_expiry_hours`,
+  `memory_expiry_hours`). ADR 0013 (human decisions).
+- Embedding backlog count skips task rows.
+- **v1.10.0 released** (tag v1.10.0): schema v7, migration drops all
+  task-list subscriptions. Upgrade and restart all hosts together, then
+  `agentbus init --global`.

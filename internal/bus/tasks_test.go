@@ -392,4 +392,11 @@ func TestEmbedderSkipsTaskRows(t *testing.T) {
 	if seq != *memRes.MemoryID {
 		t.Fatalf("embedded seq=%d want memory seq=%d", seq, *memRes.MemoryID)
 	}
+	st, err := b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.EmbeddingBacklog != 0 {
+		t.Fatalf("backlog=%d; task rows are never embedded, so they must not count", st.EmbeddingBacklog)
+	}
 }

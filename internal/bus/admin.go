@@ -95,7 +95,7 @@ func (b *Bus) StatusReport() (Status, error) {
 	// stays 0 rather than counting every live memory (which would happen if
 	// we queried with model="", since no embeddings row ever uses that key).
 	if b.embedder != nil {
-		if err := b.db.QueryRow("SELECT count(*) FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq AND e.model=? WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL", b.embedder.model).Scan(&st.EmbeddingBacklog); err != nil {
+		if err := b.db.QueryRow("SELECT count(*) "+unembeddedFrom, b.embedder.model).Scan(&st.EmbeddingBacklog); err != nil {
 			return st, internal(err)
 		}
 	}

@@ -179,6 +179,12 @@ func embedText(subject, content string) string {
 	return subject + "\n\n" + content
 }
 
+// unembeddedFrom selects live memories that still need an embedding under the
+// model bound as its one parameter. Task rows are never embedded. StatusReport
+// counts the same rows, so its backlog drains to 0.
+const unembeddedFrom = `FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq AND e.model=?
+	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel <> 'tasks' AND m.channel NOT LIKE 'tasks/%'`
+
 // embedBatch embeds up to embedBatchSize live memory revisions lacking a row for
 // the configured model, after deleting rows from other models. The HTTP call
 // can outlive an edit/delete of the memory it's embedding, so each insert is
@@ -201,8 +207,7 @@ func (b *Bus) embedBatch(ctx context.Context) (int, error) {
 			return 0, internal(err)
 		}
 	}
-	rows, err := b.db.Query(`SELECT m.seq, m.subject, m.content FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq
-	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel <> 'tasks' AND m.channel NOT LIKE 'tasks/%' ORDER BY m.seq LIMIT ?`, embedBatchSize)
+	rows, err := b.db.Query(`SELECT m.seq, m.subject, m.content `+unembeddedFrom+` ORDER BY m.seq LIMIT ?`, b.embedder.model, embedBatchSize)
 	if err != nil {
 		return 0, internal(err)
 	}

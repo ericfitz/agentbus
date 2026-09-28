@@ -38,8 +38,11 @@ are closed:
 1. Defaults: fixed by the `DefaultChannels` change above.
 2. `.local/agentbus.json` in repositories where `init` has not run again:
    `register` ignores `tasks` and `tasks/...` entries and lists them in a
-   new `ignored_channels` field of its result. It does not rewrite the
-   file; `init` remains the file's only writer.
+   new `ignored_channels` field of its result. `register` does not rewrite
+   the file. The using-agentbus skill tells an agent that sees
+   `ignored_channels` to remove those entries from `.local/agentbus.json`
+   itself, and optionally to subscribe to the effort list it is working on
+   (`tasks/<effort>`).
 3. Subscriptions stored on the bus (a resumed name keeps them): the schema
    v7 migration deletes every subscription to `tasks` and `tasks/...`, for
    every sender. Names cannot tell a per-repo list from an effort list, so
@@ -112,6 +115,9 @@ Negative values are rejected at load. The TUI health view shows all three.
   starts the effort, subscribed by the agents working on it, removed after
   `task_expiry_hours` of inactivity; drop `tasks/<repo>` and the
   machine-wide `tasks` from the scope table.
+  It also says: when `register` returns `ignored_channels`, delete those
+  entries from `.local/agentbus.json` and, if you are working on an
+  effort, subscribe to its `tasks/<effort>` list.
 - `/agentbus` command, SessionStart hook text, README, `docs/install.md`:
   same change.
 - ADR 0013 records the decisions and supersedes ADR 0007 decisions 1 and 2

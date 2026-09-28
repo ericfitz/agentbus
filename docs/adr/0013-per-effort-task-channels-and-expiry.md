@@ -23,7 +23,10 @@ Design: `docs/superpowers/specs/2026-09-27-task-channel-and-memory-expiry-design
 3. **Existing agents stop subscribing to `tasks`, `tasks/<repo>`, and
    `tasks/<agent>`**: `register` ignores task entries in
    `.local/agentbus.json`, `init` removes them, and the schema v7 migration
-   drops every stored subscription to a task list.
+   drops every stored subscription to a task list. The skill tells an
+   agent to delete the entries `register` reports in `ignored_channels`
+   from its `.local/agentbus.json` and optionally subscribe to the effort
+   list it works on.
 4. **A task channel stays while there is activity and is deleted by a
    maintenance tick after 30 days without any**, with all its tasks
    whatever their status.

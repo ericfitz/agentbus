@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // migrations[v] upgrades a database at user_version v to v+1. Each step runs
@@ -17,10 +18,11 @@ import (
 // restarted.
 var migrations = map[int]func(tx *sql.Tx) error{
 	1: dropMessagesBytes,
-	2: addTables,    // message_tags (ADR 0009)
-	3: addTables,    // tag_subscriptions (ADR 0009)
-	4: splitTagSets, // tag_subscription_tags (#13)
-	5: addSubject,   // messages.subject, FTS over subject and content (ADR 0010)
+	2: addTables,                               // message_tags (ADR 0009)
+	3: addTables,                               // tag_subscriptions (ADR 0009)
+	4: splitTagSets,                            // tag_subscription_tags (#13)
+	5: addSubject,                              // messages.subject, FTS over subject and content (ADR 0010)
+	6: addMemoryAccessAndDropTaskSubscriptions, // memory_access; drop task-list subscriptions (ADR 0013)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -146,6 +148,28 @@ func addSubject(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// addMemoryAccessAndDropTaskSubscriptions (schema 6 -> 7, ADR 0013) creates
+// memory_access, backfills one row per live memory (a message with a
+// memory_id, not tombstoned, on a channel that is not a task list) at the
+// migration time, and deletes every subscription to a task list, for every
+// sender: task lists stop being subscribed by default, and the ones agents
+// already followed must not survive the upgrade (human decision 3). The
+// timestamp is time.Now, not the bus's overridable clock: migrate runs
+// before the Bus (and Now) exists.
+func addMemoryAccessAndDropTaskSubscriptions(tx *sql.Tx) error {
+	if _, err := tx.Exec(memoryAccessDDL); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO memory_access(memory_id, accessed_at)
+	  SELECT DISTINCT memory_id, ? FROM messages
+	  WHERE memory_id IS NOT NULL AND tombstone=0 AND channel<>'tasks' AND channel NOT LIKE 'tasks/%'`,
+		time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM subscriptions WHERE channel='tasks' OR channel LIKE 'tasks/%'`)
+	return err
 }
 
 // dropMessagesBytes (schema 1 -> 2, ADR 0006 item 4) rebuilds messages

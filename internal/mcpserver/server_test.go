@@ -405,11 +405,14 @@ func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 	if _, ok := reg["subscribe_failed"]; ok {
 		t.Fatal("subscribe_failed must be omitted when empty", reg)
+	}
+	if _, ok := reg["ignored_channels"]; ok {
+		t.Fatal("ignored_channels must be omitted when empty", reg)
 	}
 	// A message on general is now received without an explicit subscribe.
 	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
@@ -426,7 +429,7 @@ func TestRegisterSubscribesDefaultsWhenChannelsKeyAbsent(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam"}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 }
@@ -437,7 +440,7 @@ func TestRegisterMalformedRepoFileReportsFailureUnderPath(t *testing.T) {
 	writeRepoFile(t, dir, `{not json`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" || got[1] != "tasks" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)
@@ -532,12 +535,12 @@ func TestRegisterPersistentAppliesToSubagentsAndNoResume(t *testing.T) {
 	cs := testSessionIn(t, dir)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
 	sub, _ := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam"})
-	if got := stringsOf(sub["subscribed"]); len(got) != 2 {
+	if got := stringsOf(sub["subscribed"]); len(got) != 1 {
 		t.Fatal(sub)
 	}
 	call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "channel": "general"})
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam", "resume": false})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
 		t.Fatal(reg)
 	}
 }
@@ -647,12 +650,20 @@ func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general/Sam","memory/Sam","tasks/Sam","reviews"]}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["subscribed"]); len(got) != 2 || got[0] != "general/Sam" || got[1] != "tasks/Sam" {
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general/Sam" {
+		t.Fatal(reg)
+	}
+	// tasks/Sam is a leftover task-list entry (ADR 0013): ignored, not
+	// subscribed, not created, and not reported as failed.
+	if got := stringsOf(reg["ignored_channels"]); len(got) != 1 || got[0] != "tasks/Sam" {
 		t.Fatal(reg)
 	}
 	failed, _ := reg["subscribe_failed"].(map[string]any)
 	if msg, _ := failed["reviews"].(string); !strings.Contains(msg, "does not exist") {
 		t.Fatal("a bare name still needs create_channel:", reg)
+	}
+	if _, ok := failed["tasks/Sam"]; ok {
+		t.Fatal("an ignored task list must not also be reported as failed:", reg)
 	}
 	_, res := call(t, cs, "list_channels", map[string]any{"as": "Sam"})
 	var list []struct{ Name, Kind string }
@@ -661,8 +672,28 @@ func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 	for _, c := range list {
 		kinds[c.Name] = c.Kind
 	}
-	if kinds["general/Sam"] != "ordinary" || kinds["memory/Sam"] != "memory" || kinds["tasks/Sam"] != "memory" {
+	if kinds["general/Sam"] != "ordinary" || kinds["memory/Sam"] != "memory" {
 		t.Fatal(kinds)
+	}
+	if _, ok := kinds["tasks/Sam"]; ok {
+		t.Fatal("register must not create an ignored task list:", kinds)
+	}
+}
+
+// TestRegisterIgnoresBareTasksEntry (ADR 0013): a bare "tasks" entry, left
+// by a repository from before the upgrade, is ignored the same way as a
+// prefixed one.
+func TestRegisterIgnoresBareTasksEntry(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general","tasks"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
+		t.Fatal(reg)
+	}
+	if got := stringsOf(reg["ignored_channels"]); len(got) != 1 || got[0] != "tasks" {
+		t.Fatal(reg)
 	}
 }
 

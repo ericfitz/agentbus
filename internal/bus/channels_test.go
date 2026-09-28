@@ -33,13 +33,13 @@ func TestDefaultChannelsExistSurviveResetAndYieldToExisting(t *testing.T) {
 		}
 		return m
 	}
-	if got := kinds(); got["general"] != "ordinary" || got["memory"] != "memory" || got["tasks"] != "memory" || len(got) != 3 {
+	if got := kinds(); got["general"] != "ordinary" || got["memory"] != "memory" || len(got) != 2 {
 		t.Fatalf("open must create the defaults, got %v", got)
 	}
 	if err := b.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(); len(got) != 3 {
+	if got := kinds(); len(got) != 2 {
 		t.Fatalf("reset must recreate the defaults, got %v", got)
 	}
 	if _, err := b.db.Exec("UPDATE channels SET kind='ordinary' WHERE name='memory'"); err != nil {

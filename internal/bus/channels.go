@@ -82,10 +82,11 @@ type Channel struct {
 }
 
 // DefaultChannels exist on every bus so agents have somewhere to talk and
-// remember before anyone creates a channel: "general" (ordinary), "memory"
-// (memory), and the task list "tasks" (memory). Decisions of 2026-09-09
-// (ADR 0002) and 2026-09-17 (ADR 0007).
-var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "memory", Kind: "memory"}, {Name: "tasks", Kind: "memory"}}
+// remember before anyone creates a channel: "general" (ordinary) and
+// "memory" (memory). Decisions of 2026-09-09 (ADR 0002); the machine-wide
+// task list "tasks" that ADR 0007 added here is gone (ADR 0013): task lists
+// are per effort (tasks/<effort>), created as needed, not a default.
+var DefaultChannels = []Channel{{Name: "general", Kind: "ordinary"}, {Name: "memory", Kind: "memory"}}
 
 // ensureDefaults creates any missing default channel. A same-named channel
 // of another kind is left alone (INSERT OR IGNORE), so a user's earlier
@@ -119,11 +120,9 @@ func (b *Bus) EnsureChannel(name, kind string) error {
 	if err := validateChannelName(name); err != nil {
 		return err
 	}
-	if name != "tasks" { // the default list is the one bare "tasks" ensureDefaults may create
-		var err error
-		if kind, err = resolveKind(name, kind); err != nil {
-			return err
-		}
+	var err error
+	if kind, err = resolveKind(name, kind); err != nil {
+		return err
 	}
 	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", name, kind); err != nil {
 		return internal(err)

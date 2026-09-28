@@ -16,13 +16,20 @@ import (
 )
 
 type Config struct {
-	DataDirectory                string            `json:"data_directory"`
-	SQLiteBudgetMiB              int               `json:"sqlite_budget_mib"`
-	MessageRetentionHours        int               `json:"message_retention_hours"`
-	CleanupFreePercent           int               `json:"cleanup_free_percent"`
-	CleanupIntervalSeconds       int               `json:"cleanup_interval_seconds"`
-	CursorIdleHours              int               `json:"cursor_idle_hours"`
-	TombstoneMinHours            int               `json:"tombstone_min_hours"`
+	DataDirectory          string `json:"data_directory"`
+	SQLiteBudgetMiB        int    `json:"sqlite_budget_mib"`
+	MessageRetentionHours  int    `json:"message_retention_hours"`
+	CleanupFreePercent     int    `json:"cleanup_free_percent"`
+	CleanupIntervalSeconds int    `json:"cleanup_interval_seconds"`
+	CursorIdleHours        int    `json:"cursor_idle_hours"`
+	TombstoneMinHours      int    `json:"tombstone_min_hours"`
+	// TaskIdleHours, TaskExpiryHours, and MemoryExpiryHours are the
+	// inactivity periods of ADR 0013: the TUI's idle marker for a task
+	// channel, the maintenance tick's deletion of an inactive task channel,
+	// and its tombstoning of an unaccessed memory. 0 disables the rule.
+	TaskIdleHours                int               `json:"task_idle_hours"`
+	TaskExpiryHours              int               `json:"task_expiry_hours"`
+	MemoryExpiryHours            int               `json:"memory_expiry_hours"`
 	ReceiptRetentionMinutes      int               `json:"receipt_retention_minutes"`
 	MaxMessageKiB                int               `json:"max_message_kib"`
 	SendMessagesPerSecond        int               `json:"send_messages_per_second"`
@@ -59,6 +66,9 @@ func Default() Config {
 		CleanupIntervalSeconds:       60,
 		CursorIdleHours:              72,
 		TombstoneMinHours:            72,
+		TaskIdleHours:                168,
+		TaskExpiryHours:              720,
+		MemoryExpiryHours:            8760,
 		ReceiptRetentionMinutes:      60,
 		MaxMessageKiB:                64,
 		SendMessagesPerSecond:        100,
@@ -327,6 +337,12 @@ func (c *Config) validate() error {
 		{"receive_max_count", c.ReceiveMaxCount, 1, 10000},
 		{"receive_max_wait_seconds", c.ReceiveMaxWaitSeconds, 0, 240},
 		{"result_default_kib", c.ResultDefaultKiB, 1, 4096},
+		// 0 disables the rule, so the floor is 0, not 1 (ADR 0013); 87600
+		// (10 years) is a sane ceiling well above memory_expiry_hours'
+		// 8760 default.
+		{"task_idle_hours", c.TaskIdleHours, 0, 87600},
+		{"task_expiry_hours", c.TaskExpiryHours, 0, 87600},
+		{"memory_expiry_hours", c.MemoryExpiryHours, 0, 87600},
 	}
 	for _, b := range bounds {
 		if b.v < b.min || b.v > b.max {

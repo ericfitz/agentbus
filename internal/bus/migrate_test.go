@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus/internal/config"
 )
@@ -403,5 +404,95 @@ func TestMigrateV5AddsSubject(t *testing.T) {
 	}
 	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'zebra'").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("insert trigger must index subject: %d %v", n, err)
+	}
+}
+
+// TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions (ADR 0013): a v6
+// file gains memory_access, backfilled at the migration time for every live
+// memory but not for task rows, and loses every subscription to a task list
+// (bare "tasks" and "tasks/..."), for every sender, while other
+// subscriptions survive.
+func TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shape a v6 database: no memory_access, two live memories (one on a
+	// task list, which must not get a row), a tombstoned memory (must not
+	// get a row either), and subscriptions to a task list and a chat
+	// channel, from two different senders.
+	for _, s := range []string{
+		"DROP TABLE memory_access",
+		"INSERT INTO channels(name,kind,created_seq) VALUES('tasks/repo','memory',0)",
+		"INSERT INTO channels(name,kind,created_seq) VALUES('dev','ordinary',0)",
+		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision) VALUES('memory','sam','r',1,'','remember me',1,1)",
+		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,tombstone,tombstone_at) VALUES('memory','sam','r',2,'','gone',2,1,1,2)",
+		`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision) VALUES('tasks/repo','sam','r',3,'','{"subject":"x","status":"pending","rank":"V"}',3,1)`,
+		"INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('sam','tasks/repo',0,0)",
+		"INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('sam','tasks',0,0)",
+		"INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('kim','tasks/repo',0,0)",
+		"INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('sam','dev',0,0)",
+		"PRAGMA user_version = 6",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().UnixMilli()
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v6 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	after := time.Now().UnixMilli()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	rows, err := b.db.Query("SELECT memory_id, accessed_at FROM memory_access ORDER BY memory_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct{ id, at int64 }
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.at); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].id != 1 {
+		t.Fatalf("memory_access after migration: %+v, want one row for memory 1 only (not the tombstone, not the task)", got)
+	}
+	if got[0].at < before || got[0].at > after {
+		t.Fatalf("accessed_at = %d, want between %d and %d (migration time)", got[0].at, before, after)
+	}
+	var subs []string
+	rows, err = b.db.Query("SELECT sender || ' ' || channel FROM subscriptions ORDER BY 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		subs = append(subs, s)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(subs, "|") != "sam dev" {
+		t.Fatalf("subscriptions after migration: %v, want only sam's dev subscription (every task-list subscription dropped)", subs)
 	}
 }

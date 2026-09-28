@@ -179,12 +179,17 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 
 // TestEmbedBatchSkipsBareTasksChannel: the bare "tasks" list is a task
 // channel too (ADR 0007, bus.IsTaskChannel), same as tasks/*, so its task
-// descriptions must not be embedded either (#14 root cause).
+// descriptions must not be embedded either (#14 root cause). "tasks" is no
+// longer a default (ADR 0013); the row is shaped directly, like a leftover
+// from before the upgrade, since create_channel still refuses the name.
 func TestEmbedBatchSkipsBareTasksChannel(t *testing.T) {
 	srv := fakeEmbeddings(t)
 	defer srv.Close()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
+	if _, err := b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('tasks','memory',0)"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks", Subject: "a", Description: "roses are red"}); err != nil {
 		t.Fatal(err)
 	}

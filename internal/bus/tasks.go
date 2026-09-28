@@ -10,8 +10,10 @@ import (
 	"unicode"
 )
 
-// TaskPrefix starts the name of every task-list channel: tasks/<name>. The
-// bare name "tasks" is the machine-wide default list (ADR 0007).
+// TaskPrefix starts the name of every task-list channel: tasks/<name>, one
+// per effort (ADR 0013). The bare name "tasks" is no longer a default
+// (ADR 0007's machine-wide list), but an existing one still works as a task
+// list until it expires; create_channel still refuses to create a new one.
 const TaskPrefix = "tasks/"
 
 // IsTaskChannel reports whether channel is a task list.

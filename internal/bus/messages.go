@@ -252,6 +252,15 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		if _, err := tx.Exec("UPDATE messages SET memory_id=seq, revision=1 WHERE seq=?", seq); err != nil {
 			return 0, err
 		}
+		// A task list is memory-kind too (prefixKinds), but a task row
+		// never gets a memory_access row: the task-channel expiry rule
+		// governs it instead (ADR 0013). TaskCreate is insertMessage's only
+		// caller with a task channel; Send refuses one before this runs.
+		if !IsTaskChannel(in.Channel) {
+			if _, err := tx.Exec("INSERT INTO memory_access(memory_id, accessed_at) VALUES(?,?) ON CONFLICT(memory_id) DO UPDATE SET accessed_at=excluded.accessed_at", seq, b.nowMs()); err != nil {
+				return 0, err
+			}
+		}
 	}
 	if err := insertTags(tx, seq, in.Tags); err != nil {
 		return 0, err

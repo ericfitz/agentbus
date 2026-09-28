@@ -162,7 +162,8 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 // repoconfig.DefaultChannels when there is none) and records the outcome on
 // reg. A file that cannot be read counts as absent, so register still
 // succeeds; the problem is surfaced in SubscribeFailed under the key
-// ".local/agentbus.json".
+// ".local/agentbus.json". A task-list entry is neither subscribed nor
+// reported as failed: it goes to reg.IgnoredChannels (ADR 0013).
 func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	reg.Subscribed = []string{}
 	reg.MemoryChannels = []string{}
@@ -181,6 +182,15 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		}
 	}
 	for _, c := range channels {
+		// Task lists are no longer subscribed by default (ADR 0013): a
+		// leftover "tasks" or "tasks/..." entry, left by an older init or a
+		// pre-upgrade file, is skipped and reported rather than resubscribed.
+		// register does not rewrite the file; the using-agentbus skill tells
+		// the caller to remove these itself.
+		if bus.IsTaskChannel(c) {
+			reg.IgnoredChannels = append(reg.IgnoredChannels, c)
+			continue
+		}
 		// A prefixed name implies its kind, so a listed project channel the
 		// tick reaped while empty and unsubscribed comes back here rather
 		// than failing until someone reruns agentbus init.
@@ -189,9 +199,9 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		}
 		// Memory channels are searched, not pushed (ADR 0008): report them
 		// and drop any subscription an earlier register left behind, so a
-		// resumed identity stops receiving memories too. Task lists are
-		// memory-kind but event-driven, so they stay subscribed.
-		if kind, _ := b.ChannelKind(c); kind == "memory" && !bus.IsTaskChannel(c) {
+		// resumed identity stops receiving memories too. c is never a task
+		// list here (skipped above), so no exception is needed for it.
+		if kind, _ := b.ChannelKind(c); kind == "memory" {
 			_ = b.Unsubscribe(reg.Sender, c)
 			reg.MemoryChannels = append(reg.MemoryChannels, c)
 			continue
@@ -321,7 +331,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels and task lists (.local/agentbus.json; default general and tasks) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {

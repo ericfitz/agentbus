@@ -281,11 +281,14 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatal("repo init touched harness CLIs:", f.calls)
 	}
 	id := readJSON(t, filepath.Join(root, ".local", "agentbus.json"))
-	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","tasks","general/widgets","memory/widgets","tasks/widgets"]`) {
+	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","general/widgets","memory/widgets"]`) {
 		t.Fatalf("identity file: %v", id)
 	}
-	if got := channelKinds(t, o.Config); got["general/widgets"] != "ordinary" || got["memory/widgets"] != "memory" || got["tasks/widgets"] != "memory" {
+	if got := channelKinds(t, o.Config); got["general/widgets"] != "ordinary" || got["memory/widgets"] != "memory" {
 		t.Fatalf("project channels not created on the bus: %v", got)
+	}
+	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
+		t.Fatal("init must not create tasks/<repo> (ADR 0013)")
 	}
 	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if string(gi) != "bin/\n.local/\n" {
@@ -308,7 +311,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	if strings.Count(string(gi), ".local/") != 1 || !strings.Contains(out.String(), "set to \"Sam\"") {
 		t.Fatalf("rerun: gitignore=%q out=%s", gi, out.String())
 	}
-	if got := channelKinds(t, o.Config); got["general/Sam"] != "ordinary" || got["memory/Sam"] != "memory" || got["tasks/Sam"] != "memory" {
+	if got := channelKinds(t, o.Config); got["general/Sam"] != "ordinary" || got["memory/Sam"] != "memory" {
 		t.Fatalf("rerun did not create channels for the existing identity: %v", got)
 	}
 
@@ -333,6 +336,42 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	if err := Init(o, &out); err != nil || len(f.calls) == 0 {
 		t.Fatalf("--global in repo did not run the global step: %v calls=%v", err, f.calls)
+	}
+}
+
+// TestInitRemovesTaskEntriesFromExistingFile (ADR 0013): init no longer
+// creates tasks/<repo>, and cleans a bare "tasks" or "tasks/..." entry a
+// pre-ADR-0013 file already lists, reporting what it removed. Other entries
+// are left alone.
+func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
+	home := t.TempDir()
+	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"agentbus":{}}}`), 0o644)
+	root := filepath.Join(t.TempDir(), "widgets")
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	idPath := filepath.Join(root, ".local", "agentbus.json")
+	_ = os.MkdirAll(filepath.Dir(idPath), 0o755)
+	_ = os.WriteFile(idPath, []byte(`{"identity":"widgets","channels":["general","memory","tasks","tasks/widgets","reviews"]}`+"\n"), 0o644)
+
+	f := &fakeHarness{home: home}
+	o := initOpts(t, home, f)
+	o.Cwd = root
+	var out bytes.Buffer
+	if err := Init(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "removed task-list entries") || !strings.Contains(out.String(), "tasks, tasks/widgets") {
+		t.Fatalf("no removal line:\n%s", out.String())
+	}
+	id := readJSON(t, idPath)
+	got := string(mustJSON(t, id["channels"]))
+	if strings.Contains(got, `"tasks"`) || strings.Contains(got, `"tasks/widgets"`) {
+		t.Fatalf("task entries survived: %s", got)
+	}
+	if !strings.Contains(got, `"reviews"`) || !strings.Contains(got, `"general/widgets"`) {
+		t.Fatalf("unrelated entries lost: %s", got)
+	}
+	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
+		t.Fatal("init must not create tasks/<repo> (ADR 0013)")
 	}
 }
 

@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -31,6 +31,18 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, subject, content) VALUES ('delete', old.seq, old.subject, old.content);
 END;
+`
+
+// memoryAccessDDL is shared by schema.go (fresh databases) and migrate.go's
+// addMemoryAccess step (v6 -> v7, ADR 0013): one row per live memory,
+// updated on create, edit, get, and search hit, apart from messages so
+// revisions need not carry it. Task rows never get one; the task-channel
+// expiry rule governs them instead.
+const memoryAccessDDL = `
+CREATE TABLE IF NOT EXISTS memory_access (
+  memory_id INTEGER PRIMARY KEY,
+  accessed_at INTEGER NOT NULL
+);
 `
 
 const schema = `
@@ -117,4 +129,5 @@ CREATE TABLE IF NOT EXISTS notices (
   message TEXT NOT NULL,
   set_at INTEGER NOT NULL
 );
+` + memoryAccessDDL + `
 `

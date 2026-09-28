@@ -29,6 +29,44 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	}
 }
 
+// TestExpiryDefaults (ADR 0013): the three new settings default to 7 days,
+// 30 days, and 1 year in hours.
+func TestExpiryDefaults(t *testing.T) {
+	t.Setenv("AGENTBUS_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("AGENTBUS_DATA_DIR", "")
+	c, _, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TaskIdleHours != 168 || c.TaskExpiryHours != 720 || c.MemoryExpiryHours != 8760 {
+		t.Fatalf("expiry defaults wrong: %+v", c)
+	}
+}
+
+// TestExpiryOverrideAcceptsZero: a file can set any of the three, including
+// 0 (which disables the rule).
+func TestExpiryOverrideAcceptsZero(t *testing.T) {
+	p := write(t, t.TempDir(), `{"task_idle_hours": 1, "task_expiry_hours": 0, "memory_expiry_hours": 24}`)
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TaskIdleHours != 1 || c.TaskExpiryHours != 0 || c.MemoryExpiryHours != 24 {
+		t.Fatalf("expiry overrides wrong: %+v", c)
+	}
+}
+
+// TestRejectsNegativeExpiryHours: negative values are rejected at load,
+// unlike 0 which means "never".
+func TestRejectsNegativeExpiryHours(t *testing.T) {
+	for _, key := range []string{"task_idle_hours", "task_expiry_hours", "memory_expiry_hours"} {
+		p := write(t, t.TempDir(), `{"`+key+`": -1}`)
+		if _, _, err := Load(p); err == nil || !strings.Contains(err.Error(), key) {
+			t.Fatalf("%s: want range error naming the key, got %v", key, err)
+		}
+	}
+}
+
 func TestIconsAndIconMapFromFile(t *testing.T) {
 	p := write(t, t.TempDir(), `{"icons": "custom", "icon_map": {"chat": "X"}}`)
 	c, _, err := Load(p)

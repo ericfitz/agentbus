@@ -16,7 +16,10 @@ import (
 )
 
 // DefaultChannels is the persistent list when the file has no "channels" key.
-var DefaultChannels = []string{"general", "memory", "tasks"}
+// "tasks" was here through ADR 0007; ADR 0013 dropped it: task lists are
+// per effort (tasks/<effort>), subscribed by whoever works on one, not a
+// default every registration picks up.
+var DefaultChannels = []string{"general", "memory"}
 
 // File is a parsed .local/agentbus.json. Raw holds every key so writers
 // preserve ones they do not understand.

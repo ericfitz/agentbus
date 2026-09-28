@@ -3,6 +3,7 @@ package bus
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMemoryEditDeleteLifecycle(t *testing.T) {
@@ -11,9 +12,25 @@ func TestMemoryEditDeleteLifecycle(t *testing.T) {
 	_, _ = b.CreateChannel(sam, "mem", "memory")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
 	id := *c.MemoryID
+	accessedAt := func() (int64, bool) {
+		var at int64
+		err := b.db.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", id).Scan(&at)
+		return at, err == nil
+	}
+	// send (create) sets memory_access (ADR 0013).
+	created, ok := accessedAt()
+	if !ok {
+		t.Fatal("send must set memory_access for a new memory")
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Minute) }
 	e, err := b.EditMemory(sam, EditInput{ID: id, Content: "roses are blue"})
 	if err != nil || e.Revision != 2 || e.Replaced != c.Seq || e.MemoryID != id {
 		t.Fatalf("%+v %v", e, err)
+	}
+	// edit_memory bumps memory_access (ADR 0013).
+	edited, ok := accessedAt()
+	if !ok || edited <= created {
+		t.Fatalf("edit_memory must bump accessed_at: created=%d edited=%d ok=%v", created, edited, ok)
 	}
 	m, err := b.GetMemory(sam, id)
 	if err != nil || m.Content != "roses are blue" || *m.Revision != 2 {
@@ -27,11 +44,29 @@ func TestMemoryEditDeleteLifecycle(t *testing.T) {
 	if err := b.DeleteMemory(sam, id, ""); err != nil {
 		t.Fatal(err)
 	}
+	// delete_memory drops the memory_access row (ADR 0013).
+	if _, ok := accessedAt(); ok {
+		t.Fatal("delete_memory must drop the memory_access row")
+	}
 	if _, err := b.GetMemory(sam, id); err == nil || !strings.Contains(err.Error(), "not_found") {
 		t.Fatal("deleted memory must be not_found:", err)
 	}
 	if _, err := b.EditMemory(sam, EditInput{ID: id, Content: "x"}); err == nil || !strings.Contains(err.Error(), "not_found") {
 		t.Fatal("edit of deleted memory must be not_found:", err)
+	}
+}
+
+// TestTaskCreateGetsNoMemoryAccessRow (ADR 0013): a task, unlike a memory,
+// never gets a memory_access row; the task-channel expiry rule governs it
+// instead.
+func TestTaskCreateGetsNoMemoryAccessRow(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM memory_access WHERE memory_id=?", tk.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("task_create must not add a memory_access row: %d %v", n, err)
 	}
 }
 

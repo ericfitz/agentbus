@@ -211,9 +211,14 @@ func TestTickReclaimsWithEmptySender(t *testing.T) {
 // The tick sweeps the machine-wide tasks list too, not only tasks/<repo> (#14).
 func TestTickReclaimsOnBareTasksList(t *testing.T) {
 	b, other := twoAgents(t)
-	// The bare "tasks" list is a default channel ensureDefaults already
-	// created; CreateChannel unconditionally rejects the reserved name
-	// "tasks" (resolveKind), so there's nothing to create here.
+	// The bare "tasks" list is no longer a default (ADR 0013), and
+	// CreateChannel unconditionally rejects the reserved name "tasks"
+	// (resolveKind); an existing one still works as a task list until it
+	// expires, so the row is shaped directly, like a leftover from before
+	// the upgrade.
+	if _, err := b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('tasks','memory',0)"); err != nil {
+		t.Fatal(err)
+	}
 	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks", Subject: "x"})
 	if _, err := other.TaskClaim("Pat", tk.ID, 0, ""); err != nil {
 		t.Fatal(err)

@@ -276,6 +276,11 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if _, err := tx.Exec("UPDATE messages SET memory_id=?, revision=? WHERE seq=?", in.ID, curRev+1, seq); err != nil {
 		return EditResult{}, internal(err)
 	}
+	// EditMemory already refused a task channel above (IsTaskChannel), so
+	// this is always a genuine memory (ADR 0013).
+	if _, err := tx.Exec("INSERT INTO memory_access(memory_id, accessed_at) VALUES(?,?) ON CONFLICT(memory_id) DO UPDATE SET accessed_at=excluded.accessed_at", in.ID, b.nowMs()); err != nil {
+		return EditResult{}, internal(err)
+	}
 	res := EditResult{Seq: seq, MemoryID: in.ID, Revision: curRev + 1, Replaced: curSeq}
 	if err := b.storeReceipt(tx, as, key, in, res); err != nil {
 		return EditResult{}, internal(err)
@@ -384,6 +389,11 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 	// than waiting for the FK cascade, which only fires at purge, up to 72h
 	// later (R6a).
 	if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", seq); err != nil {
+		return internal(err)
+	}
+	// DeleteMemory already refused a task channel above, so id never names
+	// a task; drop its access row along with it (ADR 0013).
+	if _, err := tx.Exec("DELETE FROM memory_access WHERE memory_id=?", id); err != nil {
 		return internal(err)
 	}
 	if err := b.storeReceipt(tx, as, key, payload, nil); err != nil {

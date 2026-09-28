@@ -379,9 +379,9 @@ func hasHookCommand(entry any, cmd string) bool {
 }
 
 // repo writes the repository's identity file, creates the repository's own
-// channels (general/, memory/, and tasks/<identity>) on the bus and in the
-// persistent channel list, makes sure .local/ is git-ignored, then
-// prints the registration line.
+// channels (general/ and memory/) on the bus and in the persistent channel
+// list, removes any task-list entry the file already has, makes sure
+// .local/ is git-ignored, then prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
 		in.say("warning: no agentbus MCP entry found in ~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml; run `agentbus init --global` first")
@@ -411,10 +411,15 @@ func (in *initer) repo(root string) error {
 	return identity(in.Cwd, in.out, os.Stderr)
 }
 
-// projectChannels creates general/<identity>, memory/<identity>, and
-// tasks/<identity> on the bus and adds them to the persistent channel list.
-// A pre-ADR-0007 project channel (<identity>, <identity>-memory) is renamed
-// to its prefixed name, history included, and dropped from the list.
+// projectChannels creates general/<identity> and memory/<identity> on the
+// bus and adds them to the persistent channel list. A pre-ADR-0007 project
+// channel (<identity>, <identity>-memory) is renamed to its prefixed name,
+// history included, and dropped from the list. It no longer creates
+// tasks/<identity> (ADR 0013): task lists are per effort, created as
+// needed, not by init. Any "tasks" or "tasks/..." entry already in the
+// persistent list — a pre-ADR-0013 tasks/<identity>, or the old
+// machine-wide default — is removed and reported; the channel itself stays
+// on the bus until it expires.
 func (in *initer) projectChannels(root string) error {
 	f, err := repoconfig.Load(root)
 	if err != nil {
@@ -425,20 +430,18 @@ func (in *initer) projectChannels(root string) error {
 		return err
 	}
 	defer func() { _ = b.Close() }()
-	for _, m := range []struct{ old, name string }{{f.Identity, "general/" + f.Identity}, {f.Identity + "-memory", "memory/" + f.Identity}, {"", bus.TaskPrefix + f.Identity}} {
-		if m.old != "" {
-			var be *bus.Error
-			switch err := b.RenameChannel(m.old, m.name); {
-			case err == nil:
-				in.say("renamed channel %s to %s", m.old, m.name)
-			case errors.As(err, &be) && (be.Code == "not_found" || be.Code == "conflict"):
-				// nothing to migrate, or already migrated
-			default:
-				return err
-			}
-			if _, err := f.RemoveChannel(m.old); err != nil {
-				return err
-			}
+	for _, m := range []struct{ old, name string }{{f.Identity, "general/" + f.Identity}, {f.Identity + "-memory", "memory/" + f.Identity}} {
+		var be *bus.Error
+		switch err := b.RenameChannel(m.old, m.name); {
+		case err == nil:
+			in.say("renamed channel %s to %s", m.old, m.name)
+		case errors.As(err, &be) && (be.Code == "not_found" || be.Code == "conflict"):
+			// nothing to migrate, or already migrated
+		default:
+			return err
+		}
+		if _, err := f.RemoveChannel(m.old); err != nil {
+			return err
 		}
 		if err := b.EnsureChannel(m.name, ""); err != nil {
 			return err
@@ -448,6 +451,20 @@ func (in *initer) projectChannels(root string) error {
 		}
 	}
 	list, _ := f.Channels()
+	var tasks []string
+	for _, c := range list {
+		if bus.IsTaskChannel(c) {
+			tasks = append(tasks, c)
+		}
+	}
+	for _, c := range tasks {
+		if list, err = f.RemoveChannel(c); err != nil {
+			return err
+		}
+	}
+	if len(tasks) > 0 {
+		in.say("removed task-list entries from the persistent channel list: %s (task lists are per effort now; create tasks/<effort> when you start one)", strings.Join(tasks, ", "))
+	}
 	return printChannels(in.out, f.Identity, list)
 }
 

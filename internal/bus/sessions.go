@@ -22,6 +22,12 @@ type Registration struct {
 	// excepted), which register does not subscribe: memories are searched,
 	// not pushed (ADR 0008).
 	MemoryChannels []string `json:"memory_channels"`
+	// IgnoredChannels lists the persistent-list entries register skipped
+	// because they name a task list ("tasks" or "tasks/..."): task lists
+	// are no longer a default and are not subscribed from
+	// .local/agentbus.json (ADR 0013). register does not rewrite the file;
+	// the caller is told to remove these entries itself. Omitted when empty.
+	IgnoredChannels []string `json:"ignored_channels,omitempty"`
 	// Others lists the other live identities (what discover returns, minus
 	// this one), so a session need not call discover to learn it is not alone.
 	// Omitted when discovery is disabled.

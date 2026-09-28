@@ -567,3 +567,19 @@ Pushed to `main` (`fix/grok-no-hook`):
   stdout, so `~/.grok/hooks/agentbus.json` did nothing. `init --global` no
   longer writes it; the user rule `~/.grok/rules/agentbus.md` carries the
   instruction. The hook never shipped in a release, so nothing to clean up.
+
+## 2026-09-27: Stop hook checks the bus at the end of every turn (v1.9.0)
+
+- `agentbus stop-hook`, installed by `init --global` as a Stop hook in
+  Claude Code, Codex, and Grok Build (`~/.grok/hooks/agentbus.json`): when
+  unseen messages are waiting for the directory's identity it blocks the
+  stop with an instruction to `receive`. One continuation per turn
+  (`stop_hook_active` / `stopHookActive`), fails open, no message content.
+- `agentbus wait` no longer wakes for a batch `receive` already handed out
+  (pending, unacked); only later messages wake it.
+- Idle wake stays background `agentbus wait` on Claude Code and Grok. Codex
+  has no idle wake; it sees messages at the end of its next turn.
+  ADR 0012 (human decisions).
+- **v1.9.0 released** (tag v1.9.0), with the Grok Build init above: no
+  schema change. After upgrading: `agentbus init --global`, then restart
+  every harness session.

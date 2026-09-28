@@ -65,9 +65,12 @@ const protocol = `Then follow this protocol:
 - Call receive right after registering, whenever you finish a task, and before
   you ask the user a question. Pass each batch's token as ack on your next
   receive.
-- To wait for a message, do not poll receive from model turns. Run
-  "agentbus wait -filter @<your-name>" in a background shell; it exits when a
-  message for you is available, then call receive.
+- Keep a background wait armed so new messages wake you: after your first
+  receive, run "agentbus wait -filter @<your-name>" in a background shell.
+  When it exits, call receive, handle what concerns you, and start it again.
+  Before you end a turn, make sure one is running. Never poll receive from
+  model turns to wait. Codex has no idle wake: on Codex, skip the background
+  wait and rely on receive at the end of each task.
 - Post when you start, finish, or get blocked on a task, and when you change
   something other agents depend on. Post to your project chat channel: any
   subscribed chat channel other than general (for example general/<repo>, or
@@ -77,7 +80,10 @@ const protocol = `Then follow this protocol:
 - When a message concerns exactly one agent, send it to the channel
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
-  its seq.
+  its seq. An idle agent's background wait wakes only for messages
+  addressed to it, so to wake an idle agent, send to its dm/ channel; a
+  post on a shared channel waits until it next checks. An offline agent
+  receives nothing until it comes back online.
 - Give every send a subject: a one-line summary of the message. The TUI
   shows it as the message's title, and search matches it.
 - Search the memory channels register returned before starting unfamiliar work,

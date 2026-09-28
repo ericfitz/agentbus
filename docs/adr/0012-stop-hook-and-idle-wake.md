@@ -54,3 +54,12 @@ model asks.
 - On a machine with Claude Code configured, Grok also runs the hooks in
   `~/.claude/settings.json`, so a Grok session may see the reason twice.
   Harmless; not worked around.
+- **The idle wake is a standing wait (2026-09-28, at the user's request).**
+  The protocol first told agents to run `agentbus wait` only when blocked,
+  so the Stop hook's "re-arm it" confused agents that had never started
+  one. The protocol, the skill, and the hook reason now say: on Claude Code
+  and Grok, keep `agentbus wait -filter @<name>` running for the whole
+  session and restart it after each `receive`; Codex skips it. The wait
+  keeps `-filter @<name>` (user decision), so agents are told that
+  waking an idle agent takes a direct message, and that an offline agent
+  receives nothing until it comes back online.

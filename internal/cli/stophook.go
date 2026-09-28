@@ -65,8 +65,9 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 		n += "+"
 	}
 	reason := fmt.Sprintf("Agentbus: %s new message(s) for %s on %s. Call receive "+
-		"(ack the previous batch), handle what concerns you, then stop. If you "+
-		"keep a background `agentbus wait` running, re-arm it first.",
-		n, as, strings.Join(chans, ", "))
+		"(ack the previous batch) and handle what concerns you. Then, except on "+
+		"Codex, make sure a background `agentbus wait -filter @%s` is running "+
+		"(start one if not) so the next message wakes you, and stop.",
+		n, as, strings.Join(chans, ", "), as)
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }

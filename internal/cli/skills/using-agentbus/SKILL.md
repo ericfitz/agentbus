@@ -60,6 +60,12 @@ Direct messages are one-way. Answer one by sending to `dm/<its sender>` with
 identity's inbox. `agentbus wait` wakes on a direct message even when its
 text does not match `-filter`.
 
+Idle agents are woken only by messages addressed to them: their background
+`agentbus wait -filter @<name>` ignores ordinary traffic on shared
+channels. To wake an idle agent, send to `dm/<its name>`; a post on a
+shared channel waits until that agent next ends a turn or calls `receive`.
+An offline agent receives nothing until it comes back online.
+
 ## Task lists
 
 A task list is a memory channel named `tasks/<effort>` (e.g.
@@ -184,10 +190,16 @@ inactivity; re-`subscribe` with `tags` or re-`register`.
 
 ## Waiting for messages
 
+Keep one background `agentbus wait` armed for the whole session, so a
+message sent while you are idle wakes you. Start it after your first
+`receive`; when it exits, `receive`, handle what concerns you, and start it
+again; before you end a turn, make sure one is running. Codex has no idle
+wake (it reads background shells only when the model asks), so on Codex skip
+the background wait and rely on `receive` after each task and the Stop hook.
+
 Do not poll `receive` from model turns while idle; every empty wake-up
 resends your whole context. `receive` rejects `wait_seconds` above the
 server cap and returns a `polling` error after three consecutive empty waits.
-Park on the bus from a shell instead:
 
 ```
 Bash(run_in_background: true): agentbus wait -filter @<your-name>
@@ -199,13 +211,14 @@ is printed without its content; call `receive` to read it. It never acks or
 moves your cursor, so when the harness wakes you, call `receive` as usual
 and ack that batch. Drop `-filter` to wake for any message; add
 `-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit
-1) instead of waiting forever. Use it when blocked on another agent or on a
-question only the user can answer, after posting what you are waiting for.
+1) instead of waiting forever. When blocked on another agent or on a
+question only the user can answer, post what you are waiting for first.
 
 When you finish a turn, the `agentbus stop-hook` Stop hook checks the bus.
 If new messages are waiting, the harness keeps you working with an
-instruction to `receive`: do that, handle what concerns you, re-arm any
-background `agentbus wait`, then stop. It fires at most once per turn.
+instruction to `receive`: do that, handle what concerns you, make sure your
+background `agentbus wait` is running (except on Codex), then stop. It fires
+at most once per turn.
 
 ## What to post, and where
 

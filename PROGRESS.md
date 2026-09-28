@@ -597,3 +597,12 @@ Pushed to `main` (`fix/grok-no-hook`):
 - **v1.10.0 released** (tag v1.10.0): schema v7, migration drops all
   task-list subscriptions. Upgrade and restart all hosts together, then
   `agentbus init --global`.
+
+## 2026-09-28: Standing background wait (v1.10.1)
+
+- Protocol, using-agentbus skill, and Stop hook reason now tell Claude Code
+  and Grok agents to keep `agentbus wait -filter @<name>` armed all session
+  (Codex skips it); waking an idle agent takes a DM; offline agents get
+  nothing until they return. ADR 0012 ruling added.
+- **v1.10.1 released** (tag v1.10.1). No schema change; upgrade, then
+  `agentbus init --global` and restart sessions.

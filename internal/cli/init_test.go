@@ -288,7 +288,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatalf("project channels not created on the bus: %v", got)
 	}
 	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
-		t.Fatal("init must not create tasks/<repo> (ADR 0013)")
+		t.Fatal("init must not create a per-repo task list (ADR 0013)")
 	}
 	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if string(gi) != "bin/\n.local/\n" {
@@ -340,7 +340,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 }
 
 // TestInitRemovesTaskEntriesFromExistingFile (ADR 0013): init no longer
-// creates tasks/<repo>, and cleans a bare "tasks" or "tasks/..." entry a
+// creates a per-repo task list, and cleans a bare "tasks" or "tasks/..." entry a
 // pre-ADR-0013 file already lists, reporting what it removed. Other entries
 // are left alone.
 func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
@@ -371,7 +371,7 @@ func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
 		t.Fatalf("unrelated entries lost: %s", got)
 	}
 	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
-		t.Fatal("init must not create tasks/<repo> (ADR 0013)")
+		t.Fatal("init must not create a per-repo task list (ADR 0013)")
 	}
 }
 

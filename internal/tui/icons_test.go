@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -81,6 +82,10 @@ func TestLoadIconsNerdfontWidthParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())
+	// A stale task channel (ADR 0013) adds the idle marker to its rail row;
+	// its width must still match between icon sets.
+	f.m.c.cfg.TaskIdleHours = 1
+	f.setChannelLastActivity(t, "tasks/work", time.Now().Add(-2*time.Hour))
 	f.selectTaskChannel(t, "tasks/work")
 
 	setIcons(emojiIcons)

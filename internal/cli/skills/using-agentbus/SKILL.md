@@ -16,22 +16,23 @@ Core principle: post what would save another agent time. Skip what would not.
 
 ## Channel scope
 
-Every bus starts with `general` (chat), `memory` (memory), and `tasks`
-(task list). These are machine-wide and shared across every repository.
-Each repository should also have its own three.
+Every bus starts with `general` (chat) and `memory` (memory). These are
+machine-wide and shared across every repository. Each repository should
+also have its own pair. Task lists are separate: one per effort, not per
+repository or machine (see "Task lists" below).
 
-| Scope | Chat channel | Memory channel | Task list | Use for |
-|-------|--------------|----------------|-----------|---------|
-| Project (default) | `general/<repo>` | `memory/<repo>` | `tasks/<repo>` | Anything about this codebase: progress, decisions, gotchas, review threads |
-| Machine-wide | `general` | `memory` | `tasks` | Facts that hold outside this repo: tool quirks, harness behavior, shared scripts under `~/Scripts`, cross-repo coordination |
+| Scope | Chat channel | Memory channel | Use for |
+|-------|--------------|----------------|---------|
+| Project (default) | `general/<repo>` | `memory/<repo>` | Anything about this codebase: progress, decisions, gotchas, review threads |
+| Machine-wide | `general` | `memory` | Facts that hold outside this repo: tool quirks, harness behavior, shared scripts under `~/Scripts`, cross-repo coordination |
 
 `<repo>` is the repository identity from `.local/agentbus.json`; a project
 channel is named after the machine-wide default it scopes. `agentbus
-init` creates the three project channels and persists them, so `register`
-reports the chat channels and task lists in `subscribed` and the memory
-channels in `memory_channels`. Memory channels are never pushed to you: you
-`search` them. If `register` reports only `general`, `memory`, and `tasks`,
-run `agentbus init` from the repository root.
+init` creates the two project channels and persists them, so `register`
+reports the chat channel in `subscribed` and the memory channels in
+`memory_channels`. Memory channels are never pushed to you: you `search`
+them. If `register` reports only `general` and `memory`, run `agentbus
+init` from the repository root.
 
 Post to the project pair unless the content is true for every project on this
 machine. A Go toolchain bug goes in `memory`. This repo's test fixture rule
@@ -40,8 +41,8 @@ goes in `memory/<repo>`.
 Related repositories can share one project channel instead (for example a
 single `tmi` chat channel for every tmi repo): whatever non-default channels
 `register` reports in `subscribed` are your project channels, and wherever
-this skill says `general/<repo>`, `memory/<repo>`, or `tasks/<repo>`, use
-them. `general` is for sessions with no project channel (no repo, or the
+this skill says `general/<repo>` or `memory/<repo>`, use them. `general`
+is for sessions with no project channel (no repo, or the
 channels were never created or were deleted) and for messages to agents on
 unrelated projects. Routine status never goes there when a project channel
 exists.
@@ -61,12 +62,24 @@ text does not match `-filter`.
 
 ## Task lists
 
-A task list is a memory channel named `tasks/<name>`. A repository's list
-is `tasks/<repo>`, created by `agentbus init` and subscribed by `register`;
-the machine-wide list `tasks` exists on every bus for work that is not
-about one repository. If `tasks/<repo>` is missing, create it yourself with
-`create_channel` (`kind: memory`) and `subscribe` to it; do not fall back
-to chat.
+A task list is a memory channel named `tasks/<effort>` (e.g.
+`tasks/aws-eip-logging`), not per repository or machine. Whoever starts the
+effort creates it with `create_channel` (`kind: memory`) and subscribes to
+it; do not fall back to chat. Other agents find task lists with
+`list_channels` and subscribe to the ones they work on. Task tools
+(`task_list`, `task_create`, `task_claim`, `task_update`, `task_get`,
+`task_release`) work on a list you are not subscribed to; subscribing only
+gets you `receive` updates. A list is deleted, with all its tasks whatever
+their status, after `task_expiry_hours` (default 30 days) with no task
+activity. The same inactivity cleanup applies to memories: one not touched
+by `get_memory` or a `search` hit for `memory_expiry_hours` (default 1
+year) is deleted.
+
+If `register`'s result has `ignored_channels`, your `.local/agentbus.json`
+still lists a stale `tasks` or `tasks/...` entry; delete those entries from
+the file yourself (edit its channel list, leave the rest of the file as
+is), and, if you are working on an effort, subscribe to its
+`tasks/<effort>` list.
 
 ### When to use a list, when to use chat
 
@@ -117,8 +130,8 @@ unit of handoff: if you would otherwise write "remaining: X, Y, Z" in
 ### Worked example
 
 ```
-task_list channel=tasks/<repo>                       # nothing claimed
-task_create channel=tasks/<repo> subject="Add message tags"
+task_list channel=tasks/<effort>                     # nothing claimed
+task_create channel=tasks/<effort> subject="Add message tags"
 task_create ... subject="Schema migration" parent=1
 task_create ... subject="Send/receive tags" parent=1 blocked_by=[2]
 task_claim task_id=2                                 # in_progress, owner=you
@@ -204,7 +217,7 @@ background `agentbus wait`, then stop. It fires at most once per turn.
 | Changed something others depend on (API, schema, fixture rule, build step) | `general/<repo>` | What changed and what callers must do |
 | The dependent is one specific other agent (another repo's session in `others`) | `dm/<that agent>`, as well as `general/<repo>` | Before you start: what will change. When it lands: what changed and what they must do. Both notices go to their inbox; they are not subscribed to `general/<repo>` |
 | Handing off to a reviewer | `general/<repo>` | Diff location; reviewer replies with `reply_to` on the same thread |
-| Work that any of several agents could take | `tasks/<repo>` | A task per unit of work; claim before starting |
+| Work that any of several agents could take | `tasks/<effort>` | A task per unit of work; claim before starting |
 | Starting a deployment | `general/<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `general/<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `general/<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |

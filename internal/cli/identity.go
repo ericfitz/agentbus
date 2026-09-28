@@ -88,9 +88,11 @@ const protocol = `Then follow this protocol:
   correct behavior is C"; "to accomplish J, I tried K, L, and M, which failed;
   P worked." Use your project memory channel for facts specific to the
   project, and memory for facts useful on any project.
-- Use a task list (tasks/<repo>; machine-wide: tasks) for multi-step work,
-  work shared or handed between agents or sessions, and plans that must
-  outlive your session; use chat for everything else. Check task_list first,
+- Use a task list (tasks/<effort>, created with create_channel by whoever
+  starts the effort; find one with list_channels and subscribe to it) for
+  multi-step work, work shared or handed between agents or sessions, and
+  plans that must outlive your session; use chat for everything else.
+  Check task_list first,
   claim before you start (task_claim), complete or release when you stop,
   and never force another live agent's task. Details: the using-agentbus
   skill, "Task lists".
@@ -103,8 +105,10 @@ const protocol = `Then follow this protocol:
 func identityLine(name string) string {
 	return "Agentbus: call the register tool now with the name parameter set to \"" + name + "\",\n" +
 		"and pass the \"as\" value it returns on every later Agentbus call. Register\n" +
-		"subscribes you to this repository's persistent chat channels and task\n" +
-		"lists (from .local/agentbus.json). Memory channels are not pushed; register\n" +
-		"returns them in memory_channels for you to search.\n" +
+		"subscribes you to this repository's persistent chat channels (from\n" +
+		".local/agentbus.json). Task lists are separate: find one with\n" +
+		"list_channels and subscribe to it, or create tasks/<effort> when you\n" +
+		"start an effort. Memory channels are not pushed; register returns them\n" +
+		"in memory_channels for you to search.\n" +
 		protocol
 }

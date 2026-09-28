@@ -129,6 +129,57 @@ func TestIdleSessionShowsAge(t *testing.T) {
 	}
 }
 
+// setChannelLastActivity overwrites a channel's LastActivity (ADR 0013) in
+// the rail's already-fetched status, so tests can force a stale task
+// channel without waiting on the real clock.
+func (f *fixture) setChannelLastActivity(t *testing.T, ch string, at time.Time) {
+	t.Helper()
+	for i, c := range f.m.channels {
+		if c.Name == ch {
+			f.m.channels[i].LastActivity = at.UnixMilli()
+			return
+		}
+	}
+	t.Fatalf("channel %q not found in rail", ch)
+}
+
+// TestTaskChannelIdleMarker covers the ADR 0013 rail marker: past
+// task_idle_hours it shows, before it or with the setting disabled (0) it
+// does not, and a non-task channel never gets one regardless of its
+// (unused) LastActivity.
+func TestTaskChannelIdleMarker(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.TaskIdleHours = 1
+	f := newFixtureWith(t, cfg)
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+
+	f.setChannelLastActivity(t, "tasks/work", time.Now().Add(-2*time.Hour))
+	if rail := f.m.renderRails(); !strings.Contains(rail, iconIdle) {
+		t.Fatalf("rail lacks idle marker past task_idle_hours:\n%s", rail)
+	}
+
+	f.setChannelLastActivity(t, "tasks/work", time.Now().Add(-30*time.Minute))
+	if rail := f.m.renderRails(); strings.Contains(rail, iconIdle) {
+		t.Fatalf("rail shows idle marker before task_idle_hours:\n%s", rail)
+	}
+
+	f.m.c.cfg.TaskIdleHours = 0
+	f.setChannelLastActivity(t, "tasks/work", time.Now().Add(-999*time.Hour))
+	if rail := f.m.renderRails(); strings.Contains(rail, iconIdle) {
+		t.Fatalf("rail shows idle marker with task_idle_hours=0:\n%s", rail)
+	}
+	f.m.c.cfg.TaskIdleHours = 1
+	f.setChannelLastActivity(t, "tasks/work", time.Now())
+
+	f.setChannelLastActivity(t, "dev", time.Now().Add(-999*time.Hour))
+	if rail := f.m.renderRails(); strings.Contains(rail, iconIdle) {
+		t.Fatalf("rail shows idle marker on a non-task channel:\n%s", rail)
+	}
+}
+
 func TestRailIsFifthOfScreenWithFloor(t *testing.T) {
 	f := newFixture(t)
 	for _, tc := range []struct{ width, rail int }{{60, 16}, {100, 20}, {200, 40}} {

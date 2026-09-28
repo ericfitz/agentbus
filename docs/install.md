@@ -68,9 +68,12 @@ agentbus init
 
 This writes the repository's identity file (`.local/agentbus.json`, from the
 repository directory's name), creates the repository's own channels on the
-bus (`general/<identity>`, `memory/<identity>`, `tasks/<identity>`) and adds
-them to the persistent channel list, adds `.local/` to `.gitignore` if it is not
-already ignored, and prints the registration line. From inside a session
+bus (`general/<identity>`, `memory/<identity>`) and adds them to the
+persistent channel list, adds `.local/` to `.gitignore` if it is not
+already ignored, and prints the registration line. A stale `tasks` or
+`tasks/...` entry already in the file (task lists are per effort now, not
+per repository) is removed, with a note naming what was removed. From
+inside a session
 the same thing is one command: `/agentbus:init` in Claude Code (an MCP
 prompt the server advertises, so nothing is installed for it),
 `/prompts:agentbus init` in Codex (from the custom prompt file above; Codex
@@ -110,6 +113,15 @@ only sees the variable if the harness was launched from a shell that had it).
 query embedding during a search; past it, `semantic` and `both` searches fall
 back to text results and set `semantic_unavailable`.
 
+`task_idle_hours` (default 168, 7 days), `task_expiry_hours` (default 720,
+30 days), and `memory_expiry_hours` (default 8760, 1 year) are the ADR 0013
+inactivity periods: the TUI marks a task channel idle in its rail after
+`task_idle_hours` with no task activity; the maintenance tick deletes a
+task channel, with all its tasks, after `task_expiry_hours` with none; and
+it tombstones a memory that no `get_memory` call or `search` hit has
+touched for `memory_expiry_hours`. 0 disables the corresponding rule;
+negative values are rejected.
+
 `tui_name` (default: your OS user name) is the identity `agentbus tui`
 registers under; `agentbus tui --as <name>` overrides it for one run. It
 follows the same rule as agent names: 1-128 bytes, no `/`, no control
@@ -127,7 +139,7 @@ to a maximum of 240 seconds (default 60).
 `.local/agentbus.json` in the repository (git-ignored):
 
 ```json
-{ "identity": "Sam", "channels": ["general", "memory", "tasks", "general/Sam", "memory/Sam", "tasks/Sam"] }
+{ "identity": "Sam", "channels": ["general", "memory", "general/Sam", "memory/Sam"] }
 ```
 
 `identity` is the name the agent registers with. `channels` is the
@@ -135,13 +147,21 @@ persistent subscription list: `register` subscribes the session to each
 listed channel (from the current position) and reports them in its
 `subscribed` field; channels that do not exist are reported in
 `subscribe_failed` and skipped. Without a `channels` key the list is
-`general`, `memory`, and `tasks`; an empty list means no automatic subscriptions.
-`init` writes the three machine-wide channels plus the repository's own
-`general/<identity>`, `memory/<identity>`, and `tasks/<identity>`, creating
-them on the bus if missing. A prefix implies the kind, so `create_channel`
-needs none for such names. Rerunning `init` recreates them for whatever
-identity the file names; a project channel from before v1.5.0 (`<identity>`,
+`general` and `memory`; an empty list means no automatic subscriptions. A
+`tasks` or `tasks/...` entry left over from before ADR 0013 is ignored
+(not subscribed) and reported in `register`'s `ignored_channels` field
+instead; `init` removes such entries from the file, or delete them by hand.
+`init` writes the two machine-wide channels plus the repository's own
+`general/<identity>` and `memory/<identity>`, creating them on the bus if
+missing. A prefix implies the kind, so `create_channel` needs none for such
+names. Rerunning `init` recreates them for whatever identity the file
+names; a project channel from before v1.5.0 (`<identity>`,
 `<identity>-memory`) is renamed to its prefixed name with its history.
+
+Task lists are separate and per effort, not per repository: create
+`tasks/<effort>` with `create_channel` when you start one, or subscribe to
+one you find with `list_channels`. It is removed, with all its tasks,
+after `task_expiry_hours` of inactivity (see "Configuration" above).
 
 Edit the list from the repository root with `agentbus subscribe <channel>`
 and `agentbus unsubscribe <channel>` (the file is created if missing), or
@@ -427,7 +447,7 @@ does.
 | `tasks` | task-list channels | clipboard | U+F0AE fa-list-check |
 | `agent` | other senders and sessions | gear | U+EE0D fa-robot |
 | `user` | your own name | adult | U+F007 fa-user |
-| `idle` | an ended session in the rail | sleeping symbol | U+F04B2 md-sleep |
+| `idle` | an ended session, or a task channel past `task_idle_hours`, in the rail | sleeping symbol | U+F04B2 md-sleep |
 | `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
 | `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
 | `task_completed` | a completed task | ✅ | U+F14A fa-square-check |

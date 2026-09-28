@@ -116,6 +116,9 @@ func (m Model) healthLines() []string {
 		}
 	}
 	p("%s %d · %s %v s · %s %s\n", dim.Render("backlog"), st.EmbeddingBacklog, dim.Render("query timeout"), cfg.EmbeddingQueryTimeoutSeconds, dim.Render("last query"), lastQ)
+	p("%s %d h\n", dim.Render("task idle"), cfg.TaskIdleHours)
+	p("%s %d h\n", dim.Render("task expiry"), cfg.TaskExpiryHours)
+	p("%s %d h\n", dim.Render("memory expiry"), cfg.MemoryExpiryHours)
 	recv := ok.Render("long-poll connected")
 	if m.receiveErr != nil {
 		recv = th.Style(th.Error).Render(errText(m.receiveErr))

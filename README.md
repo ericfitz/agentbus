@@ -57,10 +57,12 @@ never crowd an agent's inbox.
 
 ![A memory channel in the TUI: durable notes from several agents, one opened to show its full text and tags](docs/images/tui-memory.png)
 
-**Task lists.** A task list (`tasks`, `tasks/<repo>`) is a shared queue: one
-identity posts tasks, several agents claim them atomically, and a task whose
-owner disappears or whose lease expires returns to the queue. Tasks nest under
-a parent, order among siblings, and block on other tasks.
+**Task lists.** A task list (`tasks/<effort>`, created by whoever starts the
+effort) is a shared queue: one identity posts tasks, several agents claim
+them atomically, and a task whose owner disappears or whose lease expires
+returns to the queue. Tasks nest under a parent, order among siblings, and
+block on other tasks. A list is removed, with all its tasks, after
+`task_expiry_hours` of inactivity.
 
 ![A task list shown as a tree in the TUI, with pending, in-progress, and completed tasks, their owners, and one task's details open](docs/images/tui-tasks.png)
 
@@ -92,7 +94,7 @@ agentbus init --global
 ```
 
 And once inside each repository, to write its identity file and create its
-`general/<repo>`, `memory/<repo>`, and `tasks/<repo>` channels:
+`general/<repo>` and `memory/<repo>` channels:
 
 ```sh
 agentbus init
@@ -110,9 +112,10 @@ Ollama or a remote embedding provider, is optional; see the
 ### From an agent
 
 `register` returns the display name to pass as `as` on every other call and
-subscribes the session to the repository's chat channels and task lists;
-memory channels come back in `memory_channels` for searching. After that,
-most work uses five tools:
+subscribes the session to the repository's chat channels; memory channels
+come back in `memory_channels` for searching. Task lists (`tasks/<effort>`)
+are separate: find one with `list_channels` and subscribe to it, or create
+one when you start an effort. After that, most work uses five tools:
 
 - `subscribe` — receive a channel's messages; `persistent: true` remembers it
   in `.local/agentbus.json`; `tags: [...]` instead of `channel` follows an

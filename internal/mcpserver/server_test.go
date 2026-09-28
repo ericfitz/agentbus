@@ -641,10 +641,11 @@ func TestPersistErrClassifiesIOAsInternalRetryable(t *testing.T) {
 	}
 }
 
-// A prefixed channel listed in .local/agentbus.json (general/, memory/,
-// tasks/<repo>) is recreated by register if it is missing: the tick reaps
-// an empty channel with no live subscriber, so the ones agentbus init
-// created can be gone by the time the first session registers.
+// A prefixed chat or memory channel listed in .local/agentbus.json (general/,
+// memory/) is recreated by register if it is missing: the tick reaps an
+// empty channel with no live subscriber, so the ones agentbus init created
+// can be gone by the time the first session registers. A leftover tasks/...
+// entry (ADR 0013) is ignored instead: never recreated, never subscribed.
 func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)

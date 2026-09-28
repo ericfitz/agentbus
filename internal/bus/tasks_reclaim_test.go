@@ -208,7 +208,7 @@ func TestTickReclaimsWithEmptySender(t *testing.T) {
 	}
 }
 
-// The tick sweeps the machine-wide tasks list too, not only tasks/<repo> (#14).
+// The tick sweeps the machine-wide "tasks" list too, not only tasks/<effort> (#14).
 func TestTickReclaimsOnBareTasksList(t *testing.T) {
 	b, other := twoAgents(t)
 	// The bare "tasks" list is no longer a default (ADR 0013), and

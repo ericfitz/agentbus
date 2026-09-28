@@ -314,6 +314,9 @@ func (m Model) renderRails() string {
 			if n := m.unread(c.Name); n > 0 {
 				line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
 			}
+			if m.taskChannelIdle(c) {
+				line += " " + iconIdle
+			}
 			if !isTagPane(c.Name) && !m.c.isSubscribed(c.Name) {
 				line += dim.Render(" (off)")
 			}
@@ -373,6 +376,16 @@ func (m Model) renderRails() string {
 	sessions := lipgloss.NewStyle().MaxHeight(max(total-chanRows-1, 1)).Render(r.String())
 	col := lipgloss.JoinVertical(lipgloss.Left, channels, "", sessions)
 	return lipgloss.NewStyle().Width(rail).MaxHeight(total).Render(col)
+}
+
+// taskChannelIdle reports whether c is a task channel whose last activity
+// (ADR 0013) is older than TaskIdleHours; 0 disables the marker.
+func (m Model) taskChannelIdle(c bus.Channel) bool {
+	if !bus.IsTaskChannel(c.Name) || c.LastActivity == 0 {
+		return false
+	}
+	idle := m.c.cfg.TaskIdleHours
+	return idle > 0 && time.Now().UnixMilli()-c.LastActivity > int64(idle)*3_600_000
 }
 
 func shortDur(d time.Duration) string {

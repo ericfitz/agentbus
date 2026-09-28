@@ -606,3 +606,10 @@ Pushed to `main` (`fix/grok-no-hook`):
   nothing until they return. ADR 0012 ruling added.
 - **v1.10.1 released** (tag v1.10.1). No schema change; upgrade, then
   `agentbus init --global` and restart sessions.
+
+## 2026-09-28: TUI expand scrolls into view (v1.10.2)
+
+- → on a collapsed message or task at the bottom of the pane now scrolls
+  the revealed body, replies, subtasks, or details into view.
+- **v1.10.2 released** (tag v1.10.2). No schema change; upgrade and
+  restart `agentbus tui`.

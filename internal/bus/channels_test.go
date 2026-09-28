@@ -88,3 +88,16 @@ func TestPrefixedNamesImplyKindAndRenameCarriesHistory(t *testing.T) {
 	wantCode(t, b.RenameChannel("memory/w", "general/w"), "validation")       // kind mismatch
 	wantCode(t, b.RenameChannel("memory/w", "general/widgets"), "validation") // still a kind mismatch, checked before the exists check
 }
+
+// TestRenameChannelRefusesCrossingTaskBoundary (review finding #4): tasks/
+// and memory/ both imply kind "memory", so the kind check alone would let a
+// rename cross between a task channel and a non-task one; IsTaskChannel must
+// be checked explicitly, in both directions.
+func TestRenameChannelRefusesCrossingTaskBoundary(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "memory/x", "")
+	_, _ = b.CreateChannel(sam, "tasks/x", "")
+	wantCode(t, b.RenameChannel("memory/x", "tasks/y"), "validation")
+	wantCode(t, b.RenameChannel("tasks/x", "memory/y"), "validation")
+}

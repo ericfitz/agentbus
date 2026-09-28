@@ -19,6 +19,14 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A memory-kind send gets a memory_access row (ADR 0013); Reset must
+	// clear that table too (review finding #3).
+	if _, err := b.Send(sam, SendInput{Channel: "memory", Content: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, b, "SELECT count(*) FROM memory_access"); n == 0 {
+		t.Fatal("memory_access should be populated before reset")
+	}
 	admin, _ := Open(b.cfg, b.log)
 	defer func() { _ = admin.Close() }()
 	if n, _ := admin.LiveSessionCount(); n != 1 {
@@ -26,6 +34,9 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	}
 	if err := admin.Reset(); err != nil {
 		t.Fatal(err)
+	}
+	if n := countRows(t, b, "SELECT count(*) FROM memory_access"); n != 0 {
+		t.Fatal("Reset must clear memory_access")
 	}
 	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "y"}); err == nil || !strings.Contains(err.Error(), "not_registered") {
 		t.Fatalf("live process must lose registration after reset with not_registered, got %v", err)

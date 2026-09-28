@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -199,13 +200,15 @@ func (b *Bus) deleteChunk(table, cond string, args []any) (int, error) {
 // taskExpiry is the tick's task-expiry step (ADR 0013, design doc section
 // 1): every task channel whose last activity (taskLastActivitySQL) is
 // older than task_expiry_hours is deleted through the internal
-// deleteChannel helper with skipLiveCheck set, taking all its tasks
+// deleteChannel helper with expiryCutoff set, taking all its tasks
 // whatever their status and all subscriptions — a running TUI subscribes
 // to every channel, so DeleteChannel's usual live-subscriber refusal would
 // otherwise keep every task channel alive forever. 0 disables. Channel
-// names are collected first and deleted one at a time, checking ctx
-// between each, since deleteChannel is not chunked (a task channel's whole
-// row set goes in one transaction, like DeleteChannel always has).
+// names are collected first (this query, outside any transaction) and
+// deleted one at a time by expireStaleChannels; deleteChannel re-checks
+// each one's activity against the same cutoff inside its own transaction,
+// closing the gap a plain re-check here would leave against a task write
+// landing between this SELECT and that call.
 func (b *Bus) taskExpiry(ctx context.Context, now int64) error {
 	if b.cfg.TaskExpiryHours <= 0 {
 		return nil
@@ -229,13 +232,33 @@ func (b *Bus) taskExpiry(ctx context.Context, now int64) error {
 		return err
 	}
 	_ = rows.Close()
+	return b.expireStaleChannels(ctx, names, cutoff)
+}
+
+// expireStaleChannels deletes each of names via deleteChannel, checking ctx
+// between each since deleteChannel is not chunked (a task channel's whole
+// row set goes in one transaction, like DeleteChannel always has). A
+// not_found (the channel was deleted concurrently, by another process or an
+// earlier step, between taskExpiry's selection and this call) is skipped
+// rather than aborting the rest of the list; any other error still returns.
+// deleted false with a nil error means deleteChannel's own re-check found
+// the channel no longer stale, which is logged as a survival, not an
+// expiry.
+func (b *Bus) expireStaleChannels(ctx context.Context, names []string, cutoff int64) error {
 	for _, n := range names {
 		if ctx.Err() != nil {
 			return nil
 		}
-		c, err := b.deleteChannel(n, "", true)
+		c, deleted, err := b.deleteChannel(n, "", cutoff)
 		if err != nil {
+			var be *Error
+			if errors.As(err, &be) && be.Code == "not_found" {
+				continue
+			}
 			return err
+		}
+		if !deleted {
+			continue
 		}
 		b.log.Info("task channel expired", "channel", n, "messages", c.Messages)
 	}

@@ -221,67 +221,79 @@ func isDefaultChannel(name string) bool {
 // subscriptions are dropped with the channel. Confirmation is the caller's
 // job; the returned Channel reports what was destroyed.
 func (b *Bus) DeleteChannel(name, except string) (Channel, error) {
-	return b.deleteChannel(name, except, false)
+	c, _, err := b.deleteChannel(name, except, 0)
+	return c, err
 }
 
-// deleteChannel is DeleteChannel's own body, with skipLiveCheck added for
-// the tick's task-expiry step (ADR 0013): a task channel is deleted even
-// with live subscribers, since a running TUI subscribes to every channel
-// and would otherwise keep every task channel alive forever. DeleteChannel
-// itself always passes false, so its public behavior is unchanged.
-func (b *Bus) deleteChannel(name, except string, skipLiveCheck bool) (Channel, error) {
+// deleteChannel is DeleteChannel's own body. expiryCutoff is nonzero only
+// for the tick's task-expiry step (ADR 0013): it skips the live-subscriber
+// check (a running TUI subscribes to every channel and would otherwise keep
+// every task channel alive forever) and, inside this same transaction,
+// re-checks the channel's last activity (taskLastActivitySQL) against
+// expiryCutoff — closing the TOCTOU gap between taskExpiry's selection query
+// and this call, where a task write could commit in between. deleted reports
+// whether the channel was actually removed; false with a nil error means
+// expiry found it no longer stale. DeleteChannel itself always passes 0, so
+// its public behavior (deleted always true on a nil error) is unchanged.
+func (b *Bus) deleteChannel(name, except string, expiryCutoff int64) (Channel, bool, error) {
 	if _, ok := dmOwner(name); ok {
-		return Channel{}, errf("validation", false, "can't delete direct-message channel %q", name)
+		return Channel{}, false, errf("validation", false, "can't delete direct-message channel %q", name)
 	}
 	if isDefaultChannel(name) {
-		return Channel{}, errf("validation", false, "can't delete default channel %q", name)
+		return Channel{}, false, errf("validation", false, "can't delete default channel %q", name)
 	}
 	tx, err := b.db.Begin()
 	if err != nil {
-		return Channel{}, internal(err)
+		return Channel{}, false, internal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	c := Channel{Name: name}
+	var lastActivity int64
 	err = tx.QueryRow(`SELECT kind,
 	  (SELECT count(*) FROM messages m WHERE m.channel=c.name AND m.tombstone=0),
-	  (SELECT coalesce(max(seq),0) FROM messages m WHERE m.channel=c.name)
-	  FROM channels c WHERE name=?`, name).Scan(&c.Kind, &c.Messages, &c.LatestSeq)
+	  (SELECT coalesce(max(seq),0) FROM messages m WHERE m.channel=c.name),
+	  `+taskLastActivitySQL("c")+`
+	  FROM channels c WHERE name=?`, name).Scan(&c.Kind, &c.Messages, &c.LatestSeq, &lastActivity)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Channel{}, errf("not_found", false, "channel %q does not exist", name)
+		return Channel{}, false, errf("not_found", false, "channel %q does not exist", name)
 	}
 	if err != nil {
-		return Channel{}, internal(err)
+		return Channel{}, false, internal(err)
 	}
-	if !skipLiveCheck {
+	if expiryCutoff != 0 {
+		if lastActivity >= expiryCutoff {
+			return Channel{}, false, nil
+		}
+	} else {
 		rows, err := tx.Query("SELECT s.sender FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=? AND x.heartbeat>=? AND s.sender<>? ORDER BY s.sender",
 			name, b.nowMs()-attachmentExpiryMs, except)
 		if err != nil {
-			return Channel{}, internal(err)
+			return Channel{}, false, internal(err)
 		}
 		var live []string
 		for rows.Next() {
 			var s string
 			if err := rows.Scan(&s); err != nil {
 				_ = rows.Close()
-				return Channel{}, internal(err)
+				return Channel{}, false, internal(err)
 			}
 			live = append(live, s)
 		}
 		_ = rows.Close()
 		if len(live) > 0 {
-			return Channel{}, errf("conflict", false, "can't delete channel %q: it has active subscribers (%s)", name, strings.Join(live, ", "))
+			return Channel{}, false, errf("conflict", false, "can't delete channel %q: it has active subscribers (%s)", name, strings.Join(live, ", "))
 		}
 	}
 	// The messages_ad trigger keeps messages_fts in sync; embeddings cascade.
 	for _, q := range []string{"DELETE FROM messages WHERE channel=?", "DELETE FROM subscriptions WHERE channel=?", "DELETE FROM channels WHERE name=?"} {
 		if _, err := tx.Exec(q, name); err != nil {
-			return Channel{}, internal(err)
+			return Channel{}, false, internal(err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return Channel{}, internal(err)
+		return Channel{}, false, internal(err)
 	}
-	return c, nil
+	return c, true, nil
 }
 
 // reapEmptyChannels is the tick's step: drop non-default channels holding no
@@ -318,12 +330,18 @@ func (b *Bus) reapEmptyChannels() error {
 // RenameChannel moves channel from to to, carrying its messages and
 // subscriptions, in one transaction. It is the CLI's, for `agentbus init`
 // migrating a pre-ADR-0007 project channel (<repo>, <repo>-memory) to its
-// prefixed name. from must exist, to must not, and to's implied kind must
-// match from's kind. Cursors keep their seqs, so subscribers resume where
-// they were.
+// prefixed name. from must exist, to must not, to's implied kind must match
+// from's kind, and from and to must agree on whether they are task channels
+// — tasks/ and memory/ both imply kind "memory", so the kind check alone
+// would let a rename cross that line (a task list becoming an ordinary
+// memory channel, or vice versa). Cursors keep their seqs, so subscribers
+// resume where they were.
 func (b *Bus) RenameChannel(from, to string) error {
 	if err := validateChannelName(to); err != nil {
 		return err
+	}
+	if IsTaskChannel(from) != IsTaskChannel(to) {
+		return errf("validation", false, "can't rename between a task channel and a non-task channel (%q to %q)", from, to)
 	}
 	tx, err := b.db.Begin()
 	if err != nil {

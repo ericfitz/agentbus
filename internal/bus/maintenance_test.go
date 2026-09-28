@@ -556,6 +556,49 @@ func TestTaskExpiryZeroDisables(t *testing.T) {
 	}
 }
 
+// TestTaskExpiryRecheckInsideTransactionSurvivesRaceWithFreshActivity (ADR
+// 0013, review finding #1): taskExpiry's selection query runs outside a
+// transaction, so a task write can commit in the gap between that selection
+// and deleteChannel's own delete. deleteChannel must re-check the channel's
+// activity against the same cutoff inside its own transaction and refuse to
+// delete (without error) once it is no longer stale.
+func TestTaskExpiryRecheckInsideTransactionSurvivesRaceWithFreshActivity(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	// A cutoff in the past, as if taskExpiry had selected this channel using
+	// a snapshot taken before the task write above landed.
+	cutoff := b.nowMs() - 1000
+	if _, deleted, err := b.deleteChannel("tasks/work", "", cutoff); err != nil || deleted {
+		t.Fatalf("fresh activity after selection must save the channel: deleted=%v err=%v", deleted, err)
+	}
+	if kind, _ := b.ChannelKind("tasks/work"); kind == "" {
+		t.Fatal("channel with recent activity must survive expiry")
+	}
+}
+
+// TestTaskExpirySkipsNotFoundAndContinues (review finding #2): a channel
+// deleted concurrently between taskExpiry's selection and its own expiry
+// (deleteChannel returns not_found) must be skipped, not abort the rest of
+// the batch.
+func TestTaskExpirySkipsNotFoundAndContinues(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	b.Now = func() time.Time { return time.Now().Add(time.Duration(b.cfg.TaskExpiryHours+1) * time.Hour) }
+	cutoff := b.nowMs()
+	// "tasks/gone" was selected as stale but no longer exists by the time its
+	// own expiry runs.
+	if err := b.expireStaleChannels(context.Background(), []string{"tasks/gone", "tasks/work"}, cutoff); err != nil {
+		t.Fatalf("not_found for one channel must not abort the rest: %v", err)
+	}
+	if kind, _ := b.ChannelKind("tasks/work"); kind != "" {
+		t.Fatal("a later channel in the list must still expire despite an earlier not_found")
+	}
+}
+
 // TestMemoryExpiryTombstonesOldSurvivesRecentAndSkipsTasks (ADR 0013): a
 // memory whose accessed_at is older than memory_expiry_hours is tombstoned
 // at the tick, dropping its memory_access row with it; one created near

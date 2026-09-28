@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type EditInput struct {
@@ -374,30 +375,71 @@ func (b *Bus) DeleteMemory(as string, id int64, key string) error {
 		return errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
 	}
 
-	r, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=? AND tombstone=0", b.nowMs(), seq)
-	if err != nil {
-		return internal(err)
-	}
-	n, err := r.RowsAffected()
-	if err != nil {
-		return internal(err)
-	}
-	if n == 0 {
-		return errf("not_found", false, "memory %d has no live revision", id)
-	}
-	// The deleted revision's embedding vector is now stale; remove it rather
-	// than waiting for the FK cascade, which only fires at purge, up to 72h
-	// later (R6a).
-	if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", seq); err != nil {
-		return internal(err)
-	}
 	// DeleteMemory already refused a task channel above, so id never names
-	// a task; drop its access row along with it (ADR 0013).
-	if _, err := tx.Exec("DELETE FROM memory_access WHERE memory_id=?", id); err != nil {
+	// a task; tombstoneMemoryRow drops its memory_access row along with it
+	// (ADR 0013).
+	ok, err := b.tombstoneMemoryRow(tx, id, seq)
+	if err != nil {
 		return internal(err)
+	}
+	if !ok {
+		return errf("not_found", false, "memory %d has no live revision", id)
 	}
 	if err := b.storeReceipt(tx, as, key, payload, nil); err != nil {
 		return internal(err)
 	}
 	return internal(tx.Commit())
+}
+
+// tombstoneMemoryRow is DeleteMemory's write, factored out so the tick's
+// memory-expiry step (ADR 0013) can run the same write with no caller
+// identity to check: it tombstones seq (a memory's presumed-live revision),
+// drops its now-stale embedding rather than waiting for the FK cascade
+// (which only fires at purge, up to 72h later, R6a), and removes the
+// memory's memory_access row. The "AND tombstone=0" guard and the
+// RowsAffected check mean a memory edited or already deleted out from under
+// a stale (memoryID, seq) pair between the caller's read and this write is
+// left alone rather than wrongly finished off; ok reports whether seq was
+// actually tombstoned here.
+func (b *Bus) tombstoneMemoryRow(tx *sql.Tx, memoryID, seq int64) (ok bool, err error) {
+	r, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=? AND tombstone=0", b.nowMs(), seq)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", seq); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec("DELETE FROM memory_access WHERE memory_id=?", memoryID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// TouchMemoryAccess sets accessed_at to now for every id already carrying a
+// memory_access row (ADR 0013): get_memory and a search hit call it once,
+// batched, after their results are known. It only updates, never inserts:
+// a memory with no row — every task, by construction (insertMessage skips
+// one for a task channel) — stays without one, since giving a task row a
+// memory_access row would let memory expiry delete it. Called from the
+// mcpserver tool handlers only, so the TUI and CLI, which call Search and
+// GetMemory directly on the bus, never touch it; history and receive never
+// call it either.
+func (b *Bus) TouchMemoryAccess(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, b.nowMs())
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	_, err := b.db.Exec("UPDATE memory_access SET accessed_at=? WHERE memory_id IN (?"+strings.Repeat(",?", len(ids)-1)+")", args...)
+	return internal(err)
 }

@@ -445,11 +445,32 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq), tags (any of). If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
-			return result(b.Search(in.As, in.SearchInput))
+			res, err := b.Search(in.As, in.SearchInput)
+			// A search hit's accessed_at is touched here, once per call, not
+			// inside Bus.Search: the TUI's search overlay calls Search
+			// directly on the bus and must not touch it (ADR 0013).
+			if err == nil {
+				var ids []int64
+				for _, h := range res.Hits {
+					if h.MemoryID != nil {
+						ids = append(ids, *h.MemoryID)
+					}
+				}
+				if terr := b.TouchMemoryAccess(ids); terr != nil && log != nil {
+					log.Warn("memory access touch failed", "err", terr)
+				}
+			}
+			return result(res, err)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "get_memory", Description: "Agentbus: get the current revision of a memory by memory_id."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in memoryIn) (*mcp.CallToolResult, any, error) {
-			return result(b.GetMemory(in.As, in.ID))
+			msg, err := b.GetMemory(in.As, in.ID)
+			if err == nil {
+				if terr := b.TouchMemoryAccess([]int64{in.ID}); terr != nil && log != nil {
+					log.Warn("memory access touch failed", "err", terr)
+				}
+			}
+			return result(msg, err)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced. tags replaces the memory's tags; omit it to keep them. subject replaces the memory's subject; omit it to keep it, pass an empty string to clear it."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in editIn) (*mcp.CallToolResult, any, error) {

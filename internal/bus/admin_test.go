@@ -69,6 +69,68 @@ func TestStatusReportEmbeddingBacklogZeroWithNoEmbedder(t *testing.T) {
 	}
 }
 
+// TestStatusReportLastActivityForTaskChannelsOnly (ADR 0013): the channel
+// list's last_activity is populated only for a task channel, tracks its
+// newest revision, and is absent (the zero value, omitted by omitempty)
+// for an ordinary or plain memory channel.
+func TestStatusReportLastActivityForTaskChannelsOnly(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+
+	st, err := b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Channel{}
+	for _, c := range st.Channels {
+		byName[c.Name] = c
+	}
+	if byName["dev"].LastActivity != 0 {
+		t.Fatalf("an ordinary channel must not carry last_activity: %+v", byName["dev"])
+	}
+	first := byName["tasks/work"].LastActivity
+	if first == 0 {
+		t.Fatal("a task channel must carry last_activity")
+	}
+	// Zero out the channel's own created_at directly: with the messages
+	// column correctly resolved (not the same-named channels column an
+	// unqualified reference could shadow), last_activity is still the
+	// task's own created_at/tombstone_at, unchanged by this.
+	if _, err := b.db.Exec("UPDATE channels SET created_at=0 WHERE name='tasks/work'"); err != nil {
+		t.Fatal(err)
+	}
+	st, err = b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range st.Channels {
+		if c.Name == "tasks/work" && c.LastActivity != first {
+			t.Fatalf("last_activity must come from messages.created_at, not resolve to the zeroed channels.created_at: got %d, want %d", c.LastActivity, first)
+		}
+	}
+
+	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	if _, err := b.TaskClaim(sam, tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	st, err = b.StatusReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range st.Channels {
+		if c.Name == "tasks/work" {
+			if c.LastActivity <= first {
+				t.Fatalf("last_activity must advance on a task write: was %d, now %d", first, c.LastActivity)
+			}
+			return
+		}
+	}
+	t.Fatal("tasks/work missing from channel list")
+}
+
 // TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq is the regression for
 // A13.1: seq must not be reused across Reset, or an embedding HTTP call that
 // started before the reset (keyed only by seq) could install its vector on

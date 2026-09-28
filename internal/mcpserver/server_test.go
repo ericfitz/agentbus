@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -791,5 +792,124 @@ func TestSendAndEditMemoryCarrySubject(t *testing.T) {
 	_, bad := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "subject": "two\nlines", "content": "x"})
 	if !bad.IsError || !strings.Contains(bad.Content[0].(*mcp.TextContent).Text, "subject") {
 		t.Fatalf("a bad subject is refused naming the field: %+v", bad)
+	}
+}
+
+// TestSearchAndGetMemoryToolsUpdateAccessedAt (ADR 0013): the search and
+// get_memory MCP tools each touch memory_access after their result is
+// known; Bus.Search and Bus.GetMemory themselves never do (see
+// TestBusReadPathsNeverTouchMemoryAccess in internal/bus), so this is the
+// only place the wiring in the tool handlers is exercised.
+func TestSearchAndGetMemoryToolsUpdateAccessedAt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	// A second, read-only connection to the same file: memory_access has no
+	// exported bus accessor (there is no legitimate caller for one outside
+	// the bus package), so the test reads the table directly, the same way
+	// migrate_test.go shapes a database in the bus package's own tests.
+	dsn, err := bus.SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "mem", "kind": "memory"})
+	sent, _ := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "mem", "content": "widget rollout notes"})
+	id := int64(sent["memory_id"].(float64))
+
+	accessedAt := func() int64 {
+		var at int64
+		if err := raw.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	before := accessedAt()
+
+	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
+	afterSearch := accessedAt()
+	if afterSearch <= before {
+		t.Fatalf("the search tool must bump accessed_at on a hit: before=%d after=%d", before, afterSearch)
+	}
+
+	b.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": id})
+	afterGet := accessedAt()
+	if afterGet <= afterSearch {
+		t.Fatalf("the get_memory tool must bump accessed_at: before=%d after=%d", afterSearch, afterGet)
+	}
+}
+
+// TestSearchToolOverTaskRowDoesNotCreateAccessRow (ADR 0013): a search hit
+// on a task never creates a memory_access row for it — an insert there
+// would let memory expiry delete tasks.
+func TestSearchToolOverTaskRowDoesNotCreateAccessRow(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	dsn, err := bus.SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "tasks/work", "kind": "memory"})
+	created, _ := call(t, cs, "task_create", map[string]any{"as": "Sam", "channel": "tasks/work", "subject": "ship the widget"})
+	id := int64(created["id"].(float64))
+
+	_, res := call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
+	if res.IsError {
+		t.Fatalf("search over a task list failed: %+v", res)
+	}
+	var n int
+	if err := raw.QueryRow("SELECT count(*) FROM memory_access WHERE memory_id=?", id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("a search hit on a task must never create a memory_access row")
 	}
 }

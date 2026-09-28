@@ -81,6 +81,14 @@ func (b *Bus) Tick(ctx context.Context) {
 			})
 		}},
 		{"empty channels", b.reapEmptyChannels},
+		{"task expiry", func() error { return b.taskExpiry(tickCtx, now) }},
+		{"memory expiry", func() error {
+			if b.cfg.MemoryExpiryHours <= 0 {
+				return nil
+			}
+			cutoff := now - int64(b.cfg.MemoryExpiryHours)*3_600_000
+			return b.loopChunks(tickCtx, func() (int, error) { return b.memoryExpiryChunk(cutoff) })
+		}},
 		{"capacity", func() error { return b.evictToBudget(tickCtx, deadline) }},
 		{"vacuum", func() error {
 			_, err := b.db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumPages))
@@ -186,6 +194,112 @@ func (b *Bus) deleteChunk(table, cond string, args []any) (int, error) {
 		return 0, err
 	}
 	return int(n), nil
+}
+
+// taskExpiry is the tick's task-expiry step (ADR 0013, design doc section
+// 1): every task channel whose last activity (taskLastActivitySQL) is
+// older than task_expiry_hours is deleted through the internal
+// deleteChannel helper with skipLiveCheck set, taking all its tasks
+// whatever their status and all subscriptions — a running TUI subscribes
+// to every channel, so DeleteChannel's usual live-subscriber refusal would
+// otherwise keep every task channel alive forever. 0 disables. Channel
+// names are collected first and deleted one at a time, checking ctx
+// between each, since deleteChannel is not chunked (a task channel's whole
+// row set goes in one transaction, like DeleteChannel always has).
+func (b *Bus) taskExpiry(ctx context.Context, now int64) error {
+	if b.cfg.TaskExpiryHours <= 0 {
+		return nil
+	}
+	cutoff := now - int64(b.cfg.TaskExpiryHours)*3_600_000
+	rows, err := b.db.Query(`SELECT name FROM channels WHERE (name='tasks' OR name LIKE 'tasks/%') AND `+taskLastActivitySQL("channels")+` < ?`, cutoff)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		names = append(names, n)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, n := range names {
+		if ctx.Err() != nil {
+			return nil
+		}
+		c, err := b.deleteChannel(n, "", true)
+		if err != nil {
+			return err
+		}
+		b.log.Info("task channel expired", "channel", n, "messages", c.Messages)
+	}
+	return nil
+}
+
+// memoryExpiryChunk is the memory-expiry step's unit of work, called
+// through loopChunks: it tombstones up to cleanupChunk live memories
+// (messages.memory_id is set, tombstone=0, outside every task channel)
+// whose memory_access.accessed_at is older than cutoff, via
+// tombstoneMemoryRow — the same write delete_memory does, so readers see
+// the deletion and the tombstone is purged by the existing tombstone-purge
+// step. Tasks are excluded twice over, independently: the channel<>'tasks'
+// filter below (design doc section 2, "non-task channel"), and the INNER
+// join to memory_access, which a task row never has (insertMessage skips
+// one for a task channel) — so a live memory with no memory_access row can
+// never be expired even if the filter were ever wrong (section 2,
+// "defensive"). Returns the number of rows this chunk selected (not the
+// smaller number actually tombstoned, if any raced with a concurrent edit
+// or delete), so loopChunks keeps calling while a full chunk keeps turning
+// up.
+func (b *Bus) memoryExpiryChunk(cutoff int64) (int, error) {
+	tx, err := b.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`SELECT m.memory_id, m.seq FROM messages m JOIN memory_access a ON a.memory_id=m.memory_id
+	  WHERE m.tombstone=0 AND m.channel<>'tasks' AND m.channel NOT LIKE 'tasks/%' AND a.accessed_at<? LIMIT ?`, cutoff, cleanupChunk)
+	if err != nil {
+		return 0, err
+	}
+	type liveMemory struct{ id, seq int64 }
+	var candidates []liveMemory
+	for rows.Next() {
+		var c liveMemory
+		if err := rows.Scan(&c.id, &c.seq); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+	expired := 0
+	for _, c := range candidates {
+		ok, err := b.tombstoneMemoryRow(tx, c.id, c.seq)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			expired++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if expired > 0 {
+		b.log.Info("memories expired", "count", expired)
+	}
+	return len(candidates), nil
 }
 
 func (b *Bus) budget() int64 {

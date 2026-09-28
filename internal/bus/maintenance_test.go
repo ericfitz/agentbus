@@ -476,6 +476,181 @@ func TestTickSkipsEmbeddingsWhileEmbedSoonHoldsEmbedMu(t *testing.T) {
 	b.waitEmbed() // let embedSoon's goroutine finish before the test ends
 }
 
+// TestTaskExpiryDeletesStaleChannelWithItsTasks (ADR 0013): a task channel
+// whose last activity is older than task_expiry_hours is deleted whole
+// once the tick runs past the cutoff, tasks included.
+func TestTaskExpiryDeletesStaleChannelWithItsTasks(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	b.Now = func() time.Time { return time.Now().Add(time.Duration(b.cfg.TaskExpiryHours+1) * time.Hour) }
+	b.Tick(context.Background())
+	if kind, _ := b.ChannelKind("tasks/work"); kind != "" {
+		t.Fatal("a stale task channel must be deleted by the tick")
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=?", tk.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("a deleted task channel's tasks must be deleted with it")
+	}
+}
+
+// TestTaskExpirySurvivesRecentLeaseRenewal (ADR 0013): a claim (a lease
+// renewal) writes a new revision, so a channel with one recent enough
+// survives even though it was created well over task_expiry_hours ago.
+func TestTaskExpirySurvivesRecentLeaseRenewal(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	almostExpired := time.Duration(b.cfg.TaskExpiryHours-1) * time.Hour
+	b.Now = func() time.Time { return time.Now().Add(almostExpired) }
+	if _, err := b.TaskClaim(sam, tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Past the channel's creation time plus task_expiry_hours, but not past
+	// the claim's own activity plus task_expiry_hours.
+	b.Now = func() time.Time { return time.Now().Add(almostExpired + 2*time.Hour) }
+	b.Tick(context.Background())
+	if kind, _ := b.ChannelKind("tasks/work"); kind == "" {
+		t.Fatal("a task channel with a recent lease renewal must survive expiry")
+	}
+}
+
+// TestTaskExpiryLiveSubscriberDoesNotSaveExpiredChannel (ADR 0013): unlike
+// DeleteChannel's own refusal, task expiry deletes a channel even with a
+// live subscriber, since a running TUI subscribes to every channel.
+func TestTaskExpiryLiveSubscriberDoesNotSaveExpiredChannel(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	if err := b.Subscribe(sam, "tasks/work", "now"); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Duration(b.cfg.TaskExpiryHours+1) * time.Hour) }
+	if err := b.Heartbeat(); err != nil { // keep Sam's session live, like a running TUI
+		t.Fatal(err)
+	}
+	b.Tick(context.Background())
+	if kind, _ := b.ChannelKind("tasks/work"); kind != "" {
+		t.Fatal("a live subscriber must not keep an expired task channel alive")
+	}
+}
+
+// TestTaskExpiryZeroDisables (ADR 0013): task_expiry_hours=0 means task
+// channels never expire.
+func TestTaskExpiryZeroDisables(t *testing.T) {
+	b := newTestBus(t)
+	b.cfg.TaskExpiryHours = 0
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+	b.Now = func() time.Time { return time.Now().Add(100_000 * time.Hour) }
+	b.Tick(context.Background())
+	if kind, _ := b.ChannelKind("tasks/work"); kind == "" {
+		t.Fatal("task_expiry_hours=0 must disable task expiry")
+	}
+}
+
+// TestMemoryExpiryTombstonesOldSurvivesRecentAndSkipsTasks (ADR 0013): a
+// memory whose accessed_at is older than memory_expiry_hours is tombstoned
+// at the tick, dropping its memory_access row with it; one created near
+// the tick's cutoff survives; a task, which never gets a memory_access row,
+// is untouched.
+func TestMemoryExpiryTombstonesOldSurvivesRecentAndSkipsTasks(t *testing.T) {
+	b := newTestBus(t)
+	b.cfg.TaskExpiryHours = 0 // isolate memory expiry from task expiry, tested on its own above
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	old, err := b.Send(sam, SendInput{Channel: "mem", Content: "forget me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+
+	expiry := time.Duration(b.cfg.MemoryExpiryHours) * time.Hour
+	b.Now = func() time.Time { return time.Now().Add(expiry - time.Hour) } // just inside the window
+	recent, err := b.Send(sam, SendInput{Channel: "mem", Content: "remember me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b.Now = func() time.Time { return time.Now().Add(expiry + time.Hour) } // old is now stale; recent is not
+	if err := b.Heartbeat(); err != nil {                                  // keep Sam registered past the clock jump
+		t.Fatal(err)
+	}
+	b.Tick(context.Background())
+
+	if _, err := b.GetMemory(sam, *old.MemoryID); err == nil {
+		t.Fatal("an old, never-touched memory must be tombstoned by expiry")
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM memory_access WHERE memory_id=?", *old.MemoryID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("an expired memory's memory_access row must be removed")
+	}
+	if _, err := b.GetMemory(sam, *recent.MemoryID); err != nil {
+		t.Fatalf("a memory created near the tick's cutoff must survive expiry: %v", err)
+	}
+	if _, err := b.TaskGet(sam, tk.ID); err != nil {
+		t.Fatalf("a task must be untouched by memory expiry: %v", err)
+	}
+}
+
+// TestMemoryExpiryRecentlyFetchedSurvives (ADR 0013): touching accessed_at
+// (as get_memory or a search hit does through TouchMemoryAccess) resets a
+// memory's expiry clock even though it was created long ago.
+func TestMemoryExpiryRecentlyFetchedSurvives(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "old but touched"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiry := time.Duration(b.cfg.MemoryExpiryHours) * time.Hour
+	b.Now = func() time.Time { return time.Now().Add(expiry - time.Hour) }
+	if err := b.TouchMemoryAccess([]int64{*c.MemoryID}); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(expiry + time.Hour) }
+	if err := b.Heartbeat(); err != nil { // keep Sam registered past the clock jump
+		t.Fatal(err)
+	}
+	b.Tick(context.Background())
+	if _, err := b.GetMemory(sam, *c.MemoryID); err != nil {
+		t.Fatalf("a recently fetched memory must survive expiry: %v", err)
+	}
+}
+
+// TestMemoryExpiryZeroDisables (ADR 0013): memory_expiry_hours=0 means
+// memories never expire.
+func TestMemoryExpiryZeroDisables(t *testing.T) {
+	b := newTestBus(t)
+	b.cfg.MemoryExpiryHours = 0
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "never expires"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(1_000_000 * time.Hour) }
+	if err := b.Heartbeat(); err != nil { // keep Sam registered past the clock jump
+		t.Fatal(err)
+	}
+	b.Tick(context.Background())
+	if _, err := b.GetMemory(sam, *c.MemoryID); err != nil {
+		t.Fatalf("memory_expiry_hours=0 must disable memory expiry: %v", err)
+	}
+}
+
 func TestLeaseAllowsOneProcess(t *testing.T) {
 	b := newTestBus(t)
 	other, _ := Open(b.cfg, b.log)

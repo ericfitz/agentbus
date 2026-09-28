@@ -188,3 +188,91 @@ func TestMemoryRevisionsListsAllRevisionsOldestFirst(t *testing.T) {
 		t.Fatalf("want not_found, got %v", err)
 	}
 }
+
+// TestTouchMemoryAccessUpdatesOnlyExistingRows (ADR 0013): TouchMemoryAccess
+// bumps accessed_at for a memory that already has a row, and never inserts
+// one for an id with none — in particular a task's memory_id, which must
+// never gain a memory_access row (an insert here would let memory expiry
+// delete tasks).
+func TestTouchMemoryAccessUpdatesOnlyExistingRows(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.CreateChannel(sam, "tasks/work", "memory")
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk := mustCreate(t, b, TaskCreateInput{Channel: "tasks/work", Subject: "ship it"})
+
+	var before int64
+	if err := b.db.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", *c.MemoryID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	// tk.ID is included alongside a real memory id in the same batched call:
+	// the task id must be silently ignored, not error, and must not create
+	// a row.
+	if err := b.TouchMemoryAccess([]int64{*c.MemoryID, tk.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var after int64
+	if err := b.db.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", *c.MemoryID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after <= before {
+		t.Fatalf("TouchMemoryAccess must bump an existing row's accessed_at: before=%d after=%d", before, after)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM memory_access WHERE memory_id=?", tk.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("TouchMemoryAccess must never create a memory_access row for a task")
+	}
+	if err := b.TouchMemoryAccess(nil); err != nil {
+		t.Fatalf("an empty id list must be a no-op, not an error: %v", err)
+	}
+}
+
+// TestBusReadPathsNeverTouchMemoryAccess (ADR 0013): GetMemory, Search,
+// History, and Receive, called directly on the bus the way the TUI and CLI
+// do, must never move accessed_at. The mcpserver tool handlers are the only
+// callers that touch it (see internal/mcpserver's own tests), via
+// TouchMemoryAccess after get_memory and search results are known.
+func TestBusReadPathsNeverTouchMemoryAccess(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	c, err := b.Send(sam, SendInput{Channel: "mem", Content: "hello there"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before int64
+	if err := b.db.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", *c.MemoryID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	if _, err := b.GetMemory(sam, *c.MemoryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Search(sam, SearchInput{Query: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.History(sam, "mem", nil, nil, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Subscribe(sam, "mem", "oldest"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Receive(sam, ReceiveInput{}); err != nil {
+		t.Fatal(err)
+	}
+	var after int64
+	if err := b.db.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", *c.MemoryID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("Bus GetMemory/Search/History/Receive must never touch memory_access: before=%d after=%d", before, after)
+	}
+}

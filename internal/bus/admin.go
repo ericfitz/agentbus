@@ -40,10 +40,14 @@ func (b *Bus) liveSessions(db querier) ([]Session, error) {
 }
 
 // listChannels is the shared query behind ListChannels and StatusReport.
+// last_activity (ADR 0013) is computed only for a task channel, via
+// taskLastActivitySQL; NULL (so Channel.LastActivity's zero value, omitted
+// by omitempty) for every other channel.
 func (b *Bus) listChannels(db *sql.DB) ([]Channel, error) {
 	rows, err := db.Query(`SELECT c.name, c.kind,
 	  (SELECT count(*) FROM messages m WHERE m.channel=c.name AND m.tombstone=0),
-	  (SELECT coalesce(max(seq),0) FROM messages m WHERE m.channel=c.name)
+	  (SELECT coalesce(max(seq),0) FROM messages m WHERE m.channel=c.name),
+	  CASE WHEN c.name='tasks' OR c.name LIKE 'tasks/%' THEN ` + taskLastActivitySQL("c") + ` ELSE NULL END
 	  FROM channels c ORDER BY c.name`)
 	if err != nil {
 		return nil, internal(err)
@@ -52,9 +56,11 @@ func (b *Bus) listChannels(db *sql.DB) ([]Channel, error) {
 	out := []Channel{}
 	for rows.Next() {
 		var c Channel
-		if err := rows.Scan(&c.Name, &c.Kind, &c.Messages, &c.LatestSeq); err != nil {
+		var la sql.NullInt64
+		if err := rows.Scan(&c.Name, &c.Kind, &c.Messages, &c.LatestSeq, &la); err != nil {
 			return nil, internal(err)
 		}
+		c.LastActivity = la.Int64 // 0 when la is NULL (not a task channel)
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {

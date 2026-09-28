@@ -21,6 +21,22 @@ func IsTaskChannel(channel string) bool {
 	return channel == "tasks" || strings.HasPrefix(channel, TaskPrefix)
 }
 
+// taskLastActivitySQL is the last-activity expression for a task channel
+// (ADR 0013, design doc section 1): the greatest of every message row's
+// created_at (every create, update, claim, lease renewal, and release
+// writes a revision), every tombstone's tombstone_at, and the channel's
+// own creation time (channels.created_at), so a task channel with no
+// messages yet is not stale from the moment it is created. alias names the
+// channels row in the surrounding query (a table alias, or the bare table
+// name); shared so listChannels (StatusReport's channel list) and the
+// tick's task-expiry step apply exactly the same rule.
+func taskLastActivitySQL(alias string) string {
+	return "(SELECT max(x) FROM (" +
+		"SELECT messages.created_at AS x FROM messages WHERE messages.channel=" + alias + ".name" +
+		" UNION ALL SELECT messages.tombstone_at FROM messages WHERE messages.channel=" + alias + ".name AND messages.tombstone_at IS NOT NULL" +
+		" UNION ALL SELECT " + alias + ".created_at))"
+}
+
 // Task is a task as returned to callers. The stored JSON document is the
 // subset tagged in taskDoc; the rest is envelope data and derived fields.
 type Task struct {

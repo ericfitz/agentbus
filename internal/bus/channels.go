@@ -79,6 +79,10 @@ type Channel struct {
 	Kind      string `json:"kind"`
 	Messages  int64  `json:"messages"`
 	LatestSeq int64  `json:"latest_seq"`
+	// LastActivity is set for a task channel only (ADR 0013): the greatest
+	// of every message row's created_at, every tombstone's tombstone_at,
+	// and the channel's own creation time. See taskLastActivitySQL.
+	LastActivity int64 `json:"last_activity,omitempty"`
 }
 
 // DefaultChannels exist on every bus so agents have somewhere to talk and
@@ -124,7 +128,7 @@ func (b *Bus) EnsureChannel(name, kind string) error {
 	if kind, err = resolveKind(name, kind); err != nil {
 		return err
 	}
-	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0)", name, kind); err != nil {
+	if _, err := b.db.Exec("INSERT OR IGNORE INTO channels(name,kind,created_seq,evicted_before_seq,created_at) VALUES(?,?,(SELECT coalesce(max(seq),0) FROM messages),0,?)", name, kind, b.nowMs()); err != nil {
 		return internal(err)
 	}
 	return nil
@@ -161,7 +165,7 @@ func (b *Bus) CreateChannel(as, name, kind string) (Channel, error) {
 		if err := tx.QueryRow("SELECT coalesce(max(seq),0) FROM messages").Scan(&latest); err != nil {
 			return Channel{}, internal(err)
 		}
-		if _, err := tx.Exec("INSERT INTO channels(name,kind,created_seq,evicted_before_seq) VALUES(?,?,?,0)", name, kind, latest); err != nil {
+		if _, err := tx.Exec("INSERT INTO channels(name,kind,created_seq,evicted_before_seq,created_at) VALUES(?,?,?,0,?)", name, kind, latest, b.nowMs()); err != nil {
 			return Channel{}, internal(err)
 		}
 	default:
@@ -217,6 +221,15 @@ func isDefaultChannel(name string) bool {
 // subscriptions are dropped with the channel. Confirmation is the caller's
 // job; the returned Channel reports what was destroyed.
 func (b *Bus) DeleteChannel(name, except string) (Channel, error) {
+	return b.deleteChannel(name, except, false)
+}
+
+// deleteChannel is DeleteChannel's own body, with skipLiveCheck added for
+// the tick's task-expiry step (ADR 0013): a task channel is deleted even
+// with live subscribers, since a running TUI subscribes to every channel
+// and would otherwise keep every task channel alive forever. DeleteChannel
+// itself always passes false, so its public behavior is unchanged.
+func (b *Bus) deleteChannel(name, except string, skipLiveCheck bool) (Channel, error) {
 	if _, ok := dmOwner(name); ok {
 		return Channel{}, errf("validation", false, "can't delete direct-message channel %q", name)
 	}
@@ -239,23 +252,25 @@ func (b *Bus) DeleteChannel(name, except string) (Channel, error) {
 	if err != nil {
 		return Channel{}, internal(err)
 	}
-	rows, err := tx.Query("SELECT s.sender FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=? AND x.heartbeat>=? AND s.sender<>? ORDER BY s.sender",
-		name, b.nowMs()-attachmentExpiryMs, except)
-	if err != nil {
-		return Channel{}, internal(err)
-	}
-	var live []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			_ = rows.Close()
+	if !skipLiveCheck {
+		rows, err := tx.Query("SELECT s.sender FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=? AND x.heartbeat>=? AND s.sender<>? ORDER BY s.sender",
+			name, b.nowMs()-attachmentExpiryMs, except)
+		if err != nil {
 			return Channel{}, internal(err)
 		}
-		live = append(live, s)
-	}
-	_ = rows.Close()
-	if len(live) > 0 {
-		return Channel{}, errf("conflict", false, "can't delete channel %q: it has active subscribers (%s)", name, strings.Join(live, ", "))
+		var live []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				_ = rows.Close()
+				return Channel{}, internal(err)
+			}
+			live = append(live, s)
+		}
+		_ = rows.Close()
+		if len(live) > 0 {
+			return Channel{}, errf("conflict", false, "can't delete channel %q: it has active subscribers (%s)", name, strings.Join(live, ", "))
+		}
 	}
 	// The messages_ad trigger keeps messages_fts in sync; embeddings cascade.
 	for _, q := range []string{"DELETE FROM messages WHERE channel=?", "DELETE FROM subscriptions WHERE channel=?", "DELETE FROM channels WHERE name=?"} {

@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS channels (
   name TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('ordinary','memory')),
   created_seq INTEGER NOT NULL,
-  evicted_before_seq INTEGER NOT NULL DEFAULT 0
+  evicted_before_seq INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
   sender TEXT PRIMARY KEY,

@@ -496,3 +496,67 @@ func TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions(t *testing.T) {
 		t.Fatalf("subscriptions after migration: %v, want only sam's dev subscription (every task-list subscription dropped)", subs)
 	}
 }
+
+// schemaV6Channels is the channels DDL as shipped through v1.9.0, without
+// the created_at column schema version 7 adds (ADR 0013). Kept here
+// verbatim so the migration is tested against a real pre-column table, not
+// a simulated one (the shared schema string already carries the column, so
+// every other migration test in this file, which bootstraps from it,
+// starts with created_at already present and never exercises this step's
+// ALTER TABLE path).
+const schemaV6Channels = `
+CREATE TABLE channels (
+  name TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('ordinary','memory')),
+  created_seq INTEGER NOT NULL,
+  evicted_before_seq INTEGER NOT NULL DEFAULT 0
+);`
+
+// TestMigrateV6AddsChannelsCreatedAt (ADR 0013): a v6 file's channels table,
+// which has no created_at column, gains one, backfilled to the migration
+// time for every existing channel (there is no earlier per-channel
+// timestamp to recover), so no task channel looks stale from the moment
+// the upgrade lands.
+func TestMigrateV6AddsChannelsCreatedAt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{schema, "DROP TABLE channels", schemaV6Channels, "PRAGMA user_version = 6",
+		"INSERT INTO channels(name,kind,created_seq) VALUES('tasks/repo','memory',0)",
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Now().UnixMilli()
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v6 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	after := time.Now().UnixMilli()
+
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var createdAt int64
+	if err := b.db.QueryRow("SELECT created_at FROM channels WHERE name='tasks/repo'").Scan(&createdAt); err != nil {
+		t.Fatal(err)
+	}
+	if createdAt < before || createdAt > after {
+		t.Fatalf("created_at = %d, want between %d and %d (migration time)", createdAt, before, after)
+	}
+}

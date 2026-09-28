@@ -153,20 +153,38 @@ func addSubject(tx *sql.Tx) error {
 // addMemoryAccessAndDropTaskSubscriptions (schema 6 -> 7, ADR 0013) creates
 // memory_access, backfills one row per live memory (a message with a
 // memory_id, not tombstoned, on a channel that is not a task list) at the
-// migration time, and deletes every subscription to a task list, for every
-// sender: task lists stop being subscribed by default, and the ones agents
-// already followed must not survive the upgrade (human decision 3). The
-// timestamp is time.Now, not the bus's overridable clock: migrate runs
-// before the Bus (and Now) exists.
+// migration time, deletes every subscription to a task list for every
+// sender (task lists stop being subscribed by default, and the ones agents
+// already followed must not survive the upgrade, human decision 3), and
+// adds channels.created_at, the floor a task channel's last activity never
+// goes below (design doc section 1). No earlier per-channel timestamp
+// exists to backfill from, so every existing channel gets the migration
+// time, the same reasoning as memory_access's own backfill: neither a
+// task channel nor a memory built before this upgrade should look stale
+// the moment it lands. The timestamp is time.Now, not the bus's
+// overridable clock: migrate runs before the Bus (and Now) exists.
 func addMemoryAccessAndDropTaskSubscriptions(tx *sql.Tx) error {
 	if _, err := tx.Exec(memoryAccessDDL); err != nil {
 		return err
 	}
+	now := time.Now().UnixMilli()
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO memory_access(memory_id, accessed_at)
 	  SELECT DISTINCT memory_id, ? FROM messages
 	  WHERE memory_id IS NOT NULL AND tombstone=0 AND channel<>'tasks' AND channel NOT LIKE 'tasks/%'`,
-		time.Now().UnixMilli()); err != nil {
+		now); err != nil {
 		return err
+	}
+	var hasCreatedAt int
+	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('channels') WHERE name='created_at'").Scan(&hasCreatedAt); err != nil {
+		return err
+	}
+	if hasCreatedAt == 0 {
+		if _, err := tx.Exec("ALTER TABLE channels ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE channels SET created_at=?", now); err != nil {
+			return err
+		}
 	}
 	_, err := tx.Exec(`DELETE FROM subscriptions WHERE channel='tasks' OR channel LIKE 'tasks/%'`)
 	return err

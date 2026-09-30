@@ -613,3 +613,20 @@ Pushed to `main` (`fix/grok-no-hook`):
   the revealed body, replies, subtasks, or details into view.
 - **v1.10.2 released** (tag v1.10.2). No schema change; upgrade and
   restart `agentbus tui`.
+
+## 2026-09-30: tag conventions
+
+Spec `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`, plan
+`docs/superpowers/plans/2026-09-29-tag-conventions.md`. Not yet released.
+
+- Protocol bullet, using-agentbus skill Tags section, and `send`/`search`/
+  `register` descriptions teach a shared tag vocabulary and when to tag
+  (lifecycle, attention, `change` + area, memories, handoff/review).
+- `register` returns `.local/agentbus.json` `tags` as `repo_tags`
+  (invalid entries in `ignored_tags`).
+- Unscoped `search` includes DMs the caller sent (ADR 0009 amendment
+  2026-09-29); inbox read guard unchanged.
+- Structured `key:value` tags deferred to #20. Deferred review minors:
+  `ignored_tags` undocumented for agents; no observer-search test; ADR
+  wording "wrote itself" ignores name reuse; skill doesn't say how to fill
+  `tags`; empty entry shows as `""`.

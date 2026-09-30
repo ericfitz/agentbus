@@ -358,3 +358,60 @@ func TestSpaceRefusesAStaleRow(t *testing.T) {
 		t.Fatalf("the reload must show the row's real state: %+v", got)
 	}
 }
+
+// TestAssignPicker (#19): a opens a picker of the TUI's identity and the
+// live sessions; esc closes it without a change, enter assigns the cursor
+// task; an agent's task is refused with the owned toast; the TUI's own
+// task can be handed to an agent (ADR 0005 amendment 2026-09-30).
+func TestAssignPicker(t *testing.T) {
+	f := newFixture(t)
+	tasks := f.openTasks(t, "a", "b")
+	b := tasks[1] // the cursor starts on the last task
+	pick := func(name string) {
+		t.Helper()
+		f.key("a")
+		if f.m.mode != modeAssign {
+			t.Fatalf("a in a task list opens the picker: mode=%v toast=%q", f.m.mode, f.m.toast)
+		}
+		if f.m.assign.names[0] != f.c.as {
+			t.Fatalf("the TUI's own identity is listed first: %v", f.m.assign.names)
+		}
+		for f.m.assign.names[f.m.assign.sel] != name {
+			before := f.m.assign.sel
+			f.key("down")
+			if f.m.assign.sel == before {
+				t.Fatalf("%q not in the picker: %v", name, f.m.assign.names)
+			}
+		}
+		if v := f.m.View(); !strings.Contains(v, "assign") || !strings.Contains(v, f.sam) {
+			t.Fatalf("picker view:\n%s", v)
+		}
+		f.key("enter")
+	}
+
+	f.key("a")
+	f.key("esc")
+	if f.m.mode != modeNormal || f.task(t, b.ID).Owner != "" {
+		t.Fatalf("esc closes without a change: mode=%v %+v", f.m.mode, f.task(t, b.ID))
+	}
+
+	pick(f.sam)
+	if got := f.task(t, b.ID); got.Owner != f.sam || got.Status != "pending" || f.m.mode != modeNormal {
+		t.Fatalf("assign to an agent: %+v mode=%v", got, f.m.mode)
+	}
+	if got, ok := f.m.cursorTask(); !ok || got.Owner != f.sam {
+		t.Fatalf("the tree refreshes after assign: %+v", got)
+	}
+
+	f.key("a")
+	if f.m.mode != modeNormal || f.m.toast != ownedToast(f.sam) {
+		t.Fatalf("an agent's task cannot be reassigned: mode=%v toast=%q", f.m.mode, f.m.toast)
+	}
+
+	f.key("up") // task a
+	f.key("t")
+	pick(f.sam)
+	if got := f.task(t, tasks[0].ID); got.Owner != f.sam {
+		t.Fatalf("the TUI hands its own task to an agent: %+v toast=%q", got, f.m.toast)
+	}
+}

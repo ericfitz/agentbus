@@ -202,6 +202,8 @@ func (m Model) View() string {
 		return m.viewHealth()
 	case modeHelp:
 		return m.viewHelp()
+	case modeAssign:
+		return m.viewAssign()
 	}
 	dim := m.theme.Style(m.theme.Dim)
 	header := m.renderHeader()

@@ -25,6 +25,7 @@ const (
 	modeHealth
 	modeHelp
 	modeConfirmChannel // d on the channel list; y deletes, anything else cancels
+	modeAssign         // a in a task list: pick who the cursor task goes to
 )
 
 // pane is the focused main-screen region; tab and shift+tab cycle them
@@ -109,6 +110,7 @@ type Model struct {
 	toastSeq   int
 	toastHint  bool      // the toast is a hint (text color, no error prefix), not an error
 	draft      taskDraft // the one unsaved task state change; id 0 for none
+	assign     assignPicker
 	lastNotice string
 
 	search     searchState
@@ -344,6 +346,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateHealth(msg))
 	case modeHelp:
 		cmds = append(cmds, m.updateHelp(msg))
+	case modeAssign:
+		cmds = append(cmds, m.updateAssign(msg))
 	}
 	// A draft lives only on the cursor row of the focused task pane (ADR
 	// 0011 decision 2): whatever the message above did, if that is no longer
@@ -554,6 +558,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "u":
 		if bus.IsTaskChannel(m.selName()) {
 			return m.unassignTask()
+		}
+	case "a":
+		if m.pane() == paneStream && bus.IsTaskChannel(m.selName()) {
+			return m.openAssign()
 		}
 	case "d":
 		if m.sessSel >= 0 || m.selected() == nil {

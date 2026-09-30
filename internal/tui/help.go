@@ -44,6 +44,7 @@ func (m Model) helpLines() []string {
 		{"s", "subscribe / unsubscribe the channel (no-op in the sessions pane)"},
 		{"t", "rail: follow a tag set: <tag>[,<tag>...] (AND); task list: take the unassigned cursor task"},
 		{"u", "task list: unassign your not-started cursor task"},
+		{"a", "task list: assign the cursor task to you or a live session (unassigned tasks or yours)"},
 		{"d", "delete the channel and all its messages (asks first); on a tag set, unfollow it (no confirmation); no-op in the sessions pane"},
 		{"/", "search (tab cycles text / semantic / both)"},
 		{"h", "health and config"},

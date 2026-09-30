@@ -215,6 +215,83 @@ func (m *Model) unassignTask() tea.Cmd {
 	return m.loadTasks(m.selName())
 }
 
+// assignPicker is a's overlay (#19): the identities the cursor task can go
+// to, the TUI's own first, then the live sessions in the rail.
+type assignPicker struct {
+	ch    string
+	id    int64
+	owner string
+	names []string
+	sel   int
+}
+
+// openAssign (a in a task list) opens the picker for an unassigned task or
+// the TUI's own; an agent's task gets the owned toast, like t and u.
+func (m *Model) openAssign() tea.Cmd {
+	t, ok := m.cursorTask()
+	if !ok {
+		return nil
+	}
+	if m.draft.id != 0 {
+		return m.showHint(draftHintToast)
+	}
+	if !m.taskEditable(t) {
+		return m.showToast(ownedToast(t.Owner))
+	}
+	names := []string{m.c.as}
+	for _, n := range m.sessionNames() {
+		if n != m.c.as {
+			names = append(names, n)
+		}
+	}
+	m.assign = assignPicker{ch: m.selName(), id: t.ID, owner: t.Owner, names: names}
+	m.mode = modeAssign
+	return nil
+}
+
+// updateAssign: ↑↓ choose, enter assigns through task_update (the bus's
+// owner rules decide; a refusal is toasted), esc closes without a change.
+func (m *Model) updateAssign(msg tea.Msg) tea.Cmd {
+	p := &m.assign
+	switch keyString(msg) {
+	case "esc":
+		m.mode = modeNormal
+	case "up":
+		p.sel = max(p.sel-1, 0)
+	case "down":
+		p.sel = min(p.sel+1, len(p.names)-1)
+	case "enter":
+		m.mode = modeNormal
+		owner := p.names[p.sel]
+		if owner == p.owner {
+			return nil
+		}
+		if _, err := m.c.b.TaskUpdate(m.c.as, bus.TaskPatch{ID: p.id, Owner: &owner}); err != nil {
+			return m.showToast("task: " + errText(err))
+		}
+		return m.loadTasks(p.ch)
+	}
+	return nil
+}
+
+func (m Model) viewAssign() string {
+	var b strings.Builder
+	for i, n := range m.assign.names {
+		line := "  " + n
+		if n == m.c.as {
+			line += " (you)"
+		}
+		if n == m.assign.owner {
+			line += " · owner"
+		}
+		if i == m.assign.sel {
+			line = m.theme.Style(m.theme.Agent).Bold(true).Render("›" + line[1:])
+		}
+		b.WriteString(line + "\n")
+	}
+	return m.overlay("assign task "+strconv.FormatInt(m.assign.id, 10), m.theme.Agent, b.String(), m.hints("↑↓", "choose", "enter", "assign", "esc", "cancel"))
+}
+
 // taskRow is one visible row of a task tree.
 type taskRow struct {
 	t      bus.TaskSummary

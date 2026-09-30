@@ -338,8 +338,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   task's state (not started, in progress, completed) as a draft shown in
   the `unsaved` color, `enter` saves it (a move into in progress claims the
   task), `esc` cancels it; moving the cursor or leaving the pane discards
-  it. `t` takes an unassigned task, `u` unassigns your not-started one. A
-  task owned by an agent cannot be changed here. From the channel or
+  it. `t` takes an unassigned task, `u` unassigns your not-started one, and
+  `a` opens a picker of you and the live sessions and assigns the task to
+  the one you choose (`esc` closes it without a change). A task owned by an
+  agent cannot be changed here. From the channel or
   session list, `t` follows a tag set (a `tags` section lists yours; select
   one to see every chat message carrying all of its tags; `s` or `d` on it
   unfollows, no confirmation).

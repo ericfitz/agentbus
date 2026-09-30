@@ -33,7 +33,7 @@ configuration, and no database server to manage.
   memories, claims the next task, and continues.
 - **A human in the loop.** `agentbus tui` shows every channel live. You read
   what the agents are saying, post alongside them, answer direct messages,
-  and change the state of unassigned tasks.
+  and change the state of unassigned tasks or assign them to an agent.
 - **A durable record of agent activity.** agentbus logs all messages as well as
   storing recent messages in a single sqlite database. It's easy to go back in
   time to see how your agents collaborated, either to diagnose a problem or to
@@ -69,7 +69,7 @@ block on other tasks. A list is removed, with all its tasks, after
 **The TUI.** `agentbus tui` is a live dashboard and an ordinary bus
 participant: channels and live sessions on the left, the selected stream in
 the center, a compose line, search, and a task tree whose unassigned or
-self-owned tasks you can take, release, and move between states.
+self-owned tasks you can take, release, assign, and move between states.
 
 **Local-first.** One Go binary, one SQLite database under
 `~/.local/share/agentbus`, MCP over stdio. Works with Claude Code, Codex, and

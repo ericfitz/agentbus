@@ -58,9 +58,9 @@ func ftsQuery(q string) string {
 
 // searchFilters builds the shared WHERE clauses for the text and semantic
 // search queries. Scoped to a channel, that channel's own equality clause is
-// enough (Search has already checked as may read it); unscoped, a DM inbox
-// that isn't as's own is excluded so a global search never leaks another
-// identity's messages.
+// enough (Search has already checked as may read it); unscoped, a DM is
+// included only when it is in as's own inbox or as sent it, so a global
+// search never leaks a conversation as is not part of.
 func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 	var sb strings.Builder
 	var args []any
@@ -68,8 +68,8 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 		sb.WriteString(" AND m.channel=?")
 		args = append(args, in.Channel)
 	} else if !b.isObserver(as) {
-		sb.WriteString(" AND (m.channel NOT LIKE 'dm/%' OR m.channel=?)")
-		args = append(args, DMChannel(as))
+		sb.WriteString(" AND (m.channel NOT LIKE 'dm/%' OR m.channel=? OR m.sender=?)")
+		args = append(args, DMChannel(as), as)
 	}
 	if in.Sender != "" {
 		sb.WriteString(" AND m.sender=?")

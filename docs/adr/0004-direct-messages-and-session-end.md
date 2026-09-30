@@ -85,3 +85,6 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
   reveals its sender and timing). Names are not credentials: an agent that
   registers a name whose session has already ended becomes that identity,
   inbox included.
+
+Amended 2026-09-29 by ADR 0009's amendment of that date: unscoped search also
+returns DMs the caller sent; the inbox read guard is unchanged.

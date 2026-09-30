@@ -244,12 +244,35 @@ func TestDMGuards(t *testing.T) {
 	}
 	_, err = b.Search("Sam", SearchInput{Query: "zebra", Channel: "dm/Pat", Mode: "text"})
 	wantErr("scoped search by sender", "not_found", err)
+	// Unscoped search finds DMs you sent (spec 2026-09-29), by text and by tag.
 	res, err := b.Search("Sam", SearchInput{Query: "zebra", Mode: "text"})
-	if err != nil || len(res.Hits) != 0 {
-		t.Fatalf("unscoped search must not leak another inbox: %+v %v", res, err)
+	if err != nil || len(res.Hits) != 1 {
+		t.Fatalf("sender must find its own sent DM: %+v %v", res, err)
+	}
+	if _, err := b.Send("Sam", SendInput{Channel: "dm/Pat", Content: "deploy done", Tags: []string{"deployment"}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err = b.Search("Sam", SearchInput{Query: "deploy", Mode: "text", Tags: []string{"deployment"}})
+	if err != nil || len(res.Hits) != 1 {
+		t.Fatalf("sender must find its own sent DM by tag: %+v %v", res, err)
+	}
+	// A DM between two other agents stays invisible.
+	third, err := Open(b.cfg, b.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = third.Close() })
+	if _, err := third.Register("Lee", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Send("Pat", SendInput{Channel: "dm/Lee", Content: "private walrus"}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := b.Search("Sam", SearchInput{Query: "walrus", Mode: "text"}); err != nil || len(res.Hits) != 0 {
+		t.Fatalf("unscoped search must not leak other agents' DMs: %+v %v", res, err)
 	}
 	// The owner can read its own inbox both ways.
-	if ms, err := other.History("Pat", "dm/Pat", nil, nil, 10); err != nil || len(ms) != 1 {
+	if ms, err := other.History("Pat", "dm/Pat", nil, nil, 10); err != nil || len(ms) != 2 {
 		t.Fatalf("%+v %v", ms, err)
 	}
 	if res, err := other.Search("Pat", SearchInput{Query: "zebra", Mode: "text"}); err != nil || len(res.Hits) != 1 {

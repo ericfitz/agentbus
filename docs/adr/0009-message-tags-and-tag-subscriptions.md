@@ -115,3 +115,15 @@ Item 6 is unchanged: the bus tag source that delivers to agents still
 matches ordinary chat channels only. The TUI is the human operator's view
 and already shows every DM and memory channel, so widening its tag panes
 exposes nothing new.
+
+## Amendment (2026-09-29): search covers your own DMs
+
+**Human decision (user, 2026-09-29):** "Your sent AND RECEIVED DMs are
+searchable by tag." This is a search change only; tag subscriptions still
+match ordinary chat channels only (item 6).
+
+An unscoped `search` now includes DM messages the caller sent, in addition
+to its own inbox. It applies to every unscoped search, not only tag
+filters. A search scoped to `dm/<other>` and `history` on another inbox
+still return not_found (ADR 0004). Spec:
+`docs/superpowers/specs/2026-09-29-tag-conventions-design.md`.

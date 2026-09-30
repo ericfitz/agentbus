@@ -617,7 +617,7 @@ Pushed to `main` (`fix/grok-no-hook`):
 ## 2026-09-30: tag conventions
 
 Spec `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`, plan
-`docs/superpowers/plans/2026-09-29-tag-conventions.md`. Not yet released.
+`docs/superpowers/plans/2026-09-29-tag-conventions.md`. Released in v1.11.0.
 
 - Protocol bullet, using-agentbus skill Tags section, and `send`/`search`/
   `register` descriptions teach a shared tag vocabulary and when to tag
@@ -629,4 +629,14 @@ Spec `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`, plan
 - Structured `key:value` tags deferred to #20. Deferred review minors:
   `ignored_tags` undocumented for agents; no observer-search test; ADR
   wording "wrote itself" ignores name reuse; skill doesn't say how to fill
-  `tags`; empty entry shows as `""`.
+  `tags`; empty entry shows as `""`. All but the last resolved in v1.11.0
+  (an empty entry reported as `""` is accurate and left as is).
+
+## 2026-09-30: task handoff and TUI assign (v1.11.0)
+
+- The owner may hand a task to another registered identity directly,
+  keeping status and lease (ADR 0005 amendment 2026-09-30).
+- TUI: `a` in a task list assigns the cursor task to you or a live session
+  (#19).
+- **v1.11.0 released** (tag v1.11.0). No schema change; upgrade, then
+  `agentbus init --global`, restart sessions and `agentbus tui`.

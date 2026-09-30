@@ -169,7 +169,9 @@ clear them. Task lists do not take tags.
 
 Reuse these before inventing a tag, and never invent a synonym
 (`deployment`, not `deploy`). `register` returns the repository's own
-additions in `repo_tags`.
+additions in `repo_tags`. A repository adds tags by listing them under
+`tags` in `.local/agentbus.json` (`"tags": ["tmi", "tmi-ux"]`); entries
+that are not valid tags come back in `ignored_tags` for you to fix.
 
 - Activity: `deployment` `release` `migration` `ci` `rollback` `infra`
 - Lifecycle: `started` `succeeded` `failed`

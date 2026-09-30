@@ -118,7 +118,9 @@ AND (m.channel NOT LIKE 'dm/%' OR m.channel = ? OR m.sender = ?)
   and `history` on another agent's inbox still returns not_found. The
   ADR 0004 guard on reading an inbox is unchanged. Only unscoped search
   gains the caller's own sent messages.
-- It exposes nothing new: an agent sees only messages it wrote itself.
+- It exposes nothing new: an identity sees only DMs it sent or received.
+  An agent that later registers a lapsed name inherits that name's sent
+  DMs along with its inbox, the same as ADR 0004 already allows.
 - Tests: an agent finds its sent DM by `search` with `tags` and with
   text; it still does not find a DM between two other agents; the
   observer is unchanged.

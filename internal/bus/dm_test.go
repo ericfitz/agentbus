@@ -287,7 +287,7 @@ func TestDMGuards(t *testing.T) {
 }
 
 func TestObserverReadsEveryInbox(t *testing.T) {
-	b, _ := twoAgents(t)
+	b, other := twoAgents(t)
 	if _, err := b.Send("Sam", SendInput{Channel: "dm/Pat", Content: "hello"}); err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +297,17 @@ func TestObserverReadsEveryInbox(t *testing.T) {
 	}
 	if ms, err := b.History("Sam", "dm/Pat", nil, nil, 10); err != nil || len(ms) != 1 {
 		t.Fatalf("observer history: %+v %v", ms, err)
+	}
+	// The observer's unscoped search still sees every inbox, not only its own
+	// and its sent DMs (spec 2026-09-29).
+	if _, err := other.Register("Lee", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Send("Pat", SendInput{Channel: "dm/Lee", Content: "observer walrus"}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := b.Search("Sam", SearchInput{Query: "walrus", Mode: "text"}); err != nil || len(res.Hits) != 1 {
+		t.Fatalf("observer unscoped search: %+v %v", res, err)
 	}
 	st, err := b.StatusReport()
 	if err != nil {

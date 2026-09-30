@@ -34,6 +34,11 @@ type Registration struct {
 	Others []Session `json:"others,omitempty"`
 	// TagSubscriptions reports the persistent tag sets register applied (.local/agentbus.json).
 	TagSubscriptions [][]string `json:"tag_subscriptions,omitempty"`
+	// RepoTags lists the repository's own approved tags (.local/agentbus.json
+	// "tags"), returned as guidance; send does not enforce them. Omitted when empty.
+	RepoTags []string `json:"repo_tags,omitempty"`
+	// IgnoredTags lists "tags" entries that are not valid tags. Omitted when empty.
+	IgnoredTags []string `json:"ignored_tags,omitempty"`
 }
 
 type PendingChannel struct {

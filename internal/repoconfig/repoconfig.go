@@ -188,6 +188,26 @@ func (f *File) TagSubscriptions() (sets [][]string, bad []string) {
 	return sets, bad
 }
 
+// Tags returns the repository's own approved tags under "tags" (spec
+// 2026-09-29), normalized and deduplicated in file order; entries that are
+// not a valid tag are returned in bad and omitted. Absent key: none. The
+// list is guidance register hands to agents; send does not enforce it.
+func (f *File) Tags() (tags []string, bad []string) {
+	list, _ := f.Raw["tags"].([]any)
+	for _, e := range list {
+		s, ok := e.(string)
+		norm, err := bus.NormalizeTags([]string{s})
+		if !ok || err != nil || len(norm) != 1 {
+			bad = append(bad, fmt.Sprint(e))
+			continue
+		}
+		if !slices.Contains(tags, norm[0]) {
+			tags = append(tags, norm[0])
+		}
+	}
+	return tags, bad
+}
+
 // AddTagSet appends a normalized set (idempotent), writes, and returns the list.
 func (f *File) AddTagSet(tags []string) ([][]string, error) {
 	norm, err := bus.NormalizeTags(tags)

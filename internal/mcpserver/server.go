@@ -163,7 +163,9 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 // reg. A file that cannot be read counts as absent, so register still
 // succeeds; the problem is surfaced in SubscribeFailed under the key
 // ".local/agentbus.json". A task-list entry is neither subscribed nor
-// reported as failed: it goes to reg.IgnoredChannels (ADR 0013).
+// reported as failed: it goes to reg.IgnoredChannels (ADR 0013). It also
+// reports the file's own approved tags in reg.RepoTags (invalid entries in
+// reg.IgnoredTags).
 func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	reg.Subscribed = []string{}
 	reg.MemoryChannels = []string{}
@@ -221,6 +223,7 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		reg.Subscribed = append(reg.Subscribed, c)
 	}
 	if f != nil {
+		reg.RepoTags, reg.IgnoredTags = f.Tags()
 		sets, bad := f.TagSubscriptions()
 		for _, s := range bad {
 			if reg.SubscribeFailed == nil {
@@ -331,7 +334,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags; use them and the using-agentbus vocabulary before inventing a tag."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			c := in.Context
 			if c == "" {

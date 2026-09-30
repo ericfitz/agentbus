@@ -914,3 +914,33 @@ func TestSearchToolOverTaskRowDoesNotCreateAccessRow(t *testing.T) {
 		t.Fatal("a search hit on a task must never create a memory_access row")
 	}
 }
+
+func TestRegisterReturnsRepoTags(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","tags":["tmi","TMI","repo:tmi"]}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	if got := stringsOf(reg["repo_tags"]); len(got) != 1 || got[0] != "tmi" {
+		t.Fatal(reg)
+	}
+	if got := stringsOf(reg["ignored_tags"]); len(got) != 1 || got[0] != "repo:tmi" {
+		t.Fatal(reg)
+	}
+	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
+		t.Fatal("bad tags must not fail register:", reg)
+	}
+}
+
+func TestRegisterOmitsRepoTagsWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam"}`)
+	cs := testSessionIn(t, dir)
+	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	for _, k := range []string{"repo_tags", "ignored_tags"} {
+		if _, ok := reg[k]; ok {
+			t.Fatalf("%s must be omitted when empty: %v", k, reg)
+		}
+	}
+}

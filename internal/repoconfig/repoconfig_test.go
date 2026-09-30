@@ -271,3 +271,25 @@ func TestTagSubscriptionsRoundTrip(t *testing.T) {
 		t.Fatalf("%v %v", sets, err)
 	}
 }
+
+func TestTagsNormalizesDedupesAndReportsBad(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam","tags":["TMI","tmi","api-schema","repo:tmi","",7,"abcdefghijklmnopqrstu"]}`)
+	f, _ := Load(dir)
+	got, bad := f.Tags()
+	if !reflect.DeepEqual(got, []string{"tmi", "api-schema"}) {
+		t.Fatal(got)
+	}
+	if !reflect.DeepEqual(bad, []string{"repo:tmi", "", "7", "abcdefghijklmnopqrstu"}) {
+		t.Fatal(bad)
+	}
+}
+
+func TestTagsAbsentKeyMeansNone(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam"}`)
+	f, _ := Load(dir)
+	if got, bad := f.Tags(); len(got) != 0 || len(bad) != 0 {
+		t.Fatal(got, bad)
+	}
+}

@@ -70,3 +70,18 @@ an old binary can still `send` or `edit_memory` into a `tasks/` channel
 until it is restarted. As with direct messages, names are not credentials:
 the owner guard prevents accidents between cooperating agents, not a
 hostile one.
+
+## Amendment (2026-09-30): the owner may hand a task off
+
+**Human decision (user, 2026-09-30):** the current owner may set `owner`
+to another registered identity directly, instead of clearing it and
+hoping the other identity takes it before anyone else does. Prompted by
+#19 (the TUI's `a` assigns a task from the sessions list).
+
+- The owner guard's "taking ownership needs the owner to be empty" now
+  also passes when the caller is the current owner. Anyone else still gets
+  `conflict`, and `force` still overrides for anyone and is recorded.
+- A handoff keeps the task's status and lease. A task handed off while
+  `in_progress` stays `in_progress` under its new owner, and the new owner
+  renews the lease with `task_claim` as usual.
+- A handoff is an ordinary revision, not a `forced` one.

@@ -853,3 +853,39 @@ func TestDeleteCombinedWithChangesIsValidation(t *testing.T) {
 	wantCode(t, err, "validation")
 	wantUnchanged(t, b, tk.ID, 1)
 }
+
+// TestOwnerHandsOff (ADR 0005 amendment 2026-09-30): the current owner may
+// set owner to another registered identity directly, at any status, and it
+// is not a forced revision; anyone else still cannot take an owned task.
+func TestOwnerHandsOff(t *testing.T) {
+	b, other := twoAgents(t)
+	taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
+	sam := "Sam"
+	if _, err := b.TaskUpdate("Sam", TaskPatch{ID: tk.ID, Owner: &sam}); err != nil {
+		t.Fatal(err)
+	}
+	pat := "Pat"
+	_, err := other.TaskUpdate("Pat", TaskPatch{ID: tk.ID, Owner: &pat})
+	wantCode(t, err, "conflict")
+
+	res, err := b.TaskUpdate("Sam", TaskPatch{ID: tk.ID, Owner: &pat})
+	if err != nil || res.Task.Owner != "Pat" || res.Task.Status != "pending" {
+		t.Fatalf("pending handoff: %+v %v", res.Task, err)
+	}
+	revs, err := b.MemoryRevisions("Sam", tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := revs[len(revs)-1].Type; got == "forced" {
+		t.Fatal("an owner's handoff is not forced")
+	}
+
+	if _, err := other.TaskClaim("Pat", tk.ID, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	res, err = other.TaskUpdate("Pat", TaskPatch{ID: tk.ID, Owner: &sam})
+	if err != nil || res.Task.Owner != "Sam" || res.Task.Status != "in_progress" {
+		t.Fatalf("in-progress handoff keeps status: %+v %v", res.Task, err)
+	}
+}

@@ -52,7 +52,8 @@ func openBlockers(ts []Task, blockedBy []int64) []int64 {
 
 // ownerGuardBlocked reports whether the owner guard (rules 2 and 3: only
 // the owner may change an in_progress task, and taking ownership needs the
-// owner to be empty) would refuse p against cur, ignoring Force. TaskUpdate
+// owner to be empty or to be the one handing it off, ADR 0005 amendment
+// 2026-09-30) would refuse p against cur, ignoring Force. TaskUpdate
 // uses it, after applyPatch has run with Force honored, to tell whether
 // Force actually bypassed the guard (which decides the "forced" revision
 // type); applyPatch enforces the same two conditions directly, for their
@@ -61,7 +62,7 @@ func ownerGuardBlocked(cur Task, p TaskPatch, as string) bool {
 	if cur.Status == "in_progress" && cur.Owner != as {
 		return true
 	}
-	return p.Owner != nil && *p.Owner != "" && *p.Owner != cur.Owner && cur.Owner != ""
+	return p.Owner != nil && *p.Owner != "" && *p.Owner != cur.Owner && cur.Owner != "" && cur.Owner != as
 }
 
 // applyPatch is pure: it returns the patched task or the rule violation.

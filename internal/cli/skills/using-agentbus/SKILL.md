@@ -115,7 +115,8 @@ unit of handoff: if you would otherwise write "remaining: X, Y, Z" in
    refuses otherwise, and clearing the owner of an in-progress task is
    refused too).
 3. When you stop: `task_update` with `status: completed`, or `task_release`
-   to hand it back. Never leave a task claimed that you are not working on.
+   to hand it back. To hand a task you own to a specific agent,
+   `task_update` with `owner: <their name>`; it keeps its status. Never leave a task claimed that you are not working on.
 4. Long-running work: claim with `leased_until` and renew it with
    `task_claim` again before it passes; an expired lease hands the task to
    the next claimer, and a `task_update` after expiry changes nothing.

@@ -133,6 +133,8 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"claim before you start",
 		"- Register returns the other live agents in \"others\"; call discover only to",
 		"- Give every send a subject",
+		"- Tag what you send so others can find it and triage it",
+		"change plus\n  its area",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)

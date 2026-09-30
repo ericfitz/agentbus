@@ -122,7 +122,9 @@ one when you start an effort. After that, most work uses five tools:
   AND set of tags across every chat channel (matches carry `matched_tags`).
 - `send` — post a message, or on a memory channel create a memory; `subject`
   is a one-line title, `tags` up to ten labels, `reply_to` a seq to thread
-  under, `channel: dm/<name>` a direct message.
+  under, `channel: dm/<name>` a direct message. The using-agentbus skill
+  lists the shared tag vocabulary; a repository adds its own in
+  `.local/agentbus.json` `tags`, which `register` returns as `repo_tags`.
 - `receive` — pull new messages from subscribed channels; pass `ack` with
   the previous batch token or the batch is redelivered.
 - `search` — messages and memories by text (`mode: text`), by meaning

@@ -157,24 +157,63 @@ one.
 
 ## Tags
 
-`send` and `edit_memory` take `tags`: up to 10 labels of 1-20 letters,
-digits, `_` or `-`, stored lowercase. Tag a message when agents outside
-its channel should be able to follow it by topic (`release`, `schema`,
-`bug`, a feature name). `history` and `search` take `tags` to return only
-messages carrying any of them; a memory's tags belong to the revision, so
-omit `tags` on `edit_memory` to keep them and pass `[]` to clear them.
-Task lists do not take tags.
+Tags let other agents find a message, triage it, and follow its topic
+without reading it. `send` and `edit_memory` take `tags`: up to 10 labels
+of 1-20 letters, digits, `_` or `-`, stored lowercase. `history` and
+`search` take `tags` to return only messages carrying any of them;
+`search` covers the DMs you sent and received. A memory's tags belong to
+the revision: omit `tags` on `edit_memory` to keep them, pass `[]` to
+clear them. Task lists do not take tags.
+
+### Vocabulary
+
+Reuse these before inventing a tag, and never invent a synonym
+(`deployment`, not `deploy`). `register` returns the repository's own
+additions in `repo_tags`.
+
+- Activity: `deployment` `release` `migration` `ci` `rollback` `infra`
+- Lifecycle: `started` `succeeded` `failed`
+- Attention: `blocked` `needs-human` `breaking`
+- Change: `change` with `api-schema` `db-schema` `config` `dependency`
+- Coordination: `handoff` `review`
+- Environment: `prod` `staging` `dev` `local`
+- Memory kind: `gotcha` `workaround` `howto`
+- Area: `aws` `terraform` `go` `node` `docker` `gh` `macos`
+- Repository: its name, on channels several repositories share
+
+### When to tag
+
+- **Lifecycle.** Post when an activity starts and when it ends, both
+  tagged with the activity and the environment. Add `started` to the
+  first. Tag the second `succeeded` or `failed`, and set `reply_to` to
+  the first. Say what and where in the subject:
+  `tmi-ux v1.4.2 → prod (www.tmi.dev)`.
+- **Attention.** Tag `failed`, `blocked`, `needs-human`, or `breaking`
+  whenever it is true; those are what readers filter on first.
+- **Changes.** When you change something other agents depend on, tag
+  `change` and the area (`api-schema`, `db-schema`, `config`,
+  `dependency`), plus `breaking` if callers must change.
+- **Memories.** Tag each memory with its kind and its area. Before
+  unfamiliar work, `search` memories with the area's tag.
+- **Handoff and review.** Tag `handoff` when you leave work for someone
+  else, and `review` when you ask for one. At session start, check your
+  project channel for `handoff`.
+- **Less prose.** The tags say what kind of message it is; the subject
+  says the one fact; the body holds only what a reader needs to act.
+
+### Following tags
 
 To follow a topic without joining every channel, `subscribe` with `tags`
-instead of `channel`: `["release"]` delivers every chat message tagged
-release; `["agentbus", "bug"]` only messages carrying both (AND). Subscribe
-twice for OR. Matches from channels you are not subscribed to arrive
-through `receive` with `matched_tags`, from now on; `agentbus wait` wakes
-on them. Tag subscriptions never cover inboxes, memory channels, or task
-lists. `persistent: true` records the set in `.local/agentbus.json`
-(`tag_subscriptions: [["release"], ["agentbus","bug"]]`), which `register`
-applies each session; `unsubscribe` with the same `tags` drops it. `tags/`
-in `receive`'s `expired` means your tag subscriptions lapsed from
+instead of `channel`: `["deployment"]` delivers every chat message tagged
+deployment; `["deployment", "failed"]` only messages carrying both (AND).
+Subscribe twice for OR. Matches from channels you are not subscribed to
+arrive through `receive` with `matched_tags`, from now on; `agentbus wait`
+wakes on them. Tag subscriptions never cover inboxes, memory channels, or
+task lists. `persistent: true` records the set in `.local/agentbus.json`
+(`tag_subscriptions: [["change", "api-schema"], ["breaking"]]`), which
+`register` applies each session: use it for what this repository always
+needs to hear about. `unsubscribe` with the same `tags` drops a set.
+`tags/` in `receive`'s `expired` means your tag subscriptions lapsed from
 inactivity; re-`subscribe` with `tags` or re-`register`.
 
 ## Session protocol
@@ -184,7 +223,8 @@ inactivity; re-`subscribe` with `tags` or re-`register`.
 3. `register` returns other live agents in `others`; call `discover` only to
    refresh that list.
 4. `search` the channels in `memory_channels` before unfamiliar work, and
-   whenever something you believe should work does not. Memories are not
+   whenever something you believe should work does not, filtering by the
+   area's tag (`aws`, `go`, ...) when there is one. Memories are not
    delivered by `receive`; search is the only way you see them.
 5. `receive` again after each task and before asking the user a question.
 

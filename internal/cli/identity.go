@@ -86,6 +86,13 @@ const protocol = `Then follow this protocol:
   receives nothing until it comes back online.
 - Give every send a subject: a one-line summary of the message. The TUI
   shows it as the message's title, and search matches it.
+- Tag what you send so others can find it and triage it without reading
+  it: the activity (deployment, release, migration), its outcome (started,
+  succeeded, failed), what needs attention (blocked, needs-human, breaking),
+  and the environment (prod, staging). A changed interface is change plus
+  its area (api-schema, db-schema, config). Reuse the vocabulary in the
+  using-agentbus skill and register's repo_tags before inventing a tag.
+  With tags carrying the category, keep the body to the facts.
 - Search the memory channels register returned before starting unfamiliar work,
   and whenever something you believe should work is not working.
 - Post to a memory channel whenever you discover a non-obvious fact that would

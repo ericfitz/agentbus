@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -635,6 +636,15 @@ func TestPersistErrClassifiesIOAsInternalRetryable(t *testing.T) {
 	var be *bus.Error
 	if !errors.As(persistErr(&os.PathError{Op: "open", Path: "x", Err: os.ErrPermission}), &be) || be.Code != "internal" || !be.Retryable {
 		t.Fatalf("I/O error: %+v", be)
+	}
+	for _, ioErr := range []error{
+		&os.LinkError{Op: "rename", Old: "a", New: "b", Err: syscall.EIO},
+		&os.SyscallError{Syscall: "fsync", Err: syscall.EIO},
+		fmt.Errorf("wrapped: %w", &os.LinkError{Op: "rename", Old: "a", New: "b", Err: syscall.EACCES}),
+	} {
+		if !errors.As(persistErr(ioErr), &be) || be.Code != "internal" || !be.Retryable {
+			t.Fatalf("%T: %+v", ioErr, be)
+		}
 	}
 	if !errors.As(persistErr(errors.New("channel \"a/b\": must not contain '/'")), &be) || be.Code != "validation" || be.Retryable {
 		t.Fatalf("validation error: %+v", be)

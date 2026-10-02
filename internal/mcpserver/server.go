@@ -266,12 +266,15 @@ func persistFile(cwd string) (*repoconfig.File, error) {
 // persistErr wraps a repo-file problem in the bus's error envelope so the
 // agent sees the same {code,message,retryable} shape as every other failure.
 // A filesystem failure (unreadable or unwritable file) is internal and
-// retryable, matching how the bus reports its own I/O errors; a bad channel
+// retryable, matching how the bus reports its own I/O errors (that includes
+// the final rename, which fails with *os.LinkError); a bad channel
 // name, a malformed file, or no enclosing git repository is validation.
 func persistErr(err error) error {
 	msg := bus.TruncateErrorMessage(err.Error())
 	var pe *os.PathError
-	if errors.As(err, &pe) {
+	var le *os.LinkError
+	var se *os.SyscallError
+	if errors.As(err, &pe) || errors.As(err, &le) || errors.As(err, &se) {
 		return &bus.Error{Code: "internal", Message: msg, Retryable: true}
 	}
 	return &bus.Error{Code: "validation", Message: msg, Retryable: false}

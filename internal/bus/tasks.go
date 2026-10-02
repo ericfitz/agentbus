@@ -352,9 +352,8 @@ func validateTaskLinks(ts []Task, t Task) error {
 // first) steps by rankAfter/rankBefore instead of rankBetween, which would
 // take a midpoint against the alphabet's edge and grow the key by a byte
 // every few inserts (see rank.go). Inserting between two known siblings
-// keeps the midpoint algorithm. Falls back to unbounded-above when lo and
-// hi are equal (only possible from a corrupt write): rankBetween's
-// precondition is lo < hi.
+// keeps the midpoint algorithm. The caller (placeRank) guarantees lo < hi
+// when both are set, which rankBetween requires.
 func rankStep(lo, hi string) string {
 	switch {
 	case lo != "" && hi == "":
@@ -362,10 +361,54 @@ func rankStep(lo, hi string) string {
 	case lo == "" && hi != "":
 		return rankBefore(hi)
 	}
-	if hi != "" && lo >= hi {
-		hi = ""
-	}
 	return rankBetween(lo, hi)
+}
+
+// rankCollision is placeRank's report that the two neighbors it must place
+// a task between share a rank (only possible from a corrupt write), so no
+// rank fits strictly between them. The caller renumbers the siblings under
+// parent (rerankSiblings) inside its write transaction and places again.
+type rankCollision struct{ parent int64 }
+
+func (e *rankCollision) Error() string {
+	return fmt.Sprintf("sibling ranks under parent %d collide", e.parent)
+}
+
+// rerankSiblings renumbers every task sharing effective parent with
+// strictly increasing ranks, keeping the current order (rank, then id).
+// Only tasks whose rank actually changes get a "reranked" revision. Like
+// reclaimAbandoned it is not rate-charged and bypasses checkCapacity: it
+// repairs an already-corrupt list, and the net growth is one small row per
+// changed task.
+func (b *Bus) rerankSiblings(tx *sql.Tx, as, context string, ts []Task, parent int64) error {
+	var sib []Task
+	for _, t := range ts {
+		if effectiveParent(ts, t.Parent) == parent {
+			sib = append(sib, t)
+		}
+	}
+	sort.Slice(sib, func(i, j int) bool {
+		if sib[i].Rank != sib[j].Rank {
+			return sib[i].Rank < sib[j].Rank
+		}
+		return sib[i].ID < sib[j].ID
+	})
+	rank := ""
+	for _, t := range sib {
+		if rank == "" {
+			rank = "V"
+		} else {
+			rank = rankAfter(rank)
+		}
+		if t.Rank == rank {
+			continue
+		}
+		t.Rank = rank
+		if _, err := b.writeTaskRevision(tx, as, context, t, "reranked"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // placeRank computes the rank for self among the tasks in ts that share
@@ -413,11 +456,17 @@ func placeRank(ts []Task, self, parent, before, after int64) (string, error) {
 		if idx+1 < len(sib) {
 			hi = sib[idx+1].Rank
 		}
+		if hi != "" && sib[idx].Rank >= hi {
+			return "", &rankCollision{parent}
+		}
 		return rankStep(sib[idx].Rank, hi), nil
 	case before != 0:
 		lo := ""
 		if idx > 0 {
 			lo = sib[idx-1].Rank
+		}
+		if lo != "" && lo >= sib[idx].Rank {
+			return "", &rankCollision{parent}
 		}
 		return rankStep(lo, sib[idx].Rank), nil
 	default:
@@ -535,6 +584,20 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 		return Task{}, err
 	}
 	rank, err := placeRank(ts, 0, in.Parent, in.Before, in.After)
+	var rc *rankCollision
+	if errors.As(err, &rc) {
+		rctx, cerr := b.senderContext(tx, as)
+		if cerr != nil {
+			return Task{}, internal(cerr)
+		}
+		if err := b.rerankSiblings(tx, as, rctx, ts, rc.parent); err != nil {
+			return Task{}, err
+		}
+		if ts, err = loadTasks(tx, in.Channel); err != nil {
+			return Task{}, err
+		}
+		rank, err = placeRank(ts, 0, in.Parent, in.Before, in.After)
+	}
 	if err != nil {
 		return Task{}, err
 	}

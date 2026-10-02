@@ -427,6 +427,21 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 		return true, nil
 	}
 	patched, err := applyPatch(ts, *cur, p, as, b.nowMs(), ownerKnown)
+	var rc *rankCollision
+	if errors.As(err, &rc) {
+		// Corrupt equal sibling ranks: renumber them in this transaction,
+		// then redo the patch against the reloaded list.
+		if err := b.rerankSiblings(tx, as, rctx, ts, rc.parent); err != nil {
+			return TaskUpdateResult{}, err
+		}
+		if ts, err = loadTasks(tx, channel); err != nil {
+			return TaskUpdateResult{}, err
+		}
+		if cur = taskByID(ts, p.ID); cur == nil {
+			return TaskUpdateResult{}, errf("not_found", false, "memory %d is not a task", p.ID)
+		}
+		patched, err = applyPatch(ts, *cur, p, as, b.nowMs(), ownerKnown)
+	}
 	if err != nil {
 		return TaskUpdateResult{}, err
 	}

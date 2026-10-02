@@ -56,3 +56,29 @@ func TestTasksReloadScrollsToBottomWhileFollowing(t *testing.T) {
 		t.Fatalf("following tree not at bottom: offset %d of %d lines", f.m.stream.YOffset, f.m.stream.TotalLineCount())
 	}
 }
+
+// TestOtherTaskListReloadKeepsScroll: reloading a list that is not shown
+// does not move the shown pane.
+func TestOtherTaskListReloadKeepsScroll(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.taskTree(t)
+	for i := range 60 {
+		if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: fmt.Sprintf("t%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/other", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/other", Subject: "o"}); err != nil {
+		t.Fatal(err)
+	}
+	f.m.cursor, f.m.follow = -1, true
+	f.run(f.m.loadTasks("tasks/work"))
+	f.m.stream.GotoTop()
+	f.run(f.m.loadTasks("tasks/other"))
+	if f.m.stream.YOffset != 0 {
+		t.Fatalf("reloading another list scrolled the pane to %d", f.m.stream.YOffset)
+	}
+}

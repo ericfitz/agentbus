@@ -61,6 +61,10 @@ func TestSubagentHook(t *testing.T) {
 			t.Fatalf("context lacks %q: %s", want, c)
 		}
 	}
+	// A subagent that was not asked may still read the bus as its parent.
+	if strings.Contains(c, "do not call agentbus tools") {
+		t.Fatalf("context forbids agentbus tools: %s", c)
+	}
 	// The agent type is slugged; no type falls back to "subagent".
 	if c := context(t, run(map[string]any{"agent_type": "Code Reviewer"})); !strings.Contains(c, `name="code-reviewer-`) {
 		t.Fatalf("agent_type name: %s", c)

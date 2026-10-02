@@ -710,6 +710,24 @@ func TestRailKeysStopAtBounds(t *testing.T) {
 
 // ADR 0006 item 7: < and > step the saved width, not the clamped one on
 // screen, so a narrow terminal does not overwrite a wide saved setting.
+// TestRailKeysFromASavedWidthBelowMin: a saved width under railMin steps
+// from railMin, so < never saves a wider rail and > shows at once.
+func TestRailKeysFromASavedWidthBelowMin(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.m.width = 200
+	f.m.c.cfg.TUIRailWidth = 5
+	f.m.layout()
+	f.key("<")
+	if f.m.c.cfg.TUIRailWidth != 5 {
+		t.Fatalf("< from 5 saved %d, want 5 (no change)", f.m.c.cfg.TUIRailWidth)
+	}
+	f.key(">")
+	if f.m.c.cfg.TUIRailWidth != railMin+2 || f.m.railWidth() != railMin+2 {
+		t.Fatalf("> from 5: saved %d, shown %d; want %d", f.m.c.cfg.TUIRailWidth, f.m.railWidth(), railMin+2)
+	}
+}
+
 func TestRailKeysStepFromTheSavedWidth(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")

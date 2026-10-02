@@ -404,6 +404,9 @@ func (b *Bus) rerankSiblings(tx *sql.Tx, as, context string, ts []Task, parent i
 			continue
 		}
 		t.Rank = rank
+		// The revision carries the caller's name though it may not own
+		// the task; equal ranks come only from corrupt writes, so this is
+		// rare, and the type marks it as a fix-up.
 		if _, err := b.writeTaskRevision(tx, as, context, t, "reranked"); err != nil {
 			return err
 		}

@@ -291,7 +291,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshStream()
 		if cursorID != 0 {
 			m.scrollCursorIntoView()
-		} else if m.follow {
+		} else if m.follow && msg.ch == m.selName() {
 			m.stream.GotoBottom()
 		}
 	case taskMsg:
@@ -606,6 +606,7 @@ func (m *Model) resizeRail(delta int) tea.Cmd {
 	if cur <= 0 {
 		cur = m.railWidth()
 	}
+	cur = max(cur, railMin) // a saved width under railMin shows as railMin
 	next := min(max(cur+delta, railMin), railMax)
 	if next == cur {
 		return nil

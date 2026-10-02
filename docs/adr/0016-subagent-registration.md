@@ -26,7 +26,9 @@ so the gap is that a Claude subagent never calls `register`.
 
 Source: https://code.claude.com/docs/en/hooks
 
-- The Claude Code SubagentStart hook's stdin has the common fields
+- Per the docs at the time (the live capture below found `agent_prompt`,
+  `task`, and `description` absent), the Claude Code SubagentStart hook's
+  stdin has the common fields
   (`session_id`, `transcript_path`, `cwd`, `permission_mode`,
   `hook_event_name`) plus `agent_type`, `agent_prompt` (the prompt sent to the
   subagent), `task`, and `description`. Plain stdout, or

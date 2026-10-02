@@ -46,10 +46,11 @@ ericfitz/agentbus#2.
    rebalancing pass exists. Order is per sibling group; `task_list` returns
    depth-first tree order.
 2. Fix-up and forced writes are marked through the message `type`
-   (`reclaimed`, `forced`). Tick reclaims carry an empty sender.
+   (`reclaimed`, `forced`, and `reranked` for siblings renumbered when two
+   share a rank, which only corrupt writes cause; added 2026-10-02). Tick reclaims carry an empty sender.
 3. No new error code: the owner guard, a lost claim, a blocked start, and a
    delete with children all return `conflict`.
-4. Reclaim revisions are not charged to the caller's rate limit.
+4. Reclaim and rerank revisions are not charged to the caller's rate limit.
 5. `send`, `edit_memory`, and `delete_memory` are refused on `tasks/`
    channels; the embedder skips task rows.
 6. `pending` to `completed` is allowed directly; `completed` to

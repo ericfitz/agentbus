@@ -390,6 +390,19 @@ func TestSaveTUIRailWidthRejectsNonObject(t *testing.T) {
 	}
 }
 
+// The loader accepts an empty config file, so the saver must too.
+func TestSaveTUIRailWidthAcceptsEmptyFile(t *testing.T) {
+	for _, body := range []string{"", " \n\t\n"} {
+		p := write(t, t.TempDir(), body)
+		if err := SaveTUIRailWidth(p, 24); err != nil {
+			t.Fatalf("body %q: %v", body, err)
+		}
+		if c, _, err := Load(p); err != nil || c.TUIRailWidth != 24 {
+			t.Fatalf("body %q: load: %v, %+v", body, err, c.TUIRailWidth)
+		}
+	}
+}
+
 func TestRejectsOutOfRangeRailWidth(t *testing.T) {
 	p := write(t, t.TempDir(), `{"tui_rail_width": -1}`)
 	if _, _, err := Load(p); err == nil || !strings.Contains(err.Error(), "tui_rail_width") {

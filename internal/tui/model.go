@@ -291,6 +291,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshStream()
 		if cursorID != 0 {
 			m.scrollCursorIntoView()
+		} else if m.follow {
+			m.stream.GotoBottom()
 		}
 	case taskMsg:
 		if msg.err != nil {
@@ -591,18 +593,21 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 }
 
 // resizeRail moves the rail/messages divider by delta columns from the
-// width shown now, within the bounds railWidth enforces, and saves the new
-// width to the config file. A press that cannot move it does nothing; a
-// terminal too narrow to show the rail ignores the key.
+// saved width (the width shown now, when none is saved), not from the
+// clamped on-screen one, so a narrow terminal never overwrites a wide saved
+// setting (ADR 0006 item 7). It saves the result and renders whatever fits;
+// a press at railMin or railMax does nothing, and a terminal too narrow to
+// show the rail ignores the key.
 func (m *Model) resizeRail(delta int) tea.Cmd {
 	if !m.showLeft() {
 		return nil
 	}
-	cur, saved := m.railWidth(), m.c.cfg.TUIRailWidth
-	m.c.cfg.TUIRailWidth = max(cur+delta, railMin)
-	next := m.railWidth()
+	cur := m.c.cfg.TUIRailWidth
+	if cur <= 0 {
+		cur = m.railWidth()
+	}
+	next := min(max(cur+delta, railMin), railMax)
 	if next == cur {
-		m.c.cfg.TUIRailWidth = saved
 		return nil
 	}
 	m.c.cfg.TUIRailWidth = next
@@ -1037,7 +1042,11 @@ func (m *Model) onBatch(res bus.ReceiveResult) tea.Cmd {
 			m.peekReply(ch, x)
 		}
 		if bus.IsTaskChannel(ch) {
-			cmds = append(cmds, m.loadTasks(ch))
+			// Only the list on screen reloads; the others load fresh when
+			// selected (showSelected).
+			if ch == m.selName() {
+				cmds = append(cmds, m.loadTasks(ch))
+			}
 			// A revision of the drafted task newer than the one it was
 			// taken from discards the draft (ADR 0011 decision 2). Comparing
 			// against m.draft.rev, not just matching the id, is what tells

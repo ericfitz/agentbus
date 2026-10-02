@@ -160,8 +160,9 @@ func rowLine(x bus.Message, avail int) (line string, hasBody bool) {
 func (m Model) showLeft() bool { return m.width >= 60 }
 
 const (
-	railMin  = 16 // channel names stay readable at the 60-column minimum
-	railStep = 2  // columns a < or > press moves the divider
+	railMin  = 16   // channel names stay readable at the 60-column minimum
+	railStep = 2    // columns a < or > press moves the divider
+	railMax  = 1000 // the largest saved width config accepts
 	// streamMin is the narrowest messages pane the rail may leave.
 	streamMin = 40
 )

@@ -133,8 +133,9 @@ negative values are rejected.
 
 `tui_rail_width` (default 0, range 0-1000) is the channel rail's width in
 columns. The TUI writes it when you press `<` or `>`, rewriting the config
-file with its keys sorted; 0 means a fifth of the screen. Set at start, it
-is clamped to the terminal.
+file with its keys sorted; 0 means a fifth of the screen. Each press steps
+the saved value (not the width shown), so a narrow terminal never overwrites
+a wide setting; what is drawn is clamped to the terminal.
 
 `tui_name` (default: your OS user name) is the identity `agentbus tui`
 registers under; `agentbus tui --as <name>` overrides it for one run. It
@@ -353,8 +354,8 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   next newer one, labeled `r<revision> · <n> kept`; any other key returns
   it to the latest. `<` and `>` narrow and widen the
   channel rail two columns at a time; the width is saved as `tui_rail_width`
-  in the config file (0 or absent is a fifth of the screen), and is clamped
-  to the terminal, keeping the rail at least 16 columns and the messages
+  in the config file (0 or absent is a fifth of the screen), stepping from the
+  saved width; the width drawn is clamped to the terminal, keeping the rail at least 16 columns and the messages
   pane at least 40. `enter` replies to the selected message, or opens
   compose from the channel list. Colors come from the `theme` and `themes`
   config settings; see below. The first TUI launch after upgrading

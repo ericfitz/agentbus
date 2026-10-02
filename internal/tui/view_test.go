@@ -692,10 +692,10 @@ func TestRailKeysStopAtBounds(t *testing.T) {
 		t.Fatalf("a no-op press saved %d", f.m.c.cfg.TUIRailWidth)
 	}
 	f.key(">") // 16 -> 18
-	f.key(">") // 19 is the ceiling at 60 columns
+	f.key(">") // 19 is the ceiling at 60 columns; the saved width keeps stepping
 	f.key(">")
-	if got := f.m.railWidth(); got != 19 || f.m.c.cfg.TUIRailWidth != 19 {
-		t.Fatalf("rail %d, saved %d; want 19", got, f.m.c.cfg.TUIRailWidth)
+	if got := f.m.railWidth(); got != 19 || f.m.c.cfg.TUIRailWidth != 22 {
+		t.Fatalf("rail %d, saved %d; want 19, 22", got, f.m.c.cfg.TUIRailWidth)
 	}
 	if f.m.stream.Width < streamMin {
 		t.Fatalf("stream %d below the %d-column minimum", f.m.stream.Width, streamMin)
@@ -705,5 +705,33 @@ func TestRailKeysStopAtBounds(t *testing.T) {
 	}
 	if got := f.m.railWidth(); got != railMin {
 		t.Fatalf("rail %d, want floor %d", got, railMin)
+	}
+}
+
+// ADR 0006 item 7: < and > step the saved width, not the clamped one on
+// screen, so a narrow terminal does not overwrite a wide saved setting.
+func TestRailKeysStepFromTheSavedWidth(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.m.width = 60
+	f.m.c.cfg.TUIRailWidth = 40 // shows as 19
+	f.m.layout()
+	f.key("<")
+	if f.m.c.cfg.TUIRailWidth != 38 || f.m.railWidth() != 19 {
+		t.Fatalf("after <: saved %d, shown %d; want 38, 19", f.m.c.cfg.TUIRailWidth, f.m.railWidth())
+	}
+	f.key(">")
+	f.key(">")
+	if f.m.c.cfg.TUIRailWidth != 42 || f.m.railWidth() != 19 {
+		t.Fatalf("after > >: saved %d, shown %d; want 42, 19", f.m.c.cfg.TUIRailWidth, f.m.railWidth())
+	}
+	c, _, err := config.Load(f.c.cfg.Path)
+	if err != nil || c.TUIRailWidth != 42 {
+		t.Fatalf("file saved %d, err %v; want 42", c.TUIRailWidth, err)
+	}
+	f.m.width = 200 // a wide terminal shows the saved width
+	f.m.layout()
+	if got := f.m.railWidth(); got != 42 {
+		t.Fatalf("wide terminal shows %d, want 42", got)
 	}
 }

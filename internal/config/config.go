@@ -409,8 +409,11 @@ func SaveTUIRailWidth(path string, width int) error {
 	case err != nil:
 		return err
 	default:
-		if err := json.Unmarshal(body, &raw); err != nil || raw == nil {
-			return fmt.Errorf("%s: must be a JSON object", path)
+		// The loader treats an empty file as {}, so the saver does too.
+		if len(bytes.TrimSpace(body)) > 0 {
+			if err := json.Unmarshal(body, &raw); err != nil || raw == nil {
+				return fmt.Errorf("%s: must be a JSON object", path)
+			}
 		}
 		if fi, err := os.Stat(path); err == nil {
 			mode = fi.Mode().Perm()

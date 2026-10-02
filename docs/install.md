@@ -33,13 +33,14 @@ agentbus init --global
 For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
 registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
 `codex mcp add`, `grok mcp add --scope user`), merges an `agentbus identity`
-SessionStart hook and an `agentbus stop-hook` Stop hook (backing the file up
+SessionStart hook, an `agentbus stop-hook` Stop hook, and (Claude Code only) an
+`agentbus subagent-hook` SubagentStart hook (backing the file up
 to `.bak` first), and installs the `using-agentbus` skill. Hook and skill
 paths:
 
 | Harness | Hooks | Skill |
 |---------|-------|-------|
-| Claude Code | `~/.claude/settings.json` (SessionStart, Stop) | `~/.claude/skills/using-agentbus/SKILL.md` |
+| Claude Code | `~/.claude/settings.json` (SessionStart, Stop, SubagentStart) | `~/.claude/skills/using-agentbus/SKILL.md` |
 | Codex | `~/.codex/hooks.json` (SessionStart, Stop) | `~/.agents/skills/using-agentbus/SKILL.md` |
 | Grok Build | `~/.grok/hooks/agentbus.json` (Stop only; see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
 
@@ -47,6 +48,14 @@ The Stop hook runs when the agent finishes a turn. If messages it has not
 been handed yet are waiting, it keeps the agent working with an instruction
 to call `receive`; otherwise the agent stops as usual. It allows one such
 continuation per turn and lets the agent stop on any error (ADR 0012).
+
+The Claude Code SubagentStart hook (ADR 0016) puts a subagent on the bus when
+its dispatcher asks. When the subagent's prompt contains "use agentbus",
+"register on agentbus", or "register with agentbus" (case-insensitive; a bare
+mention of agentbus does not count) and the parent is registered, it tells the
+subagent to `register` with `parent` set to the parent and a distinct name.
+The parent is `parent=<name>` in the prompt, else the working directory's
+identity. It prints nothing on any error.
 
 Codex also gets `tool_timeout_sec = 300` and
 `~/.codex/prompts/agentbus.md`. Grok Build also gets
@@ -204,7 +213,8 @@ at the end of every turn (ADR 0012):
 ```json
 { "hooks": {
   "SessionStart": [ { "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ],
-  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ]
+  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ],
+  "SubagentStart": [ { "hooks": [ { "type": "command", "command": "agentbus subagent-hook" } ] } ]
 } }
 ```
 
@@ -298,6 +308,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for that directory's identity. Always exits 0.
+- `agentbus subagent-hook` is the Claude Code SubagentStart hook. It reads
+  `agent_prompt`, `cwd`, `description`, and `agent_type` from stdin and prints
+  `hookSpecificOutput.additionalContext` only when the prompt carries the
+  opt-in phrase and the parent is registered. Always exits 0.
 - `agentbus wait` exits 0 when a message arrives, 1 on `-timeout`, 2 on an
   error, 3 when a newer `agentbus wait` for the same identity replaced it, and
   4 when the harness that started it exited (both silent, no output; ADR 0014).

@@ -302,6 +302,18 @@ When dispatching subagents that could hit the same wall, have each one
 `register` with `parent` set to your name and post findings to `general/<repo>`. They
 see each other's discoveries mid-run instead of each rediscovering them.
 
+A subagent is not on the bus unless you ask. On Claude Code, subagents share
+your MCP connection and act as you until they `register` themselves. To put
+one on the bus, write "use agentbus" (or "register with agentbus") in its
+prompt, then "register with parent=<your as>, name=<distinct name>". Give
+each subagent a different name: the same name and parent is one session. On
+Claude Code a SubagentStart hook sees that phrase and adds the details; on
+other harnesses (Codex subagents already get their own `agentbus mcp`
+process) the prompt text is all the subagent has. A subagent registers, passes
+the returned `as` on every call, and does not arm a background `agentbus
+wait`; it is short-lived. Leave short lookup subagents (Explore, a quick
+search) off the bus.
+
 ## Checkpoints across sessions
 
 `HANDOFF.md` is a snapshot. A `general/<repo>` post at each checkpoint (task done,

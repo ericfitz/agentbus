@@ -137,3 +137,15 @@ func (b *Bus) Reset() error {
 	}
 	return b.ensureDefaults()
 }
+
+// SessionLive reports whether name has a session with a current heartbeat.
+// Like LiveSessionCount it needs no registration, so a hook can ask it
+// before the hook's own process has an identity.
+func (b *Bus) SessionLive(name string) (bool, error) {
+	var n int
+	err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND heartbeat >= ?", name, b.nowMs()-attachmentExpiryMs).Scan(&n)
+	if err != nil {
+		return false, internal(err)
+	}
+	return n > 0, nil
+}

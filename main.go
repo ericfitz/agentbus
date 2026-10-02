@@ -29,7 +29,7 @@ func splitTags(v string) []string {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|stop-hook|version> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|stop-hook|subagent-hook|version> [flags]")
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
@@ -151,6 +151,16 @@ func run(cmd string, args []string) int {
 			return 0
 		}
 		cli.StopHook(cfg, os.Stdin, os.Stdout, os.Stderr)
+		return 0
+	case "subagent-hook":
+		// Installed as a Claude Code SubagentStart hook by init --global
+		// (ADR 0016). Always exits 0 and prints nothing on any failure.
+		cfg, err := loadConfig(args)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 0
+		}
+		cli.SubagentHook(cfg, os.Stdin, os.Stdout, os.Stderr)
 		return 0
 	case "version":
 		fmt.Println(mcpserver.Version)

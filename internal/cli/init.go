@@ -54,6 +54,9 @@ const grokRule = "# Agentbus\n\n" +
 const (
 	hookCommand     = "agentbus identity"
 	stopHookCommand = "agentbus stop-hook"
+	// subagentHookCommand is Claude Code only (ADR 0016): Codex subagents get
+	// their own MCP process, and no other harness has a SubagentStart prompt.
+	subagentHookCommand = "agentbus subagent-hook"
 )
 
 // skillMD is the using-agentbus skill, installed by `init --global` into
@@ -223,6 +226,9 @@ func (in *initer) claude(dir string) error {
 		return err
 	}
 	if err := in.hook(filepath.Join(dir, "settings.json"), "Stop", stopHookCommand, ""); err != nil {
+		return err
+	}
+	if err := in.hook(filepath.Join(dir, "settings.json"), "SubagentStart", subagentHookCommand, ""); err != nil {
 		return err
 	}
 	return in.write(filepath.Join(dir, skillPath), skillMD)

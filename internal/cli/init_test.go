@@ -119,6 +119,15 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 			t.Fatalf("%s Stop hooks = %v", name, got)
 		}
 	}
+	// Only Claude Code gets the SubagentStart hook (ADR 0016).
+	if got := hookCommands(m, "SubagentStart"); len(got) != 1 || got[0] != "agentbus subagent-hook" {
+		t.Fatalf("claude SubagentStart hooks = %v", got)
+	}
+	for name, cfg := range map[string]map[string]any{"codex": readJSON(t, filepath.Join(home, ".codex", "hooks.json")), "grok": grokHooks} {
+		if got := hookCommands(cfg, "SubagentStart"); len(got) != 0 {
+			t.Fatalf("%s SubagentStart hooks = %v", name, got)
+		}
+	}
 	toml, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if !strings.Contains(string(toml), "[mcp_servers.agentbus]\ntool_timeout_sec = 300\n") || !strings.HasPrefix(string(toml), "model = \"gpt-5\"") {
 		t.Fatalf("config.toml:\n%s", toml)
@@ -153,6 +162,9 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 	if got := hookCommands(readJSON(t, settings), "Stop"); len(got) != 1 {
 		t.Fatalf("Stop hook duplicated on rerun: %v", got)
+	}
+	if got := hookCommands(readJSON(t, settings), "SubagentStart"); len(got) != 1 {
+		t.Fatalf("SubagentStart hook duplicated on rerun: %v", got)
 	}
 	toml, _ = os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if strings.Count(string(toml), "tool_timeout_sec") != 1 {

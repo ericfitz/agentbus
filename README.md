@@ -177,7 +177,7 @@ follow, with a worked example.
 - [Architecture decision records](docs/adr/): every decision since v1, from
   [v2 decisions](docs/adr/0002-v2-decisions.md) through direct messages, task
   lists, tags, message subjects, TUI task editing, the wait lifecycle, and
-  harness name and version.
+  harness name and version, subagent registration.
 - Feature specs: [TUI](docs/superpowers/specs/2026-09-08-agentbus-tui-design.md),
   [persistent subscriptions](docs/superpowers/specs/2026-09-09-persistent-subscriptions-design.md),
   [direct messages](docs/superpowers/specs/2026-09-17-direct-messages-design.md),

@@ -26,9 +26,6 @@ func TestSubagentHook(t *testing.T) {
 	if _, err := b.Register(me, "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Lead", "", "", false); err != nil {
-		t.Fatal(err)
-	}
 	run := func(in map[string]any) string {
 		if _, ok := in["cwd"]; !ok {
 			in["cwd"] = cwd
@@ -49,34 +46,34 @@ func TestSubagentHook(t *testing.T) {
 		return res.H["additionalContext"]
 	}
 
-	// No marker, even with agentbus mentioned: silent.
-	for _, p := range []string{"Find the agentbus schema file", "Review the agentbus repo", ""} {
-		if got := run(map[string]any{"agent_prompt": p}); got != "" {
-			t.Fatalf("prompt %q must not inject: %q", p, got)
+	// The real SubagentStart stdin has no prompt (captured 2026-10-02), so a
+	// registered parent always gets the conditional note; the subagent
+	// decides from its own prompt whether it applies.
+	c := context(t, run(map[string]any{"agent_type": "general-purpose", "agent_id": "afc4f28c9d818fff9"}))
+	for _, want := range []string{
+		`parent="` + me + `"`, `name="general-purpose-`,
+		"If your dispatcher's prompt asks you to use agentbus",
+		"parent= or name= your prompt names",
+		"do not start a background",
+		"Otherwise ignore this note",
+	} {
+		if !strings.Contains(c, want) {
+			t.Fatalf("context lacks %q: %s", want, c)
 		}
 	}
-	// Each marker spelling, case-insensitive, with the parent from cwd.
-	for _, p := range []string{"Please use agentbus.", "USE AGENTBUS to report", "register on agentbus first", "Register with the agentbus MCP? no: register with agentbus"} {
-		c := context(t, run(map[string]any{"agent_prompt": p, "description": "Fix the Parser!", "agent_type": "general-purpose"}))
-		if !strings.Contains(c, `parent="`+me+`"`) || !strings.Contains(c, `name="fix-the-parser-`) ||
-			!strings.Contains(c, "do not start a background") {
-			t.Fatalf("prompt %q context: %s", p, c)
-		}
-	}
-	// Parent and name named in the prompt win over cwd and description.
-	c := context(t, run(map[string]any{"agent_prompt": "use agentbus: register with parent=Lead, name=Lead-reviewer.", "description": "x"}))
-	if !strings.Contains(c, `parent="Lead"`) || !strings.Contains(c, `name="Lead-reviewer"`) {
-		t.Fatalf("named parent/name context: %s", c)
-	}
-	// No description: slug the agent type.
-	if c := context(t, run(map[string]any{"agent_prompt": "use agentbus", "agent_type": "Code Reviewer"})); !strings.Contains(c, `name="code-reviewer-`) {
+	// The agent type is slugged; no type falls back to "subagent".
+	if c := context(t, run(map[string]any{"agent_type": "Code Reviewer"})); !strings.Contains(c, `name="code-reviewer-`) {
 		t.Fatalf("agent_type name: %s", c)
 	}
-	// Parent not registered: named or cwd-derived, silent.
-	if got := run(map[string]any{"agent_prompt": "use agentbus parent=Nobody"}); got != "" {
-		t.Fatalf("unregistered named parent must not inject: %q", got)
+	if c := context(t, run(map[string]any{})); !strings.Contains(c, `name="subagent-`) {
+		t.Fatalf("default name: %s", c)
 	}
-	if got := run(map[string]any{"agent_prompt": "use agentbus", "cwd": t.TempDir()}); got != "" {
+	// Two subagents of one type get distinct names.
+	if a, b := run(map[string]any{"agent_type": "x"}), run(map[string]any{"agent_type": "x"}); a == b {
+		t.Fatalf("names must differ: %s", a)
+	}
+	// Parent not registered: silent.
+	if got := run(map[string]any{"agent_type": "general-purpose", "cwd": t.TempDir()}); got != "" {
 		t.Fatalf("unregistered cwd parent must not inject: %q", got)
 	}
 	// Bad or empty input: silent.
@@ -85,24 +82,6 @@ func TestSubagentHook(t *testing.T) {
 		SubagentHook(cfg, strings.NewReader(in), &out, io.Discard)
 		if out.Len() != 0 {
 			t.Fatalf("input %q must print nothing: %q", in, out.String())
-		}
-	}
-}
-
-func TestSubagentMarker(t *testing.T) {
-	for p, want := range map[string]bool{
-		"use agentbus":                   true,
-		"You should use the agentbus":    true,
-		"register on agentbus":           true,
-		"register with agentbus":         true,
-		"agentbus is the repo name":      false,
-		"read internal/agentbus/foo.go":  false,
-		"misuse agentbus":                false,
-		"register with parent=Lead":      false,
-		"register on the agentbus board": true,
-	} {
-		if got := subagentMarker.MatchString(p); got != want {
-			t.Errorf("marker(%q) = %v, want %v", p, got, want)
 		}
 	}
 }

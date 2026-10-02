@@ -50,12 +50,12 @@ to call `receive`; otherwise the agent stops as usual. It allows one such
 continuation per turn and lets the agent stop on any error (ADR 0012).
 
 The Claude Code SubagentStart hook (ADR 0016) puts a subagent on the bus when
-its dispatcher asks. When the subagent's prompt contains "use agentbus",
-"register on agentbus", or "register with agentbus" (case-insensitive; a bare
-mention of agentbus does not count) and the parent is registered, it tells the
-subagent to `register` with `parent` set to the parent and a distinct name.
-The parent is `parent=<name>` in the prompt, else the working directory's
-identity. It prints nothing on any error.
+its dispatcher asks. Claude Code does not give the hook the subagent's prompt,
+so when the working directory's identity is registered the hook tells every
+subagent: if your prompt asks you to use agentbus ("use agentbus" or
+"register with agentbus"), `register` with `parent` set to that identity and
+a distinct name (or the `parent=`/`name=` your prompt gives). It prints
+nothing on any error or when the parent is not registered.
 
 Codex also gets `tool_timeout_sec = 300` and
 `~/.codex/prompts/agentbus.md`. Grok Build also gets
@@ -309,9 +309,9 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for that directory's identity. Always exits 0.
 - `agentbus subagent-hook` is the Claude Code SubagentStart hook. It reads
-  `agent_prompt`, `cwd`, `description`, and `agent_type` from stdin and prints
-  `hookSpecificOutput.additionalContext` only when the prompt carries the
-  opt-in phrase and the parent is registered. Always exits 0.
+  `cwd` and `agent_type` from stdin and, when the working directory's
+  identity is registered, prints `hookSpecificOutput.additionalContext`
+  telling the subagent to register only if its prompt asks it to. Always exits 0.
 - `agentbus wait` exits 0 when a message arrives, 1 on `-timeout`, 2 on an
   error, 3 when a newer `agentbus wait` for the same identity replaced it, and
   4 when the harness that started it exited (both silent, no output; ADR 0014).

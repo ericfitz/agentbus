@@ -307,7 +307,8 @@ your MCP connection and act as you until they `register` themselves. To put
 one on the bus, write "use agentbus" (or "register with agentbus") in its
 prompt, then "register with parent=<your as>, name=<distinct name>". Give
 each subagent a different name: the same name and parent is one session. On
-Claude Code a SubagentStart hook sees that phrase and adds the details; on
+Claude Code a SubagentStart hook tells each subagent to register if its
+prompt says so, and suggests the parent and a name; on
 other harnesses (Codex subagents already get their own `agentbus mcp`
 process) the prompt text is all the subagent has. A subagent registers, passes
 the returned `as` on every call, and does not arm a background `agentbus

@@ -28,6 +28,50 @@ func (b *Bus) abandoned(q queryRower, t Task, now int64) (bool, error) {
 	return false, nil
 }
 
+// abandonedSet reports which of ts are abandoned, with the same rule as
+// abandoned but one sessions query for the whole list instead of one per
+// task. The query is skipped when no task needs it (none in_progress, or
+// every in_progress one already has an expired lease).
+func (b *Bus) abandonedSet(q querier, ts []Task, now int64) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	needLive := false
+	for _, t := range ts {
+		if t.Status != "in_progress" {
+			continue
+		}
+		if t.LeasedUntil != 0 && t.LeasedUntil <= now {
+			out[t.ID] = true
+			continue
+		}
+		needLive = true
+	}
+	if !needLive {
+		return out, nil
+	}
+	rows, err := q.Query("SELECT sender FROM sessions WHERE heartbeat>=?", now-attachmentExpiryMs)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	live := map[string]bool{}
+	for rows.Next() {
+		var sender string
+		if err := rows.Scan(&sender); err != nil {
+			return nil, internal(err)
+		}
+		live[sender] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	for _, t := range ts {
+		if t.Status == "in_progress" && !out[t.ID] && !live[t.Owner] {
+			out[t.ID] = true
+		}
+	}
+	return out, nil
+}
+
 // reclaimAbandoned returns every abandoned task among ids (all tasks in the
 // channel when ids is nil) to pending, owner and lease cleared, as a
 // revision of type "reclaimed" sent by as (empty for the tick). It is not
@@ -51,13 +95,13 @@ func (b *Bus) reclaimAbandoned(tx *sql.Tx, as, context, channel string, ids []in
 		}
 	}
 	now := b.nowMs()
+	ab, err := b.abandonedSet(tx, targets, now)
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, t := range targets {
-		ab, err := b.abandoned(tx, t, now)
-		if err != nil {
-			return n, err
-		}
-		if !ab {
+		if !ab[t.ID] {
 			continue
 		}
 		t.Status, t.Owner, t.LeasedUntil = "pending", "", 0
@@ -97,9 +141,14 @@ func (b *Bus) fixUpAbandoned(as, channel string, ids []int64) error {
 	return internal(tx.Commit())
 }
 
+// tickBegin opens the tick's per-channel write transaction; a package-level
+// test hook so a test can count how many channels needed one.
+var tickBegin = (*sql.DB).Begin
+
 // reclaimAllAbandonedTasks is the maintenance tick step: it reclaims
-// abandoned tasks in every task-list channel, one transaction per channel,
-// stopping early once ctx's deadline has passed.
+// abandoned tasks in every task-list channel, one transaction per channel
+// that has any (found by a read-only check first, so an idle list never
+// takes the write lock), stopping early once ctx's deadline has passed.
 func (b *Bus) reclaimAllAbandonedTasks(ctx context.Context) error {
 	rows, err := b.db.Query("SELECT name FROM channels WHERE name = 'tasks' OR name LIKE 'tasks/%'")
 	if err != nil {
@@ -124,7 +173,19 @@ func (b *Bus) reclaimAllAbandonedTasks(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		tx, err := b.db.Begin()
+		ts, err := loadTasks(b.db, ch)
+		if err != nil {
+			return err
+		}
+		ab, err := b.abandonedSet(b.db, ts, b.nowMs())
+		if err != nil {
+			return err
+		}
+		if len(ab) == 0 {
+			continue
+		}
+		// Re-checked inside the transaction: the snapshot above may be stale.
+		tx, err := tickBegin(b.db)
 		if err != nil {
 			return err
 		}

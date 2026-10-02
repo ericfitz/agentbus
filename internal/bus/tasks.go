@@ -721,18 +721,11 @@ func (b *Bus) TaskList(as string, in TaskListInput) ([]TaskSummary, error) {
 		return nil, err
 	}
 	now := b.nowMs()
-	fixUp := false
-	for _, t := range ts {
-		ab, err := b.abandoned(b.db, t, now)
-		if err != nil {
-			return nil, err
-		}
-		if ab {
-			fixUp = true
-			break
-		}
+	ab, err := b.abandonedSet(b.db, ts, now)
+	if err != nil {
+		return nil, err
 	}
-	if fixUp {
+	if len(ab) > 0 {
 		reload, err := b.tryFixUpAbandoned(as, in.Channel, nil)
 		if err != nil {
 			return nil, err

@@ -420,7 +420,9 @@ Chip text is black on light `tag` colors (yellow, cyan, white, and bright
 green/yellow/cyan/white) and bright white on the rest.
 
 The health overlay (`h`) shows the log file path, the theme in use with
-each resolved value, and the loaded config. `o` opens the config file in
+each resolved value, each agent session's harness name and version (from the
+MCP `clientInfo` its harness sends; `unknown` if it sends none), and the
+loaded config. `o` opens the config file in
 `$VISUAL`, else `$EDITOR`, else `vi`, run through the shell so a value with
 arguments or spaces works. A GUI editor in `$VISUAL` (for example
 `code --wait`) opens in the background and the TUI stays live; the config

@@ -341,7 +341,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				c = defaultContext
 			}
 			resume := in.Resume == nil || *in.Resume
-			reg, err := b.Register(in.Name, in.Parent, c, resume)
+			var harness, harnessVersion string
+			if ci := req.ClientInfo(); ci != nil {
+				harness, harnessVersion = ci.Name, ci.Version
+			}
+			reg, err := b.RegisterWithClient(in.Name, in.Parent, c, resume, harness, harnessVersion)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -271,3 +271,54 @@ func TestEndSessionsFreesOwnNamesImmediately(t *testing.T) {
 		t.Fatalf("subscriptions must survive the session end: %+v", r.Pending)
 	}
 }
+
+// TestRegisterRecordsAndRefreshesClientInfo (ADR 0015): the harness name and
+// version passed at register are stored and returned by Discover, replaced on
+// re-register, cleared when the client sends none, and cleaned of control
+// characters and over-length text.
+func TestRegisterRecordsAndRefreshesClientInfo(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "claude-code", "2.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	find := func() Session {
+		t.Helper()
+		ss, err := b.Discover("Sam")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range ss {
+			if s.Sender == "Sam" {
+				return s
+			}
+		}
+		t.Fatal("Sam not discovered")
+		return Session{}
+	}
+	if s := find(); s.Harness != "claude-code" || s.HarnessVersion != "2.1.0" {
+		t.Fatalf("recorded %+v", s)
+	}
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "codex", "0.9"); err != nil {
+		t.Fatal(err)
+	}
+	if s := find(); s.Harness != "codex" || s.HarnessVersion != "0.9" {
+		t.Fatalf("re-register must refresh, got %+v", s)
+	}
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	s := find()
+	if s.Harness != "" || s.HarnessVersion != "" {
+		t.Fatalf("a register with no clientInfo must clear it, got %+v", s)
+	}
+	j, _ := json.Marshal(s)
+	if strings.Contains(string(j), "harness") {
+		t.Fatalf("empty harness fields must be omitted: %s", j)
+	}
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "bad\x1b[31mname", strings.Repeat("v", 300)); err != nil {
+		t.Fatal(err)
+	}
+	if s := find(); s.Harness != "bad[31mname" || len(s.HarnessVersion) != 128 {
+		t.Fatalf("clientInfo must be cleaned, got %q (%d bytes)", s.Harness, len(s.HarnessVersion))
+	}
+}

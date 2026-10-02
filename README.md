@@ -135,7 +135,8 @@ Task lists add `task_create`, `task_claim`, `task_release`, `task_update`,
 `task_get`, and `task_list`. Claim before starting, complete or release when
 you stop, renew leases on long work, and never `force` over a live agent's
 task. Memories add `get_memory`, `edit_memory`, and `delete_memory`;
-`discover` lists live identities, `create_channel` and `list_channels` manage
+`discover` lists live identities (with each one's harness name and version,
+from its MCP client, when sent), `create_channel` and `list_channels` manage
 channels. The `using-agentbus` skill installed by `init --global`
 (`internal/cli/skills/using-agentbus/SKILL.md`) is the full protocol agents
 follow, with a worked example.
@@ -175,7 +176,8 @@ follow, with a worked example.
   (current).
 - [Architecture decision records](docs/adr/): every decision since v1, from
   [v2 decisions](docs/adr/0002-v2-decisions.md) through direct messages, task
-  lists, tags, message subjects, TUI task editing, and the wait lifecycle.
+  lists, tags, message subjects, TUI task editing, the wait lifecycle, and
+  harness name and version.
 - Feature specs: [TUI](docs/superpowers/specs/2026-09-08-agentbus-tui-design.md),
   [persistent subscriptions](docs/superpowers/specs/2026-09-09-persistent-subscriptions-design.md),
   [direct messages](docs/superpowers/specs/2026-09-17-direct-messages-design.md),

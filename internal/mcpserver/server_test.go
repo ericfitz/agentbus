@@ -944,3 +944,52 @@ func TestRegisterOmitsRepoTagsWhenAbsent(t *testing.T) {
 		}
 	}
 }
+
+// TestRegisterRecordsClientInfoFromInitialize (ADR 0015): register stores the
+// name and version the client sent in the initialize handshake, discover
+// returns them, and a client that sends none still registers.
+func TestRegisterRecordsClientInfoFromInitialize(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "claude-code", Version: "2.1.0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "discover", Arguments: map[string]any{"as": "Sam"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ss []map[string]any
+	if err := json.Unmarshal([]byte(res.Content[0].(*mcp.TextContent).Text), &ss); err != nil {
+		t.Fatal(err)
+	}
+	if len(ss) != 1 || ss[0]["harness"] != "claude-code" || ss[0]["harness_version"] != "2.1.0" {
+		t.Fatalf("discover: %v", ss)
+	}
+	// A client with an empty clientInfo registers and shows no harness.
+	st2, ct2 := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st2, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs2, err := mcp.NewClient(&mcp.Implementation{}, nil).Connect(ctx, ct2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs2.Close() })
+	if reg2, _ := call(t, cs2, "register", map[string]any{"name": "Kim"}); reg2["as"] != "Kim" {
+		t.Fatalf("register without clientInfo: %v", reg2)
+	}
+}

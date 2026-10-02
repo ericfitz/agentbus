@@ -13,7 +13,7 @@ import (
 func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
-	f.m.height = 75 // tall enough that the whole body (plus #15's version line, #17's icons line, the selection_text theme key, ADR 0013's three expiry config JSON lines, and its three task/memory expiry summary lines) fits without scrolling
+	f.m.height = 77 // tall enough that the whole body (plus #15's version line, #17's icons line, the selection_text theme key, ADR 0013's three expiry config JSON lines, and its three task/memory expiry summary lines, and ADR 0015's per-agent harness line) fits without scrolling
 	f.key("esc")
 	f.key("h")
 	if f.m.mode != modeHealth {
@@ -187,5 +187,30 @@ func TestEditorErrTextExplainsMissingCommand(t *testing.T) {
 	err := editorCommand("x.md").Run()
 	if got := editorErrText(err); !strings.Contains(got, "not found") || !strings.Contains(got, missing) || !strings.Contains(got, "$VISUAL") {
 		t.Fatalf("editorErrText(%v) = %q", err, got)
+	}
+}
+
+// TestHealthLinesShowHarness (ADR 0015): the health body names each agent
+// session's harness and version from its MCP clientInfo, shows "unknown" for
+// one that sent none, and leaves out the TUI's own session.
+func TestHealthLinesShowHarness(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, "claude-code", "2.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	body := strings.Join(f.m.healthLines(), "\n")
+	if !strings.Contains(body, "Sam claude-code 2.1.0") {
+		t.Fatalf("health body lacks Sam's harness:\n%s", body)
+	}
+	if strings.Contains(body, "eric ") {
+		t.Fatalf("health body lists the TUI's own session:\n%s", body)
+	}
+	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	if body := strings.Join(f.m.healthLines(), "\n"); !strings.Contains(body, "Sam unknown") {
+		t.Fatalf("a session with no clientInfo must read unknown:\n%s", body)
 	}
 }

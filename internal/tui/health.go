@@ -96,6 +96,18 @@ func (m Model) healthLines() []string {
 		}
 	}
 	p("%s %d live · %s %d (%d memory)\n", dim.Render("sessions"), len(st.Sessions), dim.Render("channels"), len(st.Channels), memCh)
+	// One line per agent session with its harness (ADR 0015); the TUI's own
+	// session is not an agent and is skipped.
+	for _, s := range st.Sessions {
+		if s.Sender == m.c.as {
+			continue
+		}
+		h := "unknown"
+		if s.Harness != "" {
+			h = strings.TrimSpace(s.Harness + " " + s.HarnessVersion)
+		}
+		p("  %s %s\n", s.Sender, dim.Render(h))
+	}
 	cfg := m.c.cfg
 	if cfg.EmbeddingEndpoint == "" {
 		p("%s unset\n", dim.Render("embeddings"))

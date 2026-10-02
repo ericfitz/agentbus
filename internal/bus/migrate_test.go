@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -558,5 +559,69 @@ func TestMigrateV6AddsChannelsCreatedAt(t *testing.T) {
 	}
 	if createdAt < before || createdAt > after {
 		t.Fatalf("created_at = %d, want between %d and %d (migration time)", createdAt, before, after)
+	}
+}
+
+// schemaV7Sessions is the sessions DDL as shipped through v1.11.0, without
+// the harness columns schema version 8 adds (ADR 0015), so the migration's
+// ALTER TABLE path runs against a real pre-column table.
+const schemaV7Sessions = `
+CREATE TABLE sessions (
+  sender TEXT PRIMARY KEY,
+  context TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  heartbeat INTEGER NOT NULL,
+  registered_at INTEGER NOT NULL
+);`
+
+// TestMigrateV7AddsSessionHarness (ADR 0015): a v7 file's sessions table
+// gains harness and harness_version, existing rows read as unknown (”), and
+// a later register records the harness.
+func TestMigrateV7AddsSessionHarness(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	for _, s := range []string{schema, "DROP INDEX sessions_heartbeat", "DROP TABLE sessions", schemaV7Sessions, "PRAGMA user_version = 7",
+		"INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES('Old','repo','x'," + strconv.FormatInt(now, 10) + "," + strconv.FormatInt(now, 10) + ")",
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v7 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var h, hv string
+	if err := b.db.QueryRow("SELECT harness, harness_version FROM sessions WHERE sender='Old'").Scan(&h, &hv); err != nil {
+		t.Fatal(err)
+	}
+	if h != "" || hv != "" {
+		t.Fatalf("existing row harness = %q %q, want empty", h, hv)
+	}
+	if _, err := b.RegisterWithClient("New", "", "repo", true, "claude-code", "2.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.db.QueryRow("SELECT harness, harness_version FROM sessions WHERE sender='New'").Scan(&h, &hv); err != nil || h != "claude-code" || hv != "2.1.0" {
+		t.Fatalf("new row harness = %q %q, %v", h, hv, err)
 	}
 }

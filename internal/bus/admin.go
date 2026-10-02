@@ -20,7 +20,7 @@ type Status struct {
 
 // liveSessions is the shared query behind Discover and StatusReport.
 func (b *Bus) liveSessions(db querier) ([]Session, error) {
-	rows, err := db.Query("SELECT sender, context, registered_at FROM sessions WHERE heartbeat >= ? ORDER BY sender", b.nowMs()-attachmentExpiryMs)
+	rows, err := db.Query("SELECT sender, context, registered_at, harness, harness_version FROM sessions WHERE heartbeat >= ? ORDER BY sender", b.nowMs()-attachmentExpiryMs)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -28,7 +28,7 @@ func (b *Bus) liveSessions(db querier) ([]Session, error) {
 	out := []Session{}
 	for rows.Next() {
 		var s Session
-		if err := rows.Scan(&s.Sender, &s.Context, &s.RegisteredAt); err != nil {
+		if err := rows.Scan(&s.Sender, &s.Context, &s.RegisteredAt, &s.Harness, &s.HarnessVersion); err != nil {
 			return nil, internal(err)
 		}
 		out = append(out, s)

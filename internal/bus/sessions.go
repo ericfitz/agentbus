@@ -50,6 +50,28 @@ type Session struct {
 	Sender       string `json:"sender"`
 	Context      string `json:"context"`
 	RegisteredAt int64  `json:"registered_at"`
+	// Harness and HarnessVersion are the name and version the session's MCP
+	// client sent in the initialize handshake (ADR 0015), refreshed at each
+	// register. Omitted when the client sent none.
+	Harness        string `json:"harness,omitempty"`
+	HarnessVersion string `json:"harness_version,omitempty"`
+}
+
+// cleanClientField makes a clientInfo string safe to store and show: control
+// characters are dropped and the result is cut to 128 bytes on a rune
+// boundary. clientInfo is advisory display text, so it is cleaned, never
+// rejected (an odd client must still register).
+func cleanClientField(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+	if len(s) > 128 {
+		s = strings.ToValidUTF8(s[:128], "")
+	}
+	return s
 }
 
 // validateName enforces 1–128 UTF-8 bytes, no control characters, no '/'.
@@ -110,7 +132,16 @@ func validateContext(context string) error {
 	return nil
 }
 
+// Register is RegisterWithClient for a caller with no MCP clientInfo.
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
+	return b.RegisterWithClient(name, parent, context, resume, "", "")
+}
+
+// RegisterWithClient registers like Register and records harness and
+// harnessVersion (the MCP initialize clientInfo name and version, ADR 0015)
+// on the session, replacing whatever an earlier register stored.
+func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harness, harnessVersion string) (Registration, error) {
+	harness, harnessVersion = cleanClientField(harness), cleanClientField(harnessVersion)
 	if err := validateName(name); err != nil {
 		return Registration{}, err
 	}
@@ -158,11 +189,11 @@ func (b *Bus) Register(name, parent, context string, resume bool) (Registration,
 		display = fmt.Sprintf("%s%s%d", base, sep, n)
 	}
 	if reused {
-		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=? WHERE sender=?", context, now, display); err != nil {
+		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=?, harness=?, harness_version=? WHERE sender=?", context, now, harness, harnessVersion, display); err != nil {
 			return Registration{}, internal(err)
 		}
-	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES(?,?,?,?,?)",
-		display, context, b.owner, now, now); err != nil {
+	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version) VALUES(?,?,?,?,?,?,?)",
+		display, context, b.owner, now, now, harness, harnessVersion); err != nil {
 		return Registration{}, internal(err)
 	}
 	if !resume {

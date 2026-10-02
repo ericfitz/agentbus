@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"strings"
 	"time"
 )
@@ -14,8 +15,9 @@ import (
 // It does not require as to be registered by this process, only subscribed.
 // match, when non-nil, decides which messages count; messages it rejects are
 // skipped for the rest of the call. timeout <= 0 waits forever. A timeout
-// returns no messages and no error.
-func (b *Bus) Wait(as string, channels []string, includeOwn bool, match func(Message) bool, timeout time.Duration) ([]Message, error) {
+// returns no messages and no error. Canceling ctx ends the wait early with
+// ctx.Err(); messages already selected are still returned.
+func (b *Bus) Wait(ctx context.Context, as string, channels []string, includeOwn bool, match func(Message) bool, timeout time.Duration) ([]Message, error) {
 	if as == "" {
 		return nil, errf("validation", false, "as is required")
 	}
@@ -43,7 +45,11 @@ func (b *Bus) Wait(as string, channels []string, includeOwn bool, match func(Mes
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return nil, nil
 		}
-		time.Sleep(waitPollInterval)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(waitPollInterval):
+		}
 	}
 }
 

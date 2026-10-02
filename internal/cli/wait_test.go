@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -32,7 +33,7 @@ func TestWaitWakesOnDirectMessageDespiteFilter(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 2 * time.Second}, &out); err != nil {
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 2 * time.Second}, &out); err != nil {
 		t.Fatalf("a direct message must wake the waiter despite a non-matching filter: %v", err)
 	}
 	if strings.Contains(out.String(), "rename landed") {
@@ -66,7 +67,7 @@ func TestWaitWithholdsDirectMessageContentFromJSON(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Timeout: 2 * time.Second}, &out); err != nil {
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat", Timeout: 2 * time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got bus.Message
@@ -112,7 +113,7 @@ func TestWaitFilterMatchesSubject(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "rename", Timeout: 2 * time.Second}, &out); err != nil {
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat", Filter: "rename", Timeout: 2 * time.Second}, &out); err != nil {
 		t.Fatalf("a filter word present only in the subject must wake the waiter: %v", err)
 	}
 }
@@ -142,7 +143,7 @@ func TestWaitFilterStillAppliesToOrdinaryChannels(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err = Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 300 * time.Millisecond}, &out)
+	err = Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 300 * time.Millisecond}, &out)
 	if err != ErrWaitTimeout {
 		t.Fatalf("non-matching content on an ordinary channel must still time out: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestWaitWakesOnTagMatchDespiteFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Wait(WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 2 * time.Second}, &out); err != nil {
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat", Filter: "@Pat", Timeout: 2 * time.Second}, &out); err != nil {
 		t.Fatalf("a tag match must wake the waiter: %v", err)
 	}
 	if !strings.Contains(out.String(), `"matched_tags":["release"]`) {

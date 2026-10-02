@@ -1,16 +1,20 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/procs"
 )
 
 // WaitOptions configures Wait. As defaults to the identity the current
@@ -27,6 +31,11 @@ type WaitOptions struct {
 // ErrWaitTimeout is returned when no message arrived before Timeout.
 var ErrWaitTimeout = fmt.Errorf("timed out waiting for messages")
 
+// ErrWaitReplaced is returned when ctx was canceled before any message
+// arrived: a newer wait for the same identity took over (it signals this one),
+// or the process was interrupted. Nothing is written to out.
+var ErrWaitReplaced = fmt.Errorf("wait replaced")
+
 // Wait blocks until at least one undelivered message is available for the
 // identity, writes each as one JSON line to out, and returns. It never
 // registers, acks, or advances a cursor: a following MCP receive returns the
@@ -34,8 +43,12 @@ var ErrWaitTimeout = fmt.Errorf("timed out waiting for messages")
 // withheld — wait's contract is "wake, then call receive" and its output can
 // land in a shell's history or logs, unlike an MCP tool call. Meant for
 // `Bash(run_in_background: true)` so an agent is woken once instead of
-// polling receive from model turns.
-func Wait(o WaitOptions, out io.Writer) error {
+// polling receive from model turns. Only one wait runs per identity: starting
+// a second one signals the first to exit silently (see acquireWaitLock). The
+// caller cancels ctx on SIGTERM/SIGINT/SIGHUP, installed before calling so the
+// replacement signal is never lost; a canceled ctx returns ErrWaitReplaced
+// unless messages were already selected, which are still printed.
+func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	var match func(bus.Message) bool
 	if o.Filter != "" {
 		re, err := regexp.Compile(o.Filter)
@@ -50,12 +63,23 @@ func Wait(o WaitOptions, out io.Writer) error {
 			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Subject) || re.MatchString(m.Content)
 		}
 	}
+	if ctx.Err() != nil {
+		return ErrWaitReplaced
+	}
+	release, err := acquireWaitLock(o.Config.DataDirectory, o.As, procs.Self(procs.System, os.Getpid()))
+	if err != nil {
+		return err
+	}
+	defer release()
 	b, err := bus.Open(o.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = b.Close() }()
-	msgs, err := b.Wait(o.As, o.Channels, o.IncludeOwn, match, o.Timeout)
+	msgs, err := b.Wait(ctx, o.As, o.Channels, o.IncludeOwn, match, o.Timeout)
+	if errors.Is(err, context.Canceled) {
+		return ErrWaitReplaced
+	}
 	if err != nil {
 		return err
 	}

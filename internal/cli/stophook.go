@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	}
 	defer func() { _ = b.Close() }()
 	// A nanosecond timeout makes Wait check once and return.
-	msgs, err := b.Wait(as, nil, false, nil, time.Nanosecond)
+	msgs, err := b.Wait(context.Background(), as, nil, false, nil, time.Nanosecond)
 	if err != nil || len(msgs) == 0 {
 		return // not subscribed here (not an agentbus session), or nothing new
 	}
@@ -67,7 +68,7 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	reason := fmt.Sprintf("Agentbus: %s new message(s) for %s on %s. Call receive "+
 		"(ack the previous batch) and handle what concerns you. Then, except on "+
 		"Codex, make sure a background `agentbus wait -filter @%s` is running "+
-		"(start one if not) so the next message wakes you, and stop.",
+		"(start one; it replaces any running wait) so the next message wakes you, and stop.",
 		n, as, strings.Join(chans, ", "), as)
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }

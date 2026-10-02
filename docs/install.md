@@ -298,6 +298,11 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for that directory's identity. Always exits 0.
+- `agentbus wait` exits 0 when a message arrives, 1 on `-timeout`, 2 on an
+  error, and 3 when a newer `agentbus wait` for the same identity replaced it
+  (silently, no output). Only one wait runs per identity; its pid is recorded
+  in `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
+  wait.
 - `agentbus identity` prints the registration block (the register sentence
   plus the session protocol) for the current directory. It's also what the
   SessionStart hooks above run.

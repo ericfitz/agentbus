@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -418,7 +419,7 @@ func TestDeliveryHonorsDMReadableAfterObserverEndsSession(t *testing.T) {
 			t.Fatalf("receive must not deliver another identity's inbox: %+v", res.Messages)
 		}
 	}
-	msgs, err := c.Wait("human", nil, false, nil, 300*time.Millisecond)
+	msgs, err := c.Wait(context.Background(), "human", nil, false, nil, 300*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

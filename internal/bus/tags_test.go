@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -511,7 +512,7 @@ func TestWaitWakesOnTagMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	sendTagged(t, b, sam, "dev", "no mention", "t")
-	msgs, err := b.Wait(kim, nil, false, nil, time.Second)
+	msgs, err := b.Wait(context.Background(), kim, nil, false, nil, time.Second)
 	if err != nil || len(msgs) != 1 || !slices.Equal(msgs[0].MatchedTags, []string{"t"}) {
 		t.Fatalf("wait peeks the tag source with matched_tags: %+v %v", msgs, err)
 	}

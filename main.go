@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -105,7 +107,7 @@ func run(cmd string, args []string) int {
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
-		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever)")
+		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity replaced this one")
 		if err := fs.Parse(args); err != nil {
 			return 2
 		}
@@ -123,9 +125,15 @@ func run(cmd string, args []string) int {
 			}
 			o.As = cli.IdentityName(cwd, os.Stderr)
 		}
-		switch err := cli.Wait(o, os.Stdout); {
+		// Installed before Wait acquires the per-identity lock, so the
+		// SIGTERM a replacing wait sends is always handled, never fatal.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+		defer stop()
+		switch err := cli.Wait(ctx, o, os.Stdout); {
 		case errors.Is(err, cli.ErrWaitTimeout):
 			return 1
+		case errors.Is(err, cli.ErrWaitReplaced):
+			return 3 // replaced by a newer wait for this identity: silent, no wake-up
 		case err != nil:
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 2

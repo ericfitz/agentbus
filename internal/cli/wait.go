@@ -49,8 +49,11 @@ var ErrWaitReplaced = fmt.Errorf("wait replaced")
 // polling receive from model turns. Only one wait runs per identity: starting
 // a second one signals the first to exit silently (see acquireWaitLock). The
 // caller cancels ctx on SIGTERM/SIGINT/SIGHUP, installed before calling so the
-// replacement signal is never lost; a wait also exits with ErrHarnessGone, silently, when the harness that started it dies (unless NoHarnessWatch); a canceled ctx returns ErrWaitReplaced
-// unless messages were already selected, which are still printed.
+// replacement signal is never lost; a canceled ctx returns ErrWaitReplaced.
+// A wait also exits with ErrHarnessGone when the harness that started it
+// dies (unless NoHarnessWatch). Either way it prints nothing, even when
+// messages were already selected: the replacing wait reports them instead,
+// or nobody is left to wake.
 func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	var match func(bus.Message) bool
 	if o.Filter != "" {
@@ -99,8 +102,8 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if errors.Is(context.Cause(ctx), ErrHarnessGone) {
-		return ErrHarnessGone // nobody is left to wake: print nothing
+	if ctx.Err() != nil {
+		return waitCanceled(ctx) // replaced or harness gone: print nothing
 	}
 	if len(msgs) == 0 {
 		return ErrWaitTimeout

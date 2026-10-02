@@ -49,7 +49,7 @@ func (f *fixture) streamHas(t *testing.T, want ...string) {
 	}
 }
 
-// . and > step to older versions, , and < to newer, stopping at both ends;
+// . steps to older versions and , to newer, stopping at both ends;
 // the row starts on the latest version.
 func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 	f, _ := onMemory(t)
@@ -57,11 +57,11 @@ func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 	f.streamHas(t, "Release v3 r3")
 	f.key(".")
 	f.streamHas(t, "Release v2 r2 · 3 kept")
-	f.key(">")
+	f.key(".")
 	f.streamHas(t, "Release v1 r1 · 3 kept")
 	f.key(".")
 	f.streamHas(t, "Release v1 r1 · 3 kept")
-	f.key("<")
+	f.key(",")
 	f.streamHas(t, "Release v2 r2 · 3 kept")
 	f.key(",")
 	f.key(",")

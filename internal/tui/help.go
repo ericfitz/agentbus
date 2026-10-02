@@ -39,6 +39,7 @@ func (m Model) helpLines() []string {
 		{"g / G", "oldest / newest"},
 		{"space", "task list: cycle the cursor task's state (not started, in progress, completed) as a draft"},
 		{", / .", "newer / older version of the cursor memory"},
+		{"< / >", "narrow / widen the channel rail (saved as tui_rail_width in the config)"},
 		{"r", "reply to the cursor message (own inbox only, in the sessions pane)"},
 		{"c", "new channel: <name> [memory]"},
 		{"s", "subscribe / unsubscribe the channel (no-op in the sessions pane)"},

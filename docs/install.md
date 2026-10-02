@@ -122,6 +122,11 @@ it tombstones a memory that no `get_memory` call or `search` hit has
 touched for `memory_expiry_hours`. 0 disables the corresponding rule;
 negative values are rejected.
 
+`tui_rail_width` (default 0, range 0-1000) is the channel rail's width in
+columns. The TUI writes it when you press `<` or `>`, rewriting the config
+file with its keys sorted; 0 means a fifth of the screen. Set at start, it
+is clamped to the terminal.
+
 `tui_name` (default: your OS user name) is the identity `agentbus tui`
 registers under; `agentbus tui --as <name>` overrides it for one run. It
 follows the same rule as agent names: 1-128 bytes, no `/`, no control
@@ -322,9 +327,13 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   change pane: `↑`/`↓` move within the focused one, `→` opens the selected
   message's body if it's closed and has one, else shows its direct replies;
   `←` hides shown replies (the whole subtree), else closes the body. On a
-  memory, `.` (or `>`) shows the next older version and `,` (or `<`) the
+  memory, `.` shows the next older version and `,` the
   next newer one, labeled `r<revision> · <n> kept`; any other key returns
-  it to the latest. `enter` replies to the selected message, or opens
+  it to the latest. `<` and `>` narrow and widen the
+  channel rail two columns at a time; the width is saved as `tui_rail_width`
+  in the config file (0 or absent is a fifth of the screen), and is clamped
+  to the terminal, keeping the rail at least 16 columns and the messages
+  pane at least 40. `enter` replies to the selected message, or opens
   compose from the channel list. Colors come from the `theme` and `themes`
   config settings; see below. The first TUI launch after upgrading
   subscribes to every existing inbox from its oldest retained message, so

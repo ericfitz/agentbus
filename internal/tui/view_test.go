@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/ericfitz/agentbus/internal/mcpserver"
 	"github.com/muesli/termenv"
 )
@@ -630,5 +631,79 @@ func TestChipTextContrastsWithTagColor(t *testing.T) {
 		if got := chipText(lipgloss.Color(bg)); got != lipgloss.Color(want) {
 			t.Errorf("tag %s: chip text %v, want %s", bg, got, want)
 		}
+	}
+}
+
+func TestRailWidthClampsToTerminal(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct{ saved, width, rail int }{
+		{0, 100, 20},   // unset: a fifth
+		{30, 100, 30},  // honored
+		{4, 100, 16},   // floor
+		{90, 100, 59},  // leaves the messages pane 40 columns
+		{30, 60, 19},   // a narrow terminal shrinks the saved width
+		{30, 200, 30},  // and a wide one restores it
+		{5000, 60, 19}, // out of range in a hand edit
+	} {
+		f.m.c.cfg.TUIRailWidth = tc.saved
+		f.m.width = tc.width
+		f.m.layout()
+		if got := f.m.railWidth(); got != tc.rail {
+			t.Errorf("saved %d, width %d: rail %d, want %d", tc.saved, tc.width, got, tc.rail)
+		}
+		if f.m.stream.Width != tc.width-tc.rail-1 {
+			t.Errorf("saved %d, width %d: stream %d, want %d", tc.saved, tc.width, f.m.stream.Width, tc.width-tc.rail-1)
+		}
+	}
+}
+
+func TestRailKeysResizeAndPersist(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.key(">")
+	if got := f.m.railWidth(); got != 22 {
+		t.Fatalf("after >: rail %d, want 22", got)
+	}
+	if f.m.stream.Width != 100-22-1 {
+		t.Fatalf("stream %d did not reflow", f.m.stream.Width)
+	}
+	f.key("<")
+	f.key("<")
+	if got := f.m.railWidth(); got != 18 {
+		t.Fatalf("after < <: rail %d, want 18", got)
+	}
+	c, _, err := config.Load(f.c.cfg.Path)
+	if err != nil || c.TUIRailWidth != 18 {
+		t.Fatalf("saved %d, err %v; want 18", c.TUIRailWidth, err)
+	}
+	// A restart reads the saved width back.
+	if m := New(f.c, f.m.theme); m.c.cfg.TUIRailWidth != 18 {
+		t.Fatalf("restart rail %d", m.c.cfg.TUIRailWidth)
+	}
+}
+
+func TestRailKeysStopAtBounds(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	f.m.width = 60
+	f.m.layout()
+	f.key("<") // already at the floor: nothing changes, nothing is saved
+	if f.m.c.cfg.TUIRailWidth != 0 {
+		t.Fatalf("a no-op press saved %d", f.m.c.cfg.TUIRailWidth)
+	}
+	f.key(">") // 16 -> 18
+	f.key(">") // 19 is the ceiling at 60 columns
+	f.key(">")
+	if got := f.m.railWidth(); got != 19 || f.m.c.cfg.TUIRailWidth != 19 {
+		t.Fatalf("rail %d, saved %d; want 19", got, f.m.c.cfg.TUIRailWidth)
+	}
+	if f.m.stream.Width < streamMin {
+		t.Fatalf("stream %d below the %d-column minimum", f.m.stream.Width, streamMin)
+	}
+	for range 20 {
+		f.key("<")
+	}
+	if got := f.m.railWidth(); got != railMin {
+		t.Fatalf("rail %d, want floor %d", got, railMin)
 	}
 }

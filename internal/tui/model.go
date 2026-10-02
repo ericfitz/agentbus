@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 )
 
 type mode int
@@ -573,14 +574,44 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.mode = modeConfirmChannel
 	case "/":
 		return m.openSearch()
-	case ".", ">":
+	case ".":
 		return m.stepVersion(true)
-	case ",", "<":
+	case ",":
 		return m.stepVersion(false)
+	case "<":
+		return m.resizeRail(-railStep)
+	case ">":
+		return m.resizeRail(railStep)
 	case "h":
 		return m.openHealth()
 	case "?":
 		return m.openHelp()
+	}
+	return nil
+}
+
+// resizeRail moves the rail/messages divider by delta columns from the
+// width shown now, within the bounds railWidth enforces, and saves the new
+// width to the config file. A press that cannot move it does nothing; a
+// terminal too narrow to show the rail ignores the key.
+func (m *Model) resizeRail(delta int) tea.Cmd {
+	if !m.showLeft() {
+		return nil
+	}
+	cur, saved := m.railWidth(), m.c.cfg.TUIRailWidth
+	m.c.cfg.TUIRailWidth = max(cur+delta, railMin)
+	next := m.railWidth()
+	if next == cur {
+		m.c.cfg.TUIRailWidth = saved
+		return nil
+	}
+	m.c.cfg.TUIRailWidth = next
+	m.layout()
+	if m.c.cfg.Path == "" {
+		return nil
+	}
+	if err := config.SaveTUIRailWidth(m.c.cfg.Path, m.c.cfg.TUIRailWidth); err != nil {
+		return m.showToast("rail width not saved: " + err.Error())
 	}
 	return nil
 }

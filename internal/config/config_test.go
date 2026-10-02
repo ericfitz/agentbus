@@ -354,3 +354,45 @@ func TestDataDirEnvResolvesTildeAndRelative(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveTUIRailWidthRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	p := write(t, dir, `{"tui_name": "eric", "theme": "default"}`)
+	if err := SaveTUIRailWidth(p, 30); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TUIRailWidth != 30 || c.TUIName != "eric" {
+		t.Fatalf("rail %d, tui_name %q", c.TUIRailWidth, c.TUIName)
+	}
+	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode not kept: %v %v", fi, err)
+	}
+}
+
+func TestSaveTUIRailWidthCreatesFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "config.json")
+	if err := SaveTUIRailWidth(p, 22); err != nil {
+		t.Fatal(err)
+	}
+	if c, _, err := Load(p); err != nil || c.TUIRailWidth != 22 {
+		t.Fatalf("load: %v, %+v", err, c.TUIRailWidth)
+	}
+}
+
+func TestSaveTUIRailWidthRejectsNonObject(t *testing.T) {
+	p := write(t, t.TempDir(), `[1]`)
+	if err := SaveTUIRailWidth(p, 20); err == nil {
+		t.Fatal("expected an error for a non-object config")
+	}
+}
+
+func TestRejectsOutOfRangeRailWidth(t *testing.T) {
+	p := write(t, t.TempDir(), `{"tui_rail_width": -1}`)
+	if _, _, err := Load(p); err == nil || !strings.Contains(err.Error(), "tui_rail_width") {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -159,9 +159,23 @@ func rowLine(x bus.Message, avail int) (line string, hasBody bool) {
 
 func (m Model) showLeft() bool { return m.width >= 60 }
 
-// railWidth is the left column: a fifth of the screen, floored so channel
-// names stay readable at the 60-column minimum.
-func (m Model) railWidth() int { return max(m.width/5, 16) }
+const (
+	railMin  = 16 // channel names stay readable at the 60-column minimum
+	railStep = 2  // columns a < or > press moves the divider
+	// streamMin is the narrowest messages pane the rail may leave.
+	streamMin = 40
+)
+
+// railWidth is the left column. Until the user resizes it (< and >, saved as
+// tui_rail_width) it is a fifth of the screen; either way it is clamped to
+// [railMin, width-streamMin-1], the floor winning on a narrow terminal.
+func (m Model) railWidth() int {
+	w := m.width / 5
+	if m.c != nil && m.c.cfg.TUIRailWidth > 0 {
+		w = m.c.cfg.TUIRailWidth
+	}
+	return min(max(w, railMin), max(m.width-streamMin-1, railMin))
+}
 
 // Rail icons. Each carries U+FE0F so the terminal draws the color emoji
 // even when its monospace font has its own glyph at that codepoint. These

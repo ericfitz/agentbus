@@ -25,11 +25,11 @@ func (v memView) version(x bus.Message) (bus.Message, bool) {
 }
 
 func isVersionKey(k string) bool {
-	return k == "." || k == ">" || k == "," || k == "<"
+	return k == "." || k == ","
 }
 
 // stepVersion moves the cursor memory row one version older (older=true,
-// . or >) or newer (, or <), stopping at either end. The first older step
+// .) or newer (,), stopping at either end. The first older step
 // fetches the revisions; revisionsMsg then applies it.
 func (m *Model) stepVersion(older bool) tea.Cmd {
 	r, ok := m.cursorRow()

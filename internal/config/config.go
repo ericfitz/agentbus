@@ -48,10 +48,11 @@ type Config struct {
 	EmbeddingQueryTimeoutSeconds float64           `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string            `json:"log_level"`
 	TUIName                      string            `json:"tui_name"`
-	Theme                        string            `json:"theme"`    // name of the entry in Themes the TUI applies
-	Themes                       []Theme           `json:"themes"`   // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
-	Icons                        string            `json:"icons"`    // emoji (default), nerdfont, or custom
-	IconMap                      map[string]string `json:"icon_map"` // custom: icon name -> glyph, overriding a subset of emoji
+	Theme                        string            `json:"theme"`          // name of the entry in Themes the TUI applies
+	Themes                       []Theme           `json:"themes"`         // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
+	Icons                        string            `json:"icons"`          // emoji (default), nerdfont, or custom
+	IconMap                      map[string]string `json:"icon_map"`       // custom: icon name -> glyph, overriding a subset of emoji
+	TUIRailWidth                 int               `json:"tui_rail_width"` // channel rail columns the TUI saves on < and >; 0 means the default
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -343,6 +344,8 @@ func (c *Config) validate() error {
 		{"task_idle_hours", c.TaskIdleHours, 0, 87600},
 		{"task_expiry_hours", c.TaskExpiryHours, 0, 87600},
 		{"memory_expiry_hours", c.MemoryExpiryHours, 0, 87600},
+		// 0 is unset; the TUI clamps any other value to the terminal.
+		{"tui_rail_width", c.TUIRailWidth, 0, 1000},
 	}
 	for _, b := range bounds {
 		if b.v < b.min || b.v > b.max {
@@ -389,4 +392,50 @@ func (c *Config) validate() error {
 		return errors.New("tui_name must not be empty")
 	}
 	return nil
+}
+
+// SaveTUIRailWidth sets tui_rail_width in the config file at path, keeping
+// every other key as written (though not their order or spacing) and
+// creating the file if it is missing. The write is atomic.
+func SaveTUIRailWidth(path string, width int) error {
+	raw := map[string]json.RawMessage{}
+	mode := os.FileMode(0o644)
+	body, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	default:
+		if err := json.Unmarshal(body, &raw); err != nil || raw == nil {
+			return fmt.Errorf("%s: must be a JSON object", path)
+		}
+		if fi, err := os.Stat(path); err == nil {
+			mode = fi.Mode().Perm()
+		}
+	}
+	raw["tui_rail_width"] = json.RawMessage(strconv.Itoa(width))
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(append(out, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

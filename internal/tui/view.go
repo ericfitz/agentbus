@@ -122,10 +122,15 @@ func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
 }
 
 // header is a message's first line: timestamp, sender → recipient, tag
-// chips. It never wraps: past avail columns the chips are cut first (dropped
+// chips. In the pane of the message's own channel the recipient is dropped
+// (it is the pane); a dm/ recipient names an agent, so it stays, as it does
+// in mixed panes (tags). It never wraps: past avail columns the chips are cut first (dropped
 // under four columns), then the whole line is cut with an ellipsis.
-func (m Model) header(x bus.Message, stampStyle lipgloss.Style, avail int) string {
-	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender) + iconArrow + m.channelLabel(x.Channel)
+func (m Model) header(x bus.Message, viewed string, stampStyle lipgloss.Style, avail int) string {
+	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender)
+	if x.Channel != viewed || strings.HasPrefix(x.Channel, bus.DMPrefix) {
+		head += iconArrow + m.channelLabel(x.Channel)
+	}
 	if chips := m.tagChips(x.Tags); chips != "" {
 		if room := avail - lipgloss.Width(head) - 2; room >= lipgloss.Width(chips) {
 			head += "  " + chips
@@ -400,7 +405,7 @@ func shortDur(d time.Duration) string {
 // renderStream draws the selected channel's messages, oldest first, with the
 // "new" divider after the last seen message, "n evicted" dividers where the
 // bus reported gaps, and the normal-mode cursor row highlighted. Each message
-// is a header line (timestamp, sender → recipient, tag chips) followed by
+// is a header line (timestamp, sender, → recipient unless it is this channel, tag chips) followed by
 // its row line (subject or first line) or, when opened, its body, at the
 // row's depth.
 func (m *Model) renderStream() string {
@@ -495,7 +500,7 @@ func (m *Model) renderStream() string {
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		line := m.header(x, stampStyle, avail) + "\n" + text
+		line := m.header(x, ch, stampStyle, avail) + "\n" + text
 		if label != "" {
 			line += " " + th.Style(th.Mem).Render(label)
 		}

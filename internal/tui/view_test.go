@@ -224,7 +224,7 @@ func TestSelectedRowKeepsBackgroundAcrossSegments(t *testing.T) {
 	f.receive(t)
 	f.key("shift+tab") // compose -> stream directly: cursor lands on the last message
 	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
-	if !strings.Contains(first, "Sam") || strings.Count(first, "44m") < 3 {
+	if !strings.Contains(first, "Sam") || strings.Count(first, "44m") < 2 {
 		t.Fatalf("segments after a reset lost the selection background: %q", first)
 	}
 	rail := strings.SplitN(f.m.renderRails(), "\n", 3)[1]
@@ -476,9 +476,12 @@ func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
 	f.agentSend(t, "dev", "hello")
 	f.receive(t)
 	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
-	want := ansi.Strip(iconAgent) + "Sam" + iconArrow + iconChat + "dev"
+	want := ansi.Strip(iconAgent) + "Sam"
 	if !strings.Contains(first, want) || !strings.Contains(first, "(today)") {
 		t.Fatalf("channel header %q lacks %q", first, want)
+	}
+	if strings.Contains(first, strings.TrimSpace(iconArrow)) || strings.Contains(first, "dev") {
+		t.Fatalf("own-channel header must drop the target: %q", first)
 	}
 	lines := strings.Split(ansi.Strip(f.m.renderStream()), "\n")
 	if len(lines) < 2 || !strings.Contains(lines[1], "hello") || strings.Contains(lines[0], "hello") {
@@ -506,11 +509,35 @@ func TestHeaderShowsSenderArrowChannelAndDM(t *testing.T) {
 	}
 }
 
+// header drops "→ channel" only when the message's channel is the one being
+// viewed; a mixed pane (tags, search) and a DM recipient keep it.
+func TestHeaderTargetOnlyOutsideOwnChannel(t *testing.T) {
+	f := newFixture(t)
+	st := lipgloss.NewStyle()
+	mk := func(ch string) bus.Message {
+		return bus.Message{Seq: 1, Channel: ch, Sender: "Sam", CreatedAt: time.Now().UnixMilli()}
+	}
+	arrow := strings.TrimSpace(iconArrow)
+	for _, ch := range []string{"general", "general/agentbus", "memory/agentbus", "dev-notes", "dev"} {
+		if got := ansi.Strip(f.m.header(mk(ch), ch, st, 200)); strings.Contains(got, arrow) || strings.Contains(got, ch) {
+			t.Errorf("own-channel header for %q keeps the target: %q", ch, got)
+		}
+	}
+	for _, viewed := range []string{tagPanePrefix + "bug", "general"} {
+		if got := ansi.Strip(f.m.header(mk("dev"), viewed, st, 200)); !strings.Contains(got, iconArrow+iconChat+"dev") {
+			t.Errorf("header viewed from %q lost the target: %q", viewed, got)
+		}
+	}
+	if got := ansi.Strip(f.m.header(mk("dm/Eric"), "dm/Eric", st, 200)); !strings.Contains(got, iconArrow+ansi.Strip(iconAgent)+"Eric") {
+		t.Errorf("DM header in its own pane lost the recipient: %q", got)
+	}
+}
+
 func TestHeaderBusSender(t *testing.T) {
 	f := newFixture(t)
 	f.msgAt("dev", "", 9001, time.Now().UnixMilli(), "reclaimed")
 	first := ansi.Strip(strings.SplitN(f.m.renderStream(), "\n", 2)[0])
-	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus"+iconArrow) {
+	if !strings.Contains(first, ansi.Strip(iconAgent)+"bus") {
 		t.Fatalf("empty sender renders as bus: %q", first)
 	}
 }
@@ -583,6 +610,13 @@ func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
 	if w := lipgloss.Width(lines[0]); w > f.m.stream.Width {
 		t.Fatalf("header wrapped or overflowed: width %d > %d: %q", w, f.m.stream.Width, lines[0])
 	}
+	// The own-channel header drops the recipient, so only a header viewed
+	// from elsewhere (a tag pane) is long enough to need the cut.
+	msg := bus.Message{Channel: long, Sender: "Sam", CreatedAt: time.Now().UnixMilli(), Tags: []string{"a", "b", "c"}}
+	if w := lipgloss.Width(f.m.header(msg, tagPanePrefix+"a", lipgloss.NewStyle(), f.m.stream.Width)); w > f.m.stream.Width {
+		t.Fatalf("mixed-pane header overflowed: width %d > %d", w, f.m.stream.Width)
+	}
+	lines[0] = f.m.header(msg, tagPanePrefix+"a", lipgloss.NewStyle(), f.m.stream.Width)
 	if s := ansi.Strip(lines[0]); !strings.Contains(s, "…") || strings.Contains(s, " a ") {
 		t.Fatalf("tags go first, then the recipient is cut with …: %q", s)
 	}

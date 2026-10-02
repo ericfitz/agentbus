@@ -525,7 +525,7 @@ func TestTaskRowSuffixes(t *testing.T) {
 		t.Fatalf("pending with owner shows a dim arrow, not the icon: %q", lines[0])
 	}
 	agentOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Agent).Render("\x00"), "\x00")
-	if !strings.Contains(raw[1], iconAgent+agentOpen+"Sam") || !strings.Contains(lines[1], "lease 59m") && !strings.Contains(lines[1], "lease 60m") {
+	if !strings.Contains(raw[1], agentOpen+iconAgent+"\x1b[0m"+agentOpen+"Sam") || !strings.Contains(lines[1], "lease 59m") && !strings.Contains(lines[1], "lease 60m") {
 		t.Fatalf("in-progress row shows icon + colored owner then the lease: %q", raw[1])
 	}
 	if idx := strings.Index(lines[1], "lease"); idx < strings.Index(lines[1], "Sam") {
@@ -615,7 +615,7 @@ func TestTaskInProgressOwnedBySelfUsesUserIcon(t *testing.T) {
 	raw := f.m.renderStream()
 	userOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.User).Render("\x00"), "\x00")
 	agentOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Agent).Render("\x00"), "\x00")
-	if !strings.Contains(raw, iconUser+userOpen+f.c.as) {
+	if !strings.Contains(raw, userOpen+iconUser+"\x1b[0m"+userOpen+f.c.as) {
 		t.Fatalf("self-owned in-progress row must use the user icon and color: %q", raw)
 	}
 	if strings.Contains(raw, agentOpen+f.c.as) {

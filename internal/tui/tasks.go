@@ -497,11 +497,11 @@ func (m *Model) renderTasks(ch string) string {
 		var suffix string
 		switch {
 		case t.Status == "in_progress" && t.Owner != "":
-			icon, style := iconAgent, th.Style(th.Agent)
+			style := th.Style(th.Agent)
 			if t.Owner == m.c.as {
-				icon, style = iconUser, th.Style(th.User)
+				style = th.Style(th.User)
 			}
-			body += "  " + icon + style.Render(t.Owner)
+			body += "  " + m.senderIcon(t.Owner) + style.Render(t.Owner)
 		case t.Status == "pending" && t.Owner != "":
 			suffix += iconArrow + t.Owner
 		}

@@ -61,9 +61,20 @@ func stamp(ms int64) string {
 // as bus) in the agent color.
 func (m Model) agentLabel(name string) string {
 	if name == m.c.as {
-		return iconUser + m.theme.Style(m.theme.User).Render(name)
+		return m.senderIcon(name) + m.theme.Style(m.theme.User).Render(name)
 	}
-	return iconAgent + m.theme.Style(m.theme.Agent).Render(senderName(name))
+	return m.senderIcon(name) + m.theme.Style(m.theme.Agent).Render(senderName(name))
+}
+
+// senderIcon is name's icon drawn in its color: the user color for the
+// TUI's own identity, the agent color for everyone else. The gear's CSI
+// erase/cursor escapes sit inside the styled run, which lipgloss and ansi
+// measure as zero width, so styling never shifts a column.
+func (m Model) senderIcon(name string) string {
+	if name == m.c.as {
+		return m.theme.Style(m.theme.User).Render(iconUser)
+	}
+	return m.theme.Style(m.theme.Agent).Render(iconAgent)
 }
 
 // channelLabel is a message's recipient: the agent for a dm/ inbox, else
@@ -371,11 +382,7 @@ func (m Model) renderRails() string {
 			if n == m.c.as {
 				ctx, name = "you", th.Style(th.User).Render(n)
 			}
-			icon := iconAgent
-			if n == m.c.as {
-				icon = iconUser
-			}
-			row = icon + name + " " + dim.Render(ctx)
+			row = m.senderIcon(n) + name + " " + dim.Render(ctx)
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
 			row = iconIdle + dim.Render(n+" "+shortDur(age))

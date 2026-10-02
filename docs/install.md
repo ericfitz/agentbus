@@ -493,6 +493,11 @@ does.
 | `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |
 | `arrow` | sender → recipient, a pending task's owner | → | U+F061 fa-arrow-right |
 
+The `agent` and `user` icons are drawn in the sender's color (the `user` theme
+color for your own name, `agent` for everyone else) wherever they appear: message
+headers, the sessions rail, and in-progress task owners. This applies to every
+set, including glyphs set with `icon_map`; color emoji ignore the text color.
+
 The health overlay (`h`) names the active set on an `icons ·` line.
 
 ### Using a Nerd Font

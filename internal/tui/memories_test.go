@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/muesli/termenv"
 )
 
 // onMemory opens dev-notes with a three-revision memory plus an ordinary
@@ -54,18 +56,18 @@ func (f *fixture) streamHas(t *testing.T, want ...string) {
 func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 	f, _ := onMemory(t)
 	f.key(",")
-	f.streamHas(t, "Release v3 r3")
+	f.streamHas(t, "Release v3", " r3")
 	f.key(".")
-	f.streamHas(t, "Release v2 r2 · 3 kept")
+	f.streamHas(t, "Release v2", " r2 · 3 kept")
 	f.key(".")
-	f.streamHas(t, "Release v1 r1 · 3 kept")
+	f.streamHas(t, "Release v1", " r1 · 3 kept")
 	f.key(".")
-	f.streamHas(t, "Release v1 r1 · 3 kept")
+	f.streamHas(t, "Release v1", " r1 · 3 kept")
 	f.key(",")
-	f.streamHas(t, "Release v2 r2 · 3 kept")
+	f.streamHas(t, "Release v2", " r2 · 3 kept")
 	f.key(",")
 	f.key(",")
-	f.streamHas(t, "Release v3 r3 · 3 kept")
+	f.streamHas(t, "Release v3", " r3 · 3 kept")
 }
 
 // Any other key (here, moving the cursor away and back) returns the row to
@@ -73,7 +75,7 @@ func TestMemoryVersionsStepOlderAndNewer(t *testing.T) {
 func TestMemoryVersionResetsOnOtherKeys(t *testing.T) {
 	f, _ := onMemory(t)
 	f.key(".")
-	f.streamHas(t, "Release v2 r2 · 3 kept")
+	f.streamHas(t, "Release v2", " r2 · 3 kept")
 	f.key("down")
 	f.key("up")
 	f.key("down")
@@ -81,7 +83,7 @@ func TestMemoryVersionResetsOnOtherKeys(t *testing.T) {
 		t.Fatal("cursor left the memory channel")
 	}
 	f.key("up")
-	f.streamHas(t, "Release v3 r3")
+	f.streamHas(t, "Release v3", " r3")
 	if strings.Contains(ansi.Strip(f.m.renderStream()), "kept") {
 		t.Fatal("version view must reset to latest")
 	}
@@ -137,8 +139,48 @@ func TestMemoryVersionLabelUsesTheRealRevision(t *testing.T) {
 	f.run(f.m.loadHistory("dev-notes", nil))
 	f.m.placeCursor(revs[0].Seq)
 	f.key(".")
-	f.streamHas(t, "Release v2 r2 · 1 kept")
+	f.streamHas(t, "Release v2", " r2 · 1 kept")
 	if s := ansi.Strip(f.m.renderStream()); strings.Contains(s, "r1") {
 		t.Fatalf("the label must not count positions:\n%s", s)
+	}
+}
+
+// The revision indicator rides the header line (after the sender, before the
+// tag chips), not the end of the content, and the content line stays clean.
+func TestMemoryRevisionIndicatorIsOnTheHeader(t *testing.T) {
+	f, _ := onMemory(t)
+	for _, tc := range []struct{ keys, label string }{{"", "r3"}, {".", "r2 · 3 kept"}} {
+		if tc.keys != "" {
+			f.key(tc.keys)
+		}
+		var head, body string
+		for _, l := range strings.Split(ansi.Strip(f.m.renderStream()), "\n") {
+			switch {
+			case strings.Contains(l, "Sam"):
+				head = l
+			case strings.Contains(l, "Release v"):
+				body = l
+			}
+		}
+		if !strings.HasSuffix(strings.TrimRight(head, " "), "Sam  "+tc.label) {
+			t.Fatalf("header %q must end with the sender then %q", head, tc.label)
+		}
+		if strings.Contains(body, " r") && strings.Contains(body, tc.label) {
+			t.Fatalf("content line %q must not carry the indicator", body)
+		}
+	}
+}
+
+// The indicator keeps the memory color on the header.
+func TestMemoryRevisionIndicatorKeepsMemColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f, _ := onMemory(t)
+	// The selected row re-applies its background after each reset, so match
+	// the color's opening sequence plus the label.
+	open, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Mem).Render("\x00"), "\x00")
+	if open == "" || !strings.Contains(f.m.renderStream(), open+"r3") {
+		t.Fatalf("header lost the memory color on r3: %q", f.m.renderStream())
 	}
 }

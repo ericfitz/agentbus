@@ -121,15 +121,19 @@ func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
 	return lipgloss.Color("15")
 }
 
-// header is a message's first line: timestamp, sender → recipient, tag
-// chips. In the pane of the message's own channel the recipient is dropped
+// header is a message's first line: timestamp, sender → recipient, memory
+// revision indicator (rev, when set), tag chips. In the pane of the message's own channel the recipient is dropped
 // (it is the pane); a dm/ recipient names an agent, so it stays, as it does
-// in mixed panes (tags). It never wraps: past avail columns the chips are cut first (dropped
-// under four columns), then the whole line is cut with an ellipsis.
-func (m Model) header(x bus.Message, viewed string, stampStyle lipgloss.Style, avail int) string {
+// in mixed panes (tags). It never wraps: past avail columns the chips are cut
+// first (dropped under four columns), then the whole line, indicator
+// included, is cut with an ellipsis.
+func (m Model) header(x bus.Message, viewed, rev string, stampStyle lipgloss.Style, avail int) string {
 	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender)
 	if x.Channel != viewed || strings.HasPrefix(x.Channel, bus.DMPrefix) {
 		head += iconArrow + m.channelLabel(x.Channel)
+	}
+	if rev != "" {
+		head += "  " + m.theme.Style(m.theme.Mem).Render(rev)
 	}
 	if chips := m.tagChips(x.Tags); chips != "" {
 		if room := avail - lipgloss.Width(head) - 2; room >= lipgloss.Width(chips) {
@@ -515,10 +519,7 @@ func (m *Model) renderStream() string {
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		line := m.header(x, ch, stampStyle, avail) + "\n" + text
-		if label != "" {
-			line += " " + th.Style(th.Mem).Render(label)
-		}
+		line := m.header(x, ch, label, stampStyle, avail) + "\n" + text
 		if r.hidden > 0 {
 			summary := strconv.Itoa(r.hidden) + " replies"
 			if r.hidden == 1 {

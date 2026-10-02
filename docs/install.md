@@ -351,7 +351,8 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   message's body if it's closed and has one, else shows its direct replies;
   `←` hides shown replies (the whole subtree), else closes the body. On a
   memory, `.` shows the next older version and `,` the
-  next newer one, labeled `r<revision> · <n> kept`; any other key returns
+  next newer one, labeled `r<revision> · <n> kept`; the revision label sits
+  on the message's header line, after the sender and before any tag chips; any other key returns
   it to the latest. `<` and `>` narrow and widen the
   channel rail two columns at a time; the width is saved as `tui_rail_width`
   in the config file (0 or absent is a fifth of the screen), stepping from the

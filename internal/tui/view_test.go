@@ -520,16 +520,16 @@ func TestHeaderTargetOnlyOutsideOwnChannel(t *testing.T) {
 	}
 	arrow := strings.TrimSpace(iconArrow)
 	for _, ch := range []string{"general", "general/agentbus", "memory/agentbus", "dev-notes", "dev"} {
-		if got := ansi.Strip(f.m.header(mk(ch), ch, st, 200)); strings.Contains(got, arrow) || strings.Contains(got, ch) {
+		if got := ansi.Strip(f.m.header(mk(ch), ch, "", st, 200)); strings.Contains(got, arrow) || strings.Contains(got, ch) {
 			t.Errorf("own-channel header for %q keeps the target: %q", ch, got)
 		}
 	}
 	for _, viewed := range []string{tagPanePrefix + "bug", "general"} {
-		if got := ansi.Strip(f.m.header(mk("dev"), viewed, st, 200)); !strings.Contains(got, iconArrow+iconChat+"dev") {
+		if got := ansi.Strip(f.m.header(mk("dev"), viewed, "", st, 200)); !strings.Contains(got, iconArrow+iconChat+"dev") {
 			t.Errorf("header viewed from %q lost the target: %q", viewed, got)
 		}
 	}
-	if got := ansi.Strip(f.m.header(mk("dm/Eric"), "dm/Eric", st, 200)); !strings.Contains(got, iconArrow+ansi.Strip(iconAgent)+"Eric") {
+	if got := ansi.Strip(f.m.header(mk("dm/Eric"), "dm/Eric", "", st, 200)); !strings.Contains(got, iconArrow+ansi.Strip(iconAgent)+"Eric") {
 		t.Errorf("DM header in its own pane lost the recipient: %q", got)
 	}
 }
@@ -614,10 +614,10 @@ func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
 	// The own-channel header drops the recipient, so only a header viewed
 	// from elsewhere (a tag pane) is long enough to need the cut.
 	msg := bus.Message{Channel: long, Sender: "Sam", CreatedAt: time.Now().UnixMilli(), Tags: []string{"a", "b", "c"}}
-	if w := lipgloss.Width(f.m.header(msg, tagPanePrefix+"a", lipgloss.NewStyle(), f.m.stream.Width)); w > f.m.stream.Width {
+	if w := lipgloss.Width(f.m.header(msg, tagPanePrefix+"a", "", lipgloss.NewStyle(), f.m.stream.Width)); w > f.m.stream.Width {
 		t.Fatalf("mixed-pane header overflowed: width %d > %d", w, f.m.stream.Width)
 	}
-	lines[0] = f.m.header(msg, tagPanePrefix+"a", lipgloss.NewStyle(), f.m.stream.Width)
+	lines[0] = f.m.header(msg, tagPanePrefix+"a", "", lipgloss.NewStyle(), f.m.stream.Width)
 	if s := ansi.Strip(lines[0]); !strings.Contains(s, "…") || strings.Contains(s, " a ") {
 		t.Fatalf("tags go first, then the recipient is cut with …: %q", s)
 	}
@@ -751,5 +751,36 @@ func TestRailKeysStepFromTheSavedWidth(t *testing.T) {
 	f.m.layout()
 	if got := f.m.railWidth(); got != 42 {
 		t.Fatalf("wide terminal shows %d, want 42", got)
+	}
+}
+
+// With a revision indicator the header reads stamp, sender, [-> channel],
+// indicator, chips; a narrow pane cuts the chips before the indicator, then
+// the whole line with an ellipsis.
+func TestHeaderRevisionIndicatorOrderAndNarrowCut(t *testing.T) {
+	f := newFixture(t)
+	st := lipgloss.NewStyle()
+	msg := bus.Message{Seq: 1, Channel: "dev", Sender: "Sam", CreatedAt: time.Now().UnixMilli(), Tags: []string{"alpha", "beta"}}
+	full := ansi.Strip(f.m.header(msg, tagPanePrefix+"a", "r3 · 5 kept", st, 200))
+	iArrow, iRev, iTag := strings.Index(full, strings.TrimSpace(iconArrow)), strings.Index(full, "r3 · 5 kept"), strings.Index(full, "alpha")
+	if iArrow <= 0 || iArrow >= iRev || iRev >= iTag {
+		t.Fatalf("want sender, arrow, indicator, chips in order: %q", full)
+	}
+	noTags := msg
+	noTags.Tags = nil
+	base := f.m.header(noTags, tagPanePrefix+"a", "r3", st, 200)
+	bw := lipgloss.Width(base)
+	// Room for the indicator but none for chips: chips go, indicator stays.
+	if got := ansi.Strip(f.m.header(msg, tagPanePrefix+"a", "r3", st, bw+3)); !strings.Contains(got, "r3") || strings.Contains(got, "alpha") || strings.Contains(got, "…") {
+		t.Fatalf("chips must be cut before the indicator: %q", got)
+	}
+	// Too narrow for the indicator: the whole line is cut with an ellipsis.
+	got := f.m.header(msg, tagPanePrefix+"a", "r3", st, bw-2)
+	if w := lipgloss.Width(got); w > bw-2 || !strings.Contains(ansi.Strip(got), "…") {
+		t.Fatalf("narrow header %q (width %d)", ansi.Strip(got), w)
+	}
+	// No indicator: unchanged from before.
+	if got := ansi.Strip(f.m.header(noTags, tagPanePrefix+"a", "", st, 200)); strings.Contains(got, "  r") && strings.HasSuffix(got, "  ") {
+		t.Fatalf("no indicator, no trailing gap: %q", got)
 	}
 }

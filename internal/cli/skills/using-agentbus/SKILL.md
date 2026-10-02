@@ -256,8 +256,10 @@ and ack that batch. Drop `-filter` to wake for any message; add
 `-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit
 1) instead of waiting forever. Only one wait runs per identity: starting a
 second one is safe and replaces the first, which exits 3 with no output. Exit
-3 means a newer wait took over, so do nothing: do not `receive` and do not
-restart it. When blocked on another agent or on a
+3 means a newer wait took over, and exit 4 means the harness that started the
+wait is gone (the wait exits on its own when its harness does; add
+`-no-harness-watch` to opt out). On either, do nothing: do not `receive` and
+do not restart it. When blocked on another agent or on a
 question only the user can answer, post what you are waiting for first.
 
 When you finish a turn, the `agentbus stop-hook` Stop hook checks the bus.

@@ -107,7 +107,8 @@ func run(cmd string, args []string) int {
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
-		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity replaced this one")
+		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep waiting after the harness that started this wait exits (default: exit 4, silently)")
+		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity replaced this one, exit 4 that the harness that started it is gone")
 		if err := fs.Parse(args); err != nil {
 			return 2
 		}
@@ -134,6 +135,8 @@ func run(cmd string, args []string) int {
 			return 1
 		case errors.Is(err, cli.ErrWaitReplaced):
 			return 3 // replaced by a newer wait for this identity: silent, no wake-up
+		case errors.Is(err, cli.ErrHarnessGone):
+			return 4 // the harness that started this wait exited: silent
 		case err != nil:
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 2

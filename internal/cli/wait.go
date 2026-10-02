@@ -26,6 +26,9 @@ type WaitOptions struct {
 	IncludeOwn bool
 	Filter     string // regexp on subject or content; non-matching messages are skipped, except direct messages
 	Timeout    time.Duration
+	// NoHarnessWatch keeps the wait running after the harness that started it
+	// is gone (see ErrHarnessGone).
+	NoHarnessWatch bool
 }
 
 // ErrWaitTimeout is returned when no message arrived before Timeout.
@@ -46,7 +49,7 @@ var ErrWaitReplaced = fmt.Errorf("wait replaced")
 // polling receive from model turns. Only one wait runs per identity: starting
 // a second one signals the first to exit silently (see acquireWaitLock). The
 // caller cancels ctx on SIGTERM/SIGINT/SIGHUP, installed before calling so the
-// replacement signal is never lost; a canceled ctx returns ErrWaitReplaced
+// replacement signal is never lost; a wait also exits with ErrHarnessGone, silently, when the harness that started it dies (unless NoHarnessWatch); a canceled ctx returns ErrWaitReplaced
 // unless messages were already selected, which are still printed.
 func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	var match func(bus.Message) bool
@@ -63,8 +66,21 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Subject) || re.MatchString(m.Content)
 		}
 	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if !o.NoHarnessWatch {
+		// The harness is the first non-shell ancestor, not the direct parent:
+		// a background shell can outlive it. If it is already gone, exit now.
+		// Any other lookup failure (unsupported platform) disables the watch.
+		switch h, err := procs.FindHarness(procs.System, os.Getpid()); {
+		case errors.Is(err, procs.ErrGone):
+			return ErrHarnessGone
+		case err == nil:
+			go watchHarness(ctx, procs.System, h, cancel)
+		}
+	}
 	if ctx.Err() != nil {
-		return ErrWaitReplaced
+		return waitCanceled(ctx)
 	}
 	release, err := acquireWaitLock(o.Config.DataDirectory, o.As, procs.Self(procs.System, os.Getpid()))
 	if err != nil {
@@ -78,10 +94,13 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	defer func() { _ = b.Close() }()
 	msgs, err := b.Wait(ctx, o.As, o.Channels, o.IncludeOwn, match, o.Timeout)
 	if errors.Is(err, context.Canceled) {
-		return ErrWaitReplaced
+		return waitCanceled(ctx)
 	}
 	if err != nil {
 		return err
+	}
+	if errors.Is(context.Cause(ctx), ErrHarnessGone) {
+		return ErrHarnessGone // nobody is left to wake: print nothing
 	}
 	if len(msgs) == 0 {
 		return ErrWaitTimeout
@@ -96,4 +115,12 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// waitCanceled maps a canceled ctx to the error that says why.
+func waitCanceled(ctx context.Context) error {
+	if errors.Is(context.Cause(ctx), ErrHarnessGone) {
+		return ErrHarnessGone
+	}
+	return ErrWaitReplaced
 }

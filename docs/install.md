@@ -299,8 +299,11 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for that directory's identity. Always exits 0.
 - `agentbus wait` exits 0 when a message arrives, 1 on `-timeout`, 2 on an
-  error, and 3 when a newer `agentbus wait` for the same identity replaced it
-  (silently, no output). Only one wait runs per identity; its pid is recorded
+  error, 3 when a newer `agentbus wait` for the same identity replaced it, and
+  4 when the harness that started it exited (both silent, no output; ADR 0014).
+  The harness is the first ancestor that is not a shell, checked every 2
+  seconds with its start time to guard against pid reuse; `-no-harness-watch`
+  turns this off. Only one wait runs per identity; its pid is recorded
   in `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
   wait.
 - `agentbus identity` prints the registration block (the register sentence

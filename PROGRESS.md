@@ -643,7 +643,7 @@ Spec `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`, plan
 
 ## 2026-10-02: issues #21-#26
 
-Committed to `main` (awaiting push; not released):
+Released in v1.12.0:
 
 - **#22** `d543b0a`: a message header drops "→ <channel>" when the message
   is in the channel being viewed; tag panes, search and DMs keep it.
@@ -661,3 +661,5 @@ Committed to `main` (awaiting push; not released):
 - **#24** `542a68f`: `agentbus init` installs a Claude Code SubagentStart
   hook (`agentbus subagent-hook`) that tells opted-in subagents ("use
   agentbus", `parent=<name>`) to register with their parent. ADR 0016.
+- **v1.12.0 released** (tag v1.12.0). Schema v8: upgrade and restart all
+  hosts together, then `agentbus init --global`.

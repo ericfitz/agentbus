@@ -640,3 +640,24 @@ Spec `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`, plan
   (#19).
 - **v1.11.0 released** (tag v1.11.0). No schema change; upgrade, then
   `agentbus init --global`, restart sessions and `agentbus tui`.
+
+## 2026-10-02: issues #21-#26
+
+Committed to `main` (awaiting push; not released):
+
+- **#22** `d543b0a`: a message header drops "→ <channel>" when the message
+  is in the channel being viewed; tag panes, search and DMs keep it.
+- **#21** `a122731`: `<` / `>` resize the channel rail (16-column floor,
+  messages pane keeps 40), saved as `tui_rail_width` in config.json.
+- **#26** `cefa529`, `c529e96`: one `agentbus wait` per identity
+  (`<data dir>/wait/<identity>.pid`); a new wait replaces the old one, which
+  exits 3 silently. New `internal/procs` package.
+- **#25** `bae507a`: `agentbus wait` watches the harness (first non-shell
+  ancestor, pid plus start time) and exits 4 silently when it is gone; no
+  SessionEnd hook. ADR 0014.
+- **#23** `e6904d1`: register records the MCP clientInfo (harness name and
+  version) on the session, shown in the `h` view and returned by discover.
+  Schema v8; upgrade and restart all hosts together. ADR 0015.
+- **#24** `542a68f`: `agentbus init` installs a Claude Code SubagentStart
+  hook (`agentbus subagent-hook`) that tells opted-in subagents ("use
+  agentbus", `parent=<name>`) to register with their parent. ADR 0016.

@@ -42,3 +42,14 @@ v1.3.0 session on 2026-09-17. All six shipped in v1.4.0.
 - The `AUTOINCREMENT` counter is carried across the rebuild explicitly so
   seq stays monotonic (ADR 0003 A13.1). Design:
   `docs/superpowers/specs/2026-09-17-schema-migration-design.md`.
+
+## Human decisions (2026-10-02, second sweep)
+
+Decided by the user.
+
+7. **Rail resize adjusts the saved width.** `<` and `>` step
+   `tui_rail_width` from its saved value, not from the clamped on-screen
+   width, and the screen shows whatever fits. A wide setting survives a stay
+   in a narrow terminal (#21 review note).
+8. **`.local/agentbus.json` stays mode 0644.** It is machine-local,
+   git-ignored config with no secrets; the original ruling stands.

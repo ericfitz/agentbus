@@ -137,7 +137,7 @@ func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
 // message's own channel the recipient is dropped (it is the pane); a dm/ recipient names an agent, so it stays, as it does
 // in mixed panes (tags). It never wraps: past avail columns the chips are cut
 // first (dropped under four columns), then the whole line, indicator
-// included, is cut with an ellipsis.
+// included, is cut with an ellipsis, with no cursor escape past it.
 func (m Model) header(x bus.Message, viewed, rev string, stampStyle lipgloss.Style, avail int) string {
 	head := stampStyle.Render(stamp(x.CreatedAt)) + "  " + m.agentLabel(x.Sender)
 	if x.Channel != viewed || strings.HasPrefix(x.Channel, bus.DMPrefix) {
@@ -154,9 +154,32 @@ func (m Model) header(x bus.Message, viewed, rev string, stampStyle lipgloss.Sty
 		}
 	}
 	if lipgloss.Width(head) > avail {
-		head = ansi.Truncate(head, avail, "…")
+		head = dropCursorEscapesAfterCut(ansi.Truncate(head, avail, "…"), "…")
 	}
 	return head
+}
+
+// dropCursorEscapesAfterCut removes every escape but SGR from the tail of
+// cut, a line ansi.Truncate cut with tail: it keeps the escapes of the
+// glyphs it drops, and with the gear's glyph gone its CSI 2X/1C would erase
+// cells and move the cursor past the counted width. SGR stays so styles
+// still close.
+func dropCursorEscapesAfterCut(cut, tail string) string {
+	i := strings.LastIndex(cut, tail)
+	if i < 0 {
+		return cut
+	}
+	i += len(tail)
+	var b strings.Builder
+	b.WriteString(cut[:i])
+	for rest := cut[i:]; rest != ""; {
+		seq, _, n, _ := ansi.DecodeSequence(rest, ansi.NormalState, nil)
+		if strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+			b.WriteString(seq)
+		}
+		rest = rest[n:]
+	}
+	return b.String()
 }
 
 // rowLine is a collapsed row's one text line: the subject, else the

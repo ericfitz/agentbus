@@ -58,3 +58,30 @@ func TestSenderIconColoredInEveryIconMode(t *testing.T) {
 		}
 	}
 }
+
+// On the selected stream row, the colored sender icon ends with a reset;
+// Highlight must re-apply the selection background right after it (and
+// after every other inner reset), or the rest of the line loses it.
+func TestSelectedRowReappliesBackgroundAfterSenderIcon(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	f.agentSend(t, "dev", "hello from sam")
+	f.receive(t)
+	f.key("shift+tab") // compose -> stream directly: cursor lands on the last message
+	th := f.m.theme
+	pre, _, _ := strings.Cut(lipgloss.NewStyle().Background(th.Sel).Render("\x00"), "\x00")
+	if pre == "" {
+		t.Fatal("selection background renders no escape")
+	}
+	icon := th.Style(th.Agent).Render(iconAgent)
+	first := strings.SplitN(f.m.renderStream(), "\n", 2)[0]
+	if !strings.Contains(first, icon+pre) {
+		t.Fatalf("selection background not re-applied after the sender icon: %q", first)
+	}
+	body := strings.TrimSuffix(first, "\x1b[0m")
+	if n, m := strings.Count(body, "\x1b[0m"), strings.Count(body, "\x1b[0m"+pre); n != m {
+		t.Fatalf("%d of %d inner resets drop the selection background: %q", n-m, n, first)
+	}
+}

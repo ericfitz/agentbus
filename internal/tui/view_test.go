@@ -626,6 +626,39 @@ func TestHeaderNeverWrapsOnNarrowPane(t *testing.T) {
 	}
 }
 
+// When the cut lands before an icon, ansi.Truncate drops the glyph but
+// keeps its escapes; the gear's CSI 1C (cursor forward) past the ellipsis
+// would push the line a column wider than counted. lipgloss measures CSI
+// as zero width, so this inspects the bytes after the ellipsis: only SGR
+// may follow it.
+func TestHeaderCutDropsCursorEscapesPastEllipsis(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := newFixture(t)
+	msg := bus.Message{Channel: bus.DMPrefix + "Bob", Sender: "Sam", CreatedAt: time.Now().UnixMilli()}
+	for _, profile := range []termenv.Profile{termenv.Ascii, termenv.ANSI} {
+		lipgloss.SetColorProfile(profile)
+		full := lipgloss.Width(f.m.header(msg, tagPanePrefix+"a", "", lipgloss.NewStyle(), 200))
+		for avail := 1; avail < full; avail++ {
+			head := f.m.header(msg, tagPanePrefix+"a", "", lipgloss.NewStyle(), avail)
+			i := strings.LastIndex(head, "…")
+			if i < 0 {
+				t.Fatalf("profile %v avail %d: no ellipsis: %q", profile, avail, head)
+			}
+			for rest := head[i+len("…"):]; rest != ""; {
+				seq, _, n, _ := ansi.DecodeSequence(rest, ansi.NormalState, nil)
+				if !strings.HasPrefix(seq, "\x1b[") || !strings.HasSuffix(seq, "m") {
+					t.Fatalf("profile %v avail %d: %q after the ellipsis: %q", profile, avail, seq, head)
+				}
+				rest = rest[n:]
+			}
+			if profile == termenv.ANSI && !strings.HasSuffix(head, "\x1b[0m") {
+				t.Fatalf("avail %d: the cut line must still close its style: %q", avail, head)
+			}
+		}
+	}
+}
+
 func TestChipTextContrastsWithTagColor(t *testing.T) {
 	for bg, want := range map[string]string{"7": "0", "11": "0", "15": "0", "3": "0", "4": "15", "8": "15", "1": "15"} {
 		if got := chipText(lipgloss.Color(bg)); got != lipgloss.Color(want) {

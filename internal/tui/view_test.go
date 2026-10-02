@@ -780,7 +780,7 @@ func TestHeaderRevisionIndicatorOrderAndNarrowCut(t *testing.T) {
 		t.Fatalf("narrow header %q (width %d)", ansi.Strip(got), w)
 	}
 	// No indicator: unchanged from before.
-	if got := ansi.Strip(f.m.header(noTags, tagPanePrefix+"a", "", st, 200)); strings.Contains(got, "  r") && strings.HasSuffix(got, "  ") {
+	if got := ansi.Strip(f.m.header(noTags, tagPanePrefix+"a", "", st, 200)); got != strings.TrimRight(got, " ") {
 		t.Fatalf("no indicator, no trailing gap: %q", got)
 	}
 }

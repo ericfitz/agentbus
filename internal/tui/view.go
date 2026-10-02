@@ -133,8 +133,8 @@ func chipText(bg lipgloss.TerminalColor) lipgloss.Color {
 }
 
 // header is a message's first line: timestamp, sender → recipient, memory
-// revision indicator (rev, when set), tag chips. In the pane of the message's own channel the recipient is dropped
-// (it is the pane); a dm/ recipient names an agent, so it stays, as it does
+// revision indicator (rev, when set), tag chips. In the pane of the
+// message's own channel the recipient is dropped (it is the pane); a dm/ recipient names an agent, so it stays, as it does
 // in mixed panes (tags). It never wraps: past avail columns the chips are cut
 // first (dropped under four columns), then the whole line, indicator
 // included, is cut with an ellipsis.
@@ -598,12 +598,10 @@ func (m Model) renderCompose() string {
 			hint = th.Style(th.Dim).Render("  ⏎ new memory")
 		}
 		if owner, ok := strings.CutPrefix(ch.Name, bus.DMPrefix); ok {
-			mark, text = iconAgent, "@"+owner
-			if owner == m.c.as {
-				mark = iconUser
-			}
+			label = m.senderIcon(owner) + m.chanStyle(*ch).Render("@"+owner)
+		} else {
+			label = m.chanStyle(*ch).Render(mark + text)
 		}
-		label = m.chanStyle(*ch).Render(mark + text)
 	}
 	prompt := label + th.Style(th.Dim).Render(" › ")
 	if m.mode != modeInsert {

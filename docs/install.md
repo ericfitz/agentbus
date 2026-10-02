@@ -351,9 +351,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   message's body if it's closed and has one, else shows its direct replies;
   `←` hides shown replies (the whole subtree), else closes the body. On a
   memory, `.` shows the next older version and `,` the
-  next newer one, labeled `r<revision> · <n> kept`; the revision label sits
-  on the message's header line, after the sender and before any tag chips; any other key returns
-  it to the latest. `<` and `>` narrow and widen the
+  next newer one, labeled `r<revision> · <n> kept`; any other key returns
+  it to the latest. A memory past its first revision shows `r<revision>` the
+  same way. The label sits on the message's header line, after the sender
+  (and the `→` recipient, when shown) and before any tag chips. `<` and `>` narrow and widen the
   channel rail two columns at a time; the width is saved as `tui_rail_width`
   in the config file (0 or absent is a fifth of the screen), stepping from the
   saved width; the width drawn is clamped to the terminal, keeping the rail at least 16 columns and the messages
@@ -495,7 +496,8 @@ does.
 
 The `agent` and `user` icons are drawn in the sender's color (the `user` theme
 color for your own name, `agent` for everyone else) wherever they appear: message
-headers, the sessions rail, and in-progress task owners. This applies to every
+headers, the sessions rail, in-progress task owners, and a DM's compose
+prompt. The focused rail row drops all color, as it does for every row. This applies to every
 set, including glyphs set with `icon_map`; color emoji ignore the text color.
 
 The health overlay (`h`) names the active set on an `icons ·` line.

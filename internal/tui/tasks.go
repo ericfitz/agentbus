@@ -539,7 +539,7 @@ func (m *Model) renderTasks(ch string) string {
 		}
 		rows := strings.Split(line, "\n")
 		for j, r := range rows {
-			rows[j] = cut(r, w, "")
+			rows[j] = cut(r, w, "…")
 		}
 		line = strings.Join(rows, "\n")
 		if selected {

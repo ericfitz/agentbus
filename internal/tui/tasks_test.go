@@ -651,3 +651,27 @@ func TestTaskRowCutDropsOrphanedCursorEscape(t *testing.T) {
 		}
 	}
 }
+
+// A task row too long for the pane ends in an ellipsis, like a message row,
+// so a cut subject reads as cut.
+func TestTaskRowCutEndsInEllipsis(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "long " + strings.Repeat("s", 200)}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	for _, line := range strings.Split(f.m.renderStream(), "\n") {
+		if s := strings.TrimRight(ansi.Strip(line), " "); strings.Contains(s, "long ") {
+			if !strings.HasSuffix(s, "…") || lipgloss.Width(line) > max(f.m.stream.Width, 20) {
+				t.Fatalf("cut task row must end in … within the pane: %q", s)
+			}
+			return
+		}
+	}
+	t.Fatal("no row for the long task")
+}

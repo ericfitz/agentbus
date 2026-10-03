@@ -154,30 +154,42 @@ func (m Model) header(x bus.Message, viewed, rev string, stampStyle lipgloss.Sty
 		}
 	}
 	if lipgloss.Width(head) > avail {
-		head = dropCursorEscapesAfterCut(ansi.Truncate(head, avail, "…"), "…")
+		head = cut(head, avail, "…")
 	}
 	return head
 }
 
-// dropCursorEscapesAfterCut removes every escape but SGR from the tail of
-// cut, a line ansi.Truncate cut with tail: it keeps the escapes of the
-// glyphs it drops, and with the gear's glyph gone its CSI 2X/1C would erase
-// cells and move the cursor past the counted width. SGR stays so styles
+// cut is ansi.Truncate(s, w, tail) for one line, except that past the cut
+// only SGR escapes are kept. ansi.Truncate keeps the escapes of every glyph
+// it drops, and with the gear's glyph gone its CSI 1C would move the cursor
+// a column past w, which lipgloss counts as zero width. SGR stays so styles
 // still close.
-func dropCursorEscapesAfterCut(cut, tail string) string {
-	i := strings.LastIndex(cut, tail)
-	if i < 0 {
-		return cut
+func cut(s string, w int, tail string) string {
+	if ansi.StringWidth(s) <= w {
+		return s
 	}
-	i += len(tail)
+	room := w - ansi.StringWidth(tail)
 	var b strings.Builder
-	b.WriteString(cut[:i])
-	for rest := cut[i:]; rest != ""; {
-		seq, _, n, _ := ansi.DecodeSequence(rest, ansi.NormalState, nil)
-		if strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+	done := false
+	state := byte(ansi.NormalState)
+	for rest := s; rest != ""; {
+		seq, width, n, next := ansi.DecodeSequence(rest, state, nil)
+		state, rest = next, rest[n:]
+		switch {
+		case strings.HasPrefix(seq, "\x1b"):
+			if !done || strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+				b.WriteString(seq)
+			}
+		case done:
+		case width <= room:
 			b.WriteString(seq)
+			room -= width
+		default:
+			done = true
+			if room >= 0 {
+				b.WriteString(tail)
+			}
 		}
-		rest = rest[n:]
 	}
 	return b.String()
 }

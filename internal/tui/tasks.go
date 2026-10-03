@@ -537,7 +537,11 @@ func (m *Model) renderTasks(ch string) string {
 			}
 			line += "\n" + strings.Repeat(" ", pw) + rowDim.Render(summary)
 		}
-		line = lipgloss.NewStyle().MaxWidth(w).Render(line)
+		rows := strings.Split(line, "\n")
+		for j, r := range rows {
+			rows[j] = cut(r, w, "")
+		}
+		line = strings.Join(rows, "\n")
 		if selected {
 			line = th.Highlight(th.Sel, line, w)
 		}

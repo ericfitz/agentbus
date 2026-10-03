@@ -622,3 +622,32 @@ func TestTaskInProgressOwnedBySelfUsesUserIcon(t *testing.T) {
 		t.Fatalf("self-owned in-progress row must not use the agent color: %q", raw)
 	}
 }
+
+// A long subject pushes an in-progress row's owner icon to the cut. The cut
+// must not keep the gear's CSI 1C (cursor forward) once its glyph is gone:
+// lipgloss counts the escape as zero width, so the row would draw a column
+// wider than the pane. Only the bytes show it: every 1C must follow a gear.
+func TestTaskRowCutDropsOrphanedCursorEscape(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	w := max(f.m.stream.Width, 20)
+	for n := w - 16; n <= w; n++ {
+		task, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: strings.Repeat("s", n)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.ab.TaskClaim(f.sam, task.ID, time.Now().Add(time.Hour).UnixMilli(), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.run(f.m.statusCmd())
+	f.selectTaskChannel(t, "tasks/work")
+	for _, line := range strings.Split(f.m.renderStream(), "\n") {
+		if strings.Count(line, "\x1b[1C") != strings.Count(line, "⚙️\x1b[1C") {
+			t.Fatalf("cursor-forward escape without its gear: %q", line)
+		}
+	}
+}

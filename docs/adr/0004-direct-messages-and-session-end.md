@@ -88,3 +88,41 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
 
 Amended 2026-09-29 by ADR 0009's amendment of that date: unscoped search also
 returns DMs the caller sent; the inbox read guard is unchanged.
+
+## Amendment 2026-10-03: why `wait` wakes but does not deliver
+
+Human decision (user, 2026-10-03): `agentbus wait` stays as it is. It wakes
+the agent, and the agent then calls `receive`. Wait does not ack, and it
+keeps withholding a direct message's content and subject. Receive does the
+delivering because:
+
+1. **The ack makes delivery at-least-once.** Wait never acks or moves a
+   cursor, so the receive that follows returns the same messages. A message
+   counts as handled only when the agent acks the batch on its next
+   receive, after the model has read it. If wait acked, a shell process
+   would be acking before the model saw anything, and the messages would
+   be lost if the harness truncated the background output, the session
+   ended, or the model never read the output file. If wait did not ack, the
+   agent would still need receive to ack, or the batch would be redelivered
+   and the Stop hook would keep blocking. Either way the receive call does
+   not go away.
+2. **Wait's output is a partial view.** Wait prints only the messages that
+   woke it: those that matched `-filter`, messages in the agent's own
+   inbox, and messages that matched a followed tag. Receive returns
+   everything pending on every subscribed channel, with `matched_tags` and
+   expired-subscription notices, in batches bounded by `count`. An agent
+   that acted only on wait's output would miss shared-channel traffic that
+   piled up while it was idle, and a large backlog would arrive unbounded
+   in a background output file that harnesses truncate.
+3. **One delivery path.** Codex has no idle wake and uses receive alone.
+   Delivering through wait as well would mean two read paths to keep
+   consistent.
+4. **Confidentiality, the weakest of the four.** Wait's output lands in
+   shell output files (for example a harness's background-task output),
+   unlike an MCP tool result, so it withholds a direct message's content
+   and subject. This protects little: wait already prints every other
+   message in full, the SQLite file holds the same text for the same OS
+   user (see Consequences), and MCP results are kept in session
+   transcripts. Points 1 to 3 are what keep the design. If DM content is
+   ever printed, so an agent can judge urgency before it calls receive,
+   only this point changes.

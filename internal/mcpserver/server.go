@@ -546,7 +546,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// working-directory name.
 	if h, err := procs.FindHarness(procs.System, os.Getpid()); err == nil {
 		b.SetHarness(h)
-		log.Info("harness found", "pid", h.Pid, "start", h.Start)
+		log.Info("harness found", "harness_pid", h.Pid, "harness_start", h.Start)
 	} else {
 		log.Warn("harness not found; hooks and waits fall back to the working-directory name", "err", err)
 	}

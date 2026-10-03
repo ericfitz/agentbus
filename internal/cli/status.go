@@ -33,6 +33,11 @@ func Status(cfg config.Config, out io.Writer) error {
 	if _, err := fmt.Fprintf(out, "embedding backlog: %d (rejected %d)\n", st.EmbeddingBacklog, st.EmbeddingRejected); err != nil {
 		return err
 	}
+	if st.EmbeddingRejectedLast != "" {
+		if _, err := fmt.Fprintf(out, "embedding latest rejection: %s\n", st.EmbeddingRejectedLast); err != nil {
+			return err
+		}
+	}
 	if st.EmbeddingError != "" {
 		if _, err := fmt.Fprintf(out, "embedding error at %s: %s\n", time.UnixMilli(st.EmbeddingErrorAt).Format(time.RFC3339), st.EmbeddingError); err != nil {
 			return err

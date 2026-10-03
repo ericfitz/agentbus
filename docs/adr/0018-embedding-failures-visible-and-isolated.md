@@ -53,3 +53,16 @@ current build.
   one process has the key and another does not, the notice reflects the
   latest attempt.
 - An idle tick still takes no write lock: clearing the notice reads first.
+- Review refinements (2026-10-02):
+  - A rejection counts as the row's fault only once the endpoint has shown
+    it accepts input under the model: another row embeds in the same retry,
+    or some row already has. An endpoint that rejects everything (a wrong
+    path answering 422, an unknown model answering 400) fails the pass with
+    a configuration hint and marks nothing.
+  - A non-row failure (429, timeout) partway through the row retry commits
+    what the retry already did, so the next pass moves on.
+  - A 422 body is left out of the error text: validation errors often echo
+    the input, and this text reaches status output.
+  - The notice names the process (`agentbus pid N`), so the failing one is
+    identifiable when several run.
+  - Status and the health view show the latest rejection's reason.

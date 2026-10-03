@@ -410,7 +410,9 @@ func (b *Bus) embedSoon() {
 	}
 	go func() {
 		defer b.embedMu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), embedRequestTimeout)
+		// Each request has its own embedRequestTimeout; the pass as a whole
+		// may make one per row when a batch is rejected (ADR 0018).
+		ctx, cancel := context.WithTimeout(context.Background(), (embedBatchSize+1)*embedRequestTimeout)
 		defer cancel()
 		if _, err := b.embedBatch(ctx); err != nil {
 			b.log.Warn("background embedding failed", "err", err)

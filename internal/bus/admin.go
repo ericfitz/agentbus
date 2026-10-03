@@ -17,6 +17,9 @@ type Status struct {
 	// EmbeddingRejected counts memories the endpoint rejected on their own
 	// under the current model; they are not in the backlog (ADR 0018).
 	EmbeddingRejected int64 `json:"embedding_rejected"`
+	// EmbeddingRejectedLast is the endpoint's reason for the most recent
+	// rejection, so a run of them can be told apart from bad memories.
+	EmbeddingRejectedLast string `json:"embedding_rejected_last,omitempty"`
 	// EmbeddingError is the last embedding pass's error, from whichever
 	// process ran it, and EmbeddingErrorAt when (unix ms); empty once a pass
 	// succeeds (ADR 0018).
@@ -115,7 +118,11 @@ func (b *Bus) StatusReport() (Status, error) {
 		if err := b.db.QueryRow("SELECT count(*) FROM embed_failures f JOIN messages m ON m.seq=f.seq WHERE f.model=? AND m.tombstone=0", b.embedder.model).Scan(&st.EmbeddingRejected); err != nil {
 			return st, internal(err)
 		}
-		err := b.db.QueryRow("SELECT message, set_at FROM notices WHERE kind='embedding'").Scan(&st.EmbeddingError, &st.EmbeddingErrorAt)
+		err := b.db.QueryRow("SELECT f.error FROM embed_failures f JOIN messages m ON m.seq=f.seq WHERE f.model=? AND m.tombstone=0 ORDER BY f.failed_at DESC, f.seq DESC LIMIT 1", b.embedder.model).Scan(&st.EmbeddingRejectedLast)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return st, internal(err)
+		}
+		err = b.db.QueryRow("SELECT message, set_at FROM notices WHERE kind='embedding'").Scan(&st.EmbeddingError, &st.EmbeddingErrorAt)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return st, internal(err)
 		}

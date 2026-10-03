@@ -85,8 +85,14 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 		}
 	}()
 	if resp.StatusCode/100 != 2 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return nil, &embedHTTPError{status: resp.Status, code: resp.StatusCode, body: strings.Join(strings.Fields(string(snippet)), " "), noKey: e.key == ""}
+		he := &embedHTTPError{status: resp.Status, code: resp.StatusCode, noKey: e.key == ""}
+		// A 422 body (validation detail) often echoes the input back, and
+		// this text reaches status output, so it is left out.
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			he.body = strings.Join(strings.Fields(string(snippet)), " ")
+		}
+		return nil, he
 	}
 	var out struct {
 		Data []struct {
@@ -244,7 +250,10 @@ func (b *Bus) noteEmbed(ctx context.Context, err error) {
 			_, dbErr = b.db.Exec("DELETE FROM notices WHERE kind='embedding'")
 		}
 	} else {
-		_, dbErr = b.db.Exec("INSERT OR REPLACE INTO notices(kind,message,set_at) VALUES('embedding',?,?)", err.Error(), b.nowMs())
+		// Name the process: with several agentbus processes, the one that
+		// failed (for example, one started without the key) is the one to fix.
+		msg := fmt.Sprintf("agentbus pid %d: %v", os.Getpid(), err)
+		_, dbErr = b.db.Exec("INSERT OR REPLACE INTO notices(kind,message,set_at) VALUES('embedding',?,?)", msg, b.nowMs())
 	}
 	if dbErr != nil {
 		b.log.Warn("record embedding status failed", "err", dbErr)
@@ -304,7 +313,18 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	}
 	vecs, err := b.embedTimed(ctx, texts)
 	rejected := map[int]string{}
+	var stopErr error // a non-row failure partway through the row retry
 	if rowRejected(err) {
+		// Retry one row at a time. A rejection only counts as the row's
+		// fault once the endpoint has proven it accepts input under this
+		// model: another row embeds in this retry, or one already has. An
+		// endpoint that rejects everything (wrong path, unknown model) is
+		// a configuration error, so nothing is marked and the pass fails.
+		var proven bool
+		if qerr := b.db.QueryRow("SELECT EXISTS(SELECT 1 FROM embeddings WHERE model=?)", b.embedder.model).Scan(&proven); qerr != nil {
+			return 0, internal(qerr)
+		}
+		firstReject := err
 		vecs = make([][]float32, len(texts))
 		for i, text := range texts {
 			v, err := b.embedTimed(ctx, []string{text})
@@ -312,10 +332,20 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 			case rowRejected(err):
 				rejected[i] = err.Error()
 			case err != nil:
-				return 0, err
+				// Keep what this retry already did (below), so the next
+				// pass starts after it rather than repeating it.
+				stopErr = err
+				seqs, texts = seqs[:i], texts[:i]
 			default:
 				vecs[i] = v[0]
+				proven = true
 			}
+			if stopErr != nil {
+				break
+			}
+		}
+		if !proven {
+			return 0, fmt.Errorf("the endpoint rejected every input, so this is likely its configuration (embedding_endpoint, embedding_model), not the memories: %w", firstReject)
 		}
 	} else if err != nil {
 		return 0, err
@@ -349,7 +379,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	if err := tx.Commit(); err != nil {
 		return 0, internal(err)
 	}
-	return int(done), nil
+	return int(done), stopErr
 }
 
 // embedTimed is one embeddings request bounded by embedRequestTimeout.

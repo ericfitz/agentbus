@@ -123,12 +123,19 @@ func (m Model) healthLines() []string {
 		p("%s %s · %s · %s\n", dim.Render("embeddings"), state, cfg.EmbeddingModel, cfg.EmbeddingEndpoint)
 		// The last embedding pass's error, from whichever process ran it
 		// (ADR 0018), wrapped so a long endpoint message stays readable.
-		if st.EmbeddingError != "" {
-			at := time.UnixMilli(st.EmbeddingErrorAt).Format("15:04:05")
-			p("  %s\n", warn.Render("last failure "+at))
-			for _, l := range strings.Split(ansi.Wordwrap(st.EmbeddingError, max(m.width-12, 30), " "), "\n") {
+		// ansi.Wrap, not Wordwrap: an error body without spaces (JSON, a
+		// URL) is one long word and must still be broken.
+		wrap := func(head, text string) {
+			p("  %s\n", warn.Render(head))
+			for _, l := range strings.Split(ansi.Wrap(text, max(m.width-12, 30), " "), "\n") {
 				p("    %s\n", warn.Render(l))
 			}
+		}
+		if st.EmbeddingError != "" {
+			wrap("last failure "+time.UnixMilli(st.EmbeddingErrorAt).Format("15:04:05"), st.EmbeddingError)
+		}
+		if st.EmbeddingRejectedLast != "" {
+			wrap(fmt.Sprintf("%d rejected; latest reason", st.EmbeddingRejected), st.EmbeddingRejectedLast)
 		}
 	}
 	lastQ := "none yet"

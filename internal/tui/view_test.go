@@ -388,7 +388,7 @@ func TestChannelNameColoredInRailAndHeader(t *testing.T) {
 	if rail := f.m.renderRails(); !strings.Contains(rail, open+iconChat+ch.Name) {
 		t.Fatalf("rail channel name uncolored: %q", rail)
 	}
-	if h := f.m.renderHeader(); !strings.Contains(h, open+ch.Name) {
+	if h := f.m.renderHeader(); !strings.Contains(h, open+iconChat+ch.Name) {
 		t.Fatalf("header channel name uncolored: %q", h)
 	}
 }

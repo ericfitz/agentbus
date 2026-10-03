@@ -333,16 +333,17 @@ func (m Model) renderHeader() string {
 		s = m.tagChips(tagPaneSet(ch.Name)) + fmt.Sprintf(" · %d messages", len(m.rows(ch.Name)))
 	case strings.HasPrefix(ch.Name, bus.DMPrefix):
 		owner, _ := strings.CutPrefix(ch.Name, bus.DMPrefix)
-		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
+		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.senderIcon(owner)+m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
 	default:
-		s = fmt.Sprintf("%s · %d unread · %d messages", m.chanStyle(*ch).Render(ch.Name), m.unread(ch.Name), ch.Messages)
+		s = fmt.Sprintf("%s · %d unread · %d messages", m.channelLabel(ch.Name), m.unread(ch.Name), ch.Messages)
 	}
 	if m.status.Notice != "" {
 		s += "   " + m.theme.Style(m.theme.Warn).Render("! capacity: "+m.status.Notice)
 	}
-	// MaxWidth truncates a long notice instead of Width's word-wrap, which
-	// would add a row and push the status bar off the bottom of the screen.
-	return lipgloss.NewStyle().MaxWidth(m.stream.Width).Render(s)
+	// Cut a long notice instead of Width's word-wrap, which would add a row
+	// and push the status bar off the bottom of the screen; cut, not
+	// MaxWidth, so a DM title's gear never leaves its cursor escape behind.
+	return cut(s, m.stream.Width, "")
 }
 
 // renderRails draws the left column: the channel list with the session list

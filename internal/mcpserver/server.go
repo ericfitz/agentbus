@@ -546,6 +546,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// working-directory name.
 	if h, err := procs.FindHarness(procs.System, os.Getpid()); err == nil {
 		b.SetHarness(h)
+		log.Info("harness found", "pid", h.Pid, "start", h.Start)
+	} else {
+		log.Warn("harness not found; hooks and waits fall back to the working-directory name", "err", err)
 	}
 	// SIGTERM/SIGINT/SIGHUP cancel ctx so the server returns and the session
 	// cleanup below runs; a harness that only closes stdin gets there too.

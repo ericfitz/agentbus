@@ -116,9 +116,31 @@ func TestWaitIdentityUsesSessionFromItsHarness(t *testing.T) {
 	if got := WaitIdentity(cfg, cwd, io.Discard); got != second {
 		t.Fatalf("WaitIdentity = %q, want %q", got, second)
 	}
-	setHarness(t, procs.Ref{Pid: 300, Start: 3}, nil)
+	setHarness(t, procs.Ref{}, procs.ErrGone)
 	if got := WaitIdentity(cfg, cwd, io.Discard); got != first {
-		t.Fatalf("no match: WaitIdentity = %q, want %q", got, first)
+		t.Fatalf("no harness: WaitIdentity = %q, want %q", got, first)
+	}
+}
+
+// A session that has not registered yet must not borrow the cwd name while
+// a live session registered from another harness holds it: its Stop hook
+// does not block for that session's messages, and its wait has no identity.
+func TestUnregisteredSessionDoesNotBorrowAnotherHarnessName(t *testing.T) {
+	cfg, cwd, first, _, b := twoSessions(t)
+	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(first), Content: "for first"}); err != nil {
+		t.Fatal(err)
+	}
+	setHarness(t, procs.Ref{Pid: 300, Start: 3}, nil)
+	if got := SessionIdentity(b, cwd, io.Discard); got != "" {
+		t.Fatalf("SessionIdentity = %q, want none", got)
+	}
+	if got := WaitIdentity(cfg, cwd, io.Discard); got != "" {
+		t.Fatalf("WaitIdentity = %q, want none", got)
+	}
+	var out bytes.Buffer
+	StopHook(cfg, strings.NewReader(`{"cwd":`+strconvQuote(cwd)+`}`), &out, io.Discard)
+	if out.Len() != 0 {
+		t.Fatalf("unregistered session must not block for %s's messages: %q", first, out.String())
 	}
 }
 

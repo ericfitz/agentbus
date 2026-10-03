@@ -2,6 +2,7 @@ package bus
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus/internal/procs"
 )
@@ -51,9 +52,34 @@ func TestIdentityForHarness(t *testing.T) {
 	}
 }
 
+// Re-registering a name refreshes its registered_at, so after A, B, A from
+// one harness (a /clear, then the old name again) the lookup names A.
+func TestIdentityForHarnessFollowsReRegister(t *testing.T) {
+	b := newTestBus(t)
+	b.SetHarness(procs.Ref{Pid: 100, Start: 1})
+	now := time.Now()
+	for i, name := range []string{"A", "B", "A"} {
+		b.Now = func() time.Time { return now.Add(time.Duration(i) * time.Second) }
+		if _, err := b.Register(name, "", "repo", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := b.IdentityForHarness(procs.Ref{Pid: 100, Start: 1}); err != nil || got != "A" {
+		t.Fatalf("got %q %v, want A", got, err)
+	}
+	h, live, err := b.SessionHarness("B")
+	if err != nil || !live || h != (procs.Ref{Pid: 100, Start: 1}) {
+		t.Fatalf("SessionHarness(B) = %+v %v %v", h, live, err)
+	}
+	if _, live, err := b.SessionHarness("nobody"); err != nil || live {
+		t.Fatalf("SessionHarness(nobody) live=%v %v", live, err)
+	}
+}
+
 // Of several live top-level sessions registered from one harness, the most
-// recently registered wins; an unknown start time (0) matches on the pid.
-func TestIdentityForHarnessPicksNewestAndToleratesUnknownStart(t *testing.T) {
+// recently registered wins; where start times are unknown (0 on both
+// sides) the pid alone decides.
+func TestIdentityForHarnessPicksNewestAndUnknownStartMatchesUnknown(t *testing.T) {
 	b := newTestBus(t)
 	b.SetHarness(procs.Ref{Pid: 100})
 	if _, err := b.Register("first", "", "repo", true); err != nil {

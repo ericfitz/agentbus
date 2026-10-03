@@ -161,6 +161,21 @@ func (b *Bus) IdentityForHarness(h procs.Ref) (string, error) {
 	return name, nil
 }
 
+// SessionHarness is the harness process recorded on name's live session
+// (zero for one registered before ADR 0017 or where the platform cannot
+// tell); live is false when name has no live session.
+func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
+	err = b.db.QueryRow("SELECT harness_pid, harness_start FROM sessions WHERE sender=? AND heartbeat >= ?",
+		name, b.nowMs()-attachmentExpiryMs).Scan(&h.Pid, &h.Start)
+	if errors.Is(err, sql.ErrNoRows) {
+		return procs.Ref{}, false, nil
+	}
+	if err != nil {
+		return procs.Ref{}, false, internal(err)
+	}
+	return h, true, nil
+}
+
 // Register is RegisterWithClient for a caller with no MCP clientInfo.
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
 	return b.RegisterWithClient(name, parent, context, resume, "", "")
@@ -218,8 +233,11 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		display = fmt.Sprintf("%s%s%d", base, sep, n)
 	}
 	if reused {
-		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=?, harness=?, harness_version=?, harness_pid=?, harness_start=? WHERE sender=?",
-			context, now, harness, harnessVersion, b.harness.Pid, b.harness.Start, display); err != nil {
+		// registered_at moves too: IdentityForHarness takes the most recent
+		// register from a harness, and re-registering an older name (after
+		// a /clear) makes it the current one again (ADR 0017).
+		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=?, registered_at=?, harness=?, harness_version=?, harness_pid=?, harness_start=? WHERE sender=?",
+			context, now, now, harness, harnessVersion, b.harness.Pid, b.harness.Start, display); err != nil {
 			return Registration{}, internal(err)
 		}
 	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version,harness_pid,harness_start) VALUES(?,?,?,?,?,?,?,?,?)",

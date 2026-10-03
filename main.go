@@ -124,7 +124,10 @@ func run(cmd string, args []string) int {
 				fmt.Fprintln(os.Stderr, "agentbus:", err)
 				return 2
 			}
-			o.As = cli.WaitIdentity(cfg, cwd, os.Stderr)
+			if o.As = cli.WaitIdentity(cfg, cwd, os.Stderr); o.As == "" {
+				fmt.Fprintln(os.Stderr, "agentbus: this session has not registered, and another session holds this repository's name; register first or pass -as")
+				return 2
+			}
 		}
 		// Installed before Wait acquires the per-identity lock, so the
 		// SIGTERM a replacing wait sends is always handled, never fatal.

@@ -48,7 +48,23 @@ Rejected:
 - Claude subagents share their parent's MCP process and so its harness. The
   lookup takes only top-level sessions (no `/` in the name); with several, the
   most recently registered wins.
-- A start time of 0 (unknown) matches on the pid alone, as `procs.Alive`
-  already treats it.
+- Start times must match exactly. Where the platform cannot tell them, both
+  sides are 0 and the pid alone decides.
+- Re-registering a name from the same process refreshes its
+  `registered_at`, so after a `/clear` the name registered last is the one
+  the lookup returns.
+- A session that has not registered yet does not borrow the
+  working-directory name while a live session from another known harness
+  holds it: its Stop hook does not block, and `agentbus wait` without `-as`
+  exits 2 asking it to register first or pass `-as`. (Review refinement,
+  2026-10-02; the fallback to the working-directory name still applies when
+  that name is free, held by a pre-ADR-0017 session, or the harness cannot
+  be found.)
+- The MCP server logs the harness it found, or a warning when it found
+  none, so a harness whose processes don't share the expected ancestor can
+  be diagnosed from the log.
+- The SessionStart bootstrap still says `agentbus wait -filter @<name>`
+  without `-as`: with this lookup, wait finds the right identity on its own.
+  The Stop hook's reason names `-as` anyway, since it already knows it.
 - Only macOS and Linux can read the process table (`procs`); elsewhere the
   lookup finds nothing and the working-directory name is used.

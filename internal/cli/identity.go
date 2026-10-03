@@ -38,18 +38,28 @@ var findHarness = func() (procs.Ref, error) { return procs.FindHarness(procs.Sys
 // (ADR 0017): the live top-level session registered from the same harness
 // process, else IdentityName(cwd). IdentityName is only the name a session
 // asks for; a second session in the same repository gets a suffixed one.
+// It returns "" when this harness has registered no session and the cwd
+// name is live under another known harness: that name is provably another
+// session's, so a session that has not registered yet does not borrow it.
 func SessionIdentity(b *bus.Bus, cwd string, warn io.Writer) string {
-	if h, err := findHarness(); err == nil {
+	h, herr := findHarness()
+	if herr == nil {
 		if name, err := b.IdentityForHarness(h); err == nil && name != "" {
 			return name
 		}
 	}
-	return IdentityName(cwd, warn)
+	name := IdentityName(cwd, warn)
+	if herr == nil {
+		if other, live, err := b.SessionHarness(name); err == nil && live && other.Pid > 0 && other != h {
+			return ""
+		}
+	}
+	return name
 }
 
 // WaitIdentity is SessionIdentity for a caller with no bus open: `agentbus
-// wait` without -as. If the bus cannot be opened it falls back to
-// IdentityName(cwd); the wait itself then reports the open error.
+// wait` without -as, "" included. If the bus cannot be opened it falls back
+// to IdentityName(cwd); the wait itself then reports the open error.
 func WaitIdentity(cfg config.Config, cwd string, warn io.Writer) string {
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

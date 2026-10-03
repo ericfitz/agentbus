@@ -47,6 +47,9 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	}
 	defer func() { _ = b.Close() }()
 	as := SessionIdentity(b, hi.Cwd, io.Discard)
+	if as == "" {
+		return // this session has not registered, and the cwd name is another's
+	}
 	// A nanosecond timeout makes Wait check once and return.
 	msgs, err := b.Wait(context.Background(), as, nil, false, nil, time.Nanosecond)
 	if err != nil || len(msgs) == 0 {

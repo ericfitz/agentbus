@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/procs"
 	_ "modernc.org/sqlite"
 )
 
@@ -32,6 +33,9 @@ type Bus struct {
 	cfg   config.Config
 	log   *slog.Logger
 	owner string
+	// harness is the harness process SetHarness recorded, stamped on every
+	// session this process registers (ADR 0017); zero when unknown.
+	harness procs.Ref
 	// observer is the identity SetObserver granted DM-inbox read/subscribe
 	// access to everywhere, set once before use so no lock guards it.
 	observer string

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/procs"
 )
 
 // schemaV1 is the messages DDL as shipped through v1.3.0, with the bytes
@@ -623,5 +624,68 @@ func TestMigrateV7AddsSessionHarness(t *testing.T) {
 	}
 	if err := b.db.QueryRow("SELECT harness, harness_version FROM sessions WHERE sender='New'").Scan(&h, &hv); err != nil || h != "claude-code" || hv != "2.1.0" {
 		t.Fatalf("new row harness = %q %q, %v", h, hv, err)
+	}
+}
+
+// schemaV8Sessions is the sessions table as schema v8 created it, before
+// ADR 0017 added the harness process columns.
+const schemaV8Sessions = `
+CREATE TABLE sessions (
+  sender TEXT PRIMARY KEY,
+  context TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  heartbeat INTEGER NOT NULL,
+  registered_at INTEGER NOT NULL,
+  harness TEXT NOT NULL DEFAULT '',
+  harness_version TEXT NOT NULL DEFAULT ''
+);`
+
+// TestMigrateV8AddsSessionHarnessProcess (ADR 0017): a v8 file's sessions
+// table gains harness_pid and harness_start, existing rows read as 0
+// (unknown), and a later register records the harness process.
+func TestMigrateV8AddsSessionHarnessProcess(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	for _, s := range []string{schema, "DROP INDEX sessions_heartbeat", "DROP TABLE sessions", schemaV8Sessions, "PRAGMA user_version = 8",
+		"INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES('Old','repo','x'," + now + "," + now + ")",
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v8 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var pid, start int64
+	if err := b.db.QueryRow("SELECT harness_pid, harness_start FROM sessions WHERE sender='Old'").Scan(&pid, &start); err != nil || pid != 0 || start != 0 {
+		t.Fatalf("existing row harness process = %d %d, %v; want 0 0", pid, start, err)
+	}
+	b.SetHarness(procs.Ref{Pid: 42, Start: 7})
+	if _, err := b.Register("New", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.db.QueryRow("SELECT harness_pid, harness_start FROM sessions WHERE sender='New'").Scan(&pid, &start); err != nil || pid != 42 || start != 7 {
+		t.Fatalf("new row harness process = %d %d, %v", pid, start, err)
 	}
 }

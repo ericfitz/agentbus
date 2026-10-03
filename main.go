@@ -103,7 +103,7 @@ func run(cmd string, args []string) int {
 		fs := flag.NewFlagSet("agentbus wait", flag.ContinueOnError)
 		var o cli.WaitOptions
 		path := fs.String("config", "", "configuration file")
-		fs.StringVar(&o.As, "as", "", "identity to wait for (default: what `agentbus identity` reports)")
+		fs.StringVar(&o.As, "as", "", "identity to wait for (default: the session registered from the same harness, else what `agentbus identity` reports)")
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
@@ -124,7 +124,7 @@ func run(cmd string, args []string) int {
 				fmt.Fprintln(os.Stderr, "agentbus:", err)
 				return 2
 			}
-			o.As = cli.IdentityName(cwd, os.Stderr)
+			o.As = cli.WaitIdentity(cfg, cwd, os.Stderr)
 		}
 		// Installed before Wait acquires the per-identity lock, so the
 		// SIGTERM a replacing wait sends is always handled, never fatal.

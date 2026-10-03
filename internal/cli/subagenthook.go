@@ -44,8 +44,8 @@ func subagentName(agentType string) string {
 // SubagentHook is the SubagentStart hook `agentbus init --global` installs
 // in Claude Code (ADR 0016). Claude subagents share the parent's MCP
 // process, so without a register of their own they act as the parent. The
-// hook cannot see the dispatch prompt, so when the identity of its working
-// directory is registered it prints additionalContext telling the subagent
+// hook cannot see the dispatch prompt, so when its session (SessionIdentity,
+// ADR 0017) is registered it prints additionalContext telling the subagent
 // to register (with that parent and a distinct name) only if its own prompt
 // asks it to use agentbus. It fails open: any error or an unregistered
 // parent prints nothing.
@@ -57,13 +57,13 @@ func SubagentHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	if hi.Cwd == "" {
 		hi.Cwd, _ = os.Getwd()
 	}
-	parent := IdentityName(hi.Cwd, io.Discard)
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		_, _ = fmt.Fprintln(warn, "agentbus subagent-hook:", err)
 		return
 	}
 	defer func() { _ = b.Close() }()
+	parent := SessionIdentity(b, hi.Cwd, io.Discard)
 	if live, err := b.SessionLive(parent); err != nil || !live {
 		return
 	}

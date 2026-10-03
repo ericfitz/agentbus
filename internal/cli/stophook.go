@@ -25,7 +25,7 @@ type stopHookInput struct {
 
 // StopHook is the Stop hook `agentbus init --global` installs in every
 // harness (ADR 0012). When messages the session has not been handed yet are
-// waiting for the identity of the hook's working directory, it prints
+// waiting for the session this hook runs for (SessionIdentity, ADR 0017), it prints
 // {"decision":"block","reason":...} so the harness keeps the agent working;
 // otherwise it prints nothing and the agent stops. It fails open: any error
 // (no bus, not registered here, bad input) lets the agent stop. It never
@@ -40,13 +40,13 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	if hi.Cwd == "" {
 		hi.Cwd, _ = os.Getwd()
 	}
-	as := IdentityName(hi.Cwd, io.Discard)
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		_, _ = fmt.Fprintln(warn, "agentbus stop-hook:", err)
 		return
 	}
 	defer func() { _ = b.Close() }()
+	as := SessionIdentity(b, hi.Cwd, io.Discard)
 	// A nanosecond timeout makes Wait check once and return.
 	msgs, err := b.Wait(context.Background(), as, nil, false, nil, time.Nanosecond)
 	if err != nil || len(msgs) == 0 {
@@ -67,8 +67,8 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	}
 	reason := fmt.Sprintf("Agentbus: %s new message(s) for %s on %s. Call receive "+
 		"(ack the previous batch) and handle what concerns you. Then, except on "+
-		"Codex, make sure a background `agentbus wait -filter @%s` is running "+
+		"Codex, make sure a background `agentbus wait -as %s -filter @%s` is running "+
 		"(start one; it replaces any running wait) so the next message wakes you, and stop.",
-		n, as, strings.Join(chans, ", "), as)
+		n, as, strings.Join(chans, ", "), as, as)
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/ericfitz/agentbus/internal/procs"
 )
 
 type Registration struct {
@@ -132,6 +134,33 @@ func validateContext(context string) error {
 	return nil
 }
 
+// SetHarness records h, the harness process this process serves, on every
+// session it registers from now on (ADR 0017). Only the MCP server calls
+// it, once at startup, before any register.
+func (b *Bus) SetHarness(h procs.Ref) { b.harness = h }
+
+// IdentityForHarness is the live top-level session registered from harness
+// h (ADR 0017), the most recent if there are several, or "" if none.
+// Subagent sessions (parent/name) share their parent's harness and are
+// skipped. Like SessionLive it needs no registration, so a hook or a wait
+// can ask before it knows its identity. Where the platform cannot tell
+// start times, both sides are 0 and the pid alone decides.
+func (b *Bus) IdentityForHarness(h procs.Ref) (string, error) {
+	if h.Pid <= 0 {
+		return "", nil
+	}
+	var name string
+	err := b.db.QueryRow("SELECT sender FROM sessions WHERE harness_pid=? AND harness_start=? AND instr(sender,'/')=0 AND heartbeat >= ? ORDER BY registered_at DESC, sender LIMIT 1",
+		h.Pid, h.Start, b.nowMs()-attachmentExpiryMs).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", internal(err)
+	}
+	return name, nil
+}
+
 // Register is RegisterWithClient for a caller with no MCP clientInfo.
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
 	return b.RegisterWithClient(name, parent, context, resume, "", "")
@@ -189,11 +218,12 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		display = fmt.Sprintf("%s%s%d", base, sep, n)
 	}
 	if reused {
-		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=?, harness=?, harness_version=? WHERE sender=?", context, now, harness, harnessVersion, display); err != nil {
+		if _, err := tx.Exec("UPDATE sessions SET context=?, heartbeat=?, harness=?, harness_version=?, harness_pid=?, harness_start=? WHERE sender=?",
+			context, now, harness, harnessVersion, b.harness.Pid, b.harness.Start, display); err != nil {
 			return Registration{}, internal(err)
 		}
-	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version) VALUES(?,?,?,?,?,?,?)",
-		display, context, b.owner, now, now, harness, harnessVersion); err != nil {
+	} else if _, err := tx.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version,harness_pid,harness_start) VALUES(?,?,?,?,?,?,?,?,?)",
+		display, context, b.owner, now, now, harness, harnessVersion, b.harness.Pid, b.harness.Start); err != nil {
 		return Registration{}, internal(err)
 	}
 	if !resume {

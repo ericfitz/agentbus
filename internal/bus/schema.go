@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   heartbeat INTEGER NOT NULL,
   registered_at INTEGER NOT NULL,
   harness TEXT NOT NULL DEFAULT '',
-  harness_version TEXT NOT NULL DEFAULT ''
+  harness_version TEXT NOT NULL DEFAULT '',
+  harness_pid INTEGER NOT NULL DEFAULT 0,
+  harness_start INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS sessions_heartbeat ON sessions(heartbeat);
 CREATE TABLE IF NOT EXISTS subscriptions (

@@ -18,6 +18,7 @@ import (
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/cli"
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/procs"
 	"github.com/ericfitz/agentbus/internal/repoconfig"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -539,6 +540,13 @@ func Run(ctx context.Context, cfg config.Config) error {
 			log.Warn("bus close failed", "err", cerr)
 		}
 	}()
+	// Stamp every session registered here with this server's harness, so the
+	// harness's hooks and waits can find it (ADR 0017). An unsupported
+	// platform or a vanished harness leaves it unset: they fall back to the
+	// working-directory name.
+	if h, err := procs.FindHarness(procs.System, os.Getpid()); err == nil {
+		b.SetHarness(h)
+	}
 	// SIGTERM/SIGINT/SIGHUP cancel ctx so the server returns and the session
 	// cleanup below runs; a harness that only closes stdin gets there too.
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

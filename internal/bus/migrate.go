@@ -24,6 +24,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	5: addSubject,                              // messages.subject, FTS over subject and content (ADR 0010)
 	6: addMemoryAccessAndDropTaskSubscriptions, // memory_access; drop task-list subscriptions (ADR 0013)
 	7: addSessionHarness,                       // sessions.harness, sessions.harness_version (ADR 0015)
+	8: addSessionHarnessProcess,                // sessions.harness_pid, sessions.harness_start (ADR 0017)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -204,6 +205,25 @@ func addSessionHarness(tx *sql.Tx) error {
 		}
 		if has == 0 {
 			if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// addSessionHarnessProcess (schema 8 -> 9, ADR 0017) adds the sessions
+// columns that hold the pid and start time of the harness process that
+// registered the session. Existing rows get 0 (unknown) until their next
+// register. Like addSessionHarness, it skips a column the file already has.
+func addSessionHarnessProcess(tx *sql.Tx) error {
+	for _, col := range []string{"harness_pid", "harness_start"} {
+		var has int
+		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('sessions') WHERE name=?", col).Scan(&has); err != nil {
+			return err
+		}
+		if has == 0 {
+			if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN " + col + " INTEGER NOT NULL DEFAULT 0"); err != nil {
 				return err
 			}
 		}

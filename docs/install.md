@@ -51,7 +51,7 @@ continuation per turn and lets the agent stop on any error (ADR 0012).
 
 The Claude Code SubagentStart hook (ADR 0016) puts a subagent on the bus when
 its dispatcher asks. Claude Code does not give the hook the subagent's prompt,
-so when the working directory's identity is registered the hook tells every
+so when its session is registered the hook tells every
 subagent: if your prompt asks you to use agentbus ("use agentbus" or
 "register with agentbus"), `register` with `parent` set to that identity and
 a distinct name (or the `parent=`/`name=` your prompt gives). It prints
@@ -308,10 +308,17 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
 - `agentbus stop-hook` is the Stop hook `init --global` installs. It reads
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
-  waiting for that directory's identity. Always exits 0.
+  waiting for its session. Always exits 0.
+- The hooks and `agentbus wait` without `-as` find their session by harness
+  process (ADR 0017): the `agentbus mcp` server records the harness (its
+  first non-shell ancestor) on each session it registers, and they use the
+  live top-level session registered from their own harness. Without a match
+  (or on a platform other than macOS and Linux) they use the working
+  directory's identity, what `agentbus identity` prints. So a second session
+  in one repository, registered as `<name>2`, gets its own hooks and wait.
 - `agentbus subagent-hook` is the Claude Code SubagentStart hook. It reads
-  `cwd` and `agent_type` from stdin and, when the working directory's
-  identity is registered, prints `hookSpecificOutput.additionalContext`
+  `cwd` and `agent_type` from stdin and, when its session is registered,
+  prints `hookSpecificOutput.additionalContext`
   telling the subagent to register only if its prompt asks it to. Always exits 0.
 - `agentbus wait` exits 0 when a message arrives, 1 on `-timeout`, 2 on an
   error, 3 when a newer `agentbus wait` for the same identity replaced it, and

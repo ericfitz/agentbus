@@ -72,7 +72,8 @@ prompt did not ignored the note and made no agentbus calls.
   it to use agentbus. A subagent that was not asked ignores the note. Every
   subagent of a registered parent pays for the note (about 80 tokens).
 - **Parent.** The identity of the hook's working directory (as `stop-hook`
-  derives it). The hook injects only when that parent has a live session
+  derives it; since ADR 0017, the session registered from the hook's own
+  harness process, falling back to that directory identity). The hook injects only when that parent has a live session
   (`Bus.SessionLive`). A `parent=<name>` in the prompt overrides it, but the
   hook cannot check that name.
 - **Name.** A slug of `agent_type` plus a 4-hex suffix, unless the prompt

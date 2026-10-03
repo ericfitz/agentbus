@@ -50,7 +50,8 @@ model asks.
 - The hook checks the identity `agentbus identity` would print for the
   working directory. A second session in the same repository registered
   under a suffixed name is checked as the first identity, the same
-  limitation `agentbus wait` without `-as` has.
+  limitation `agentbus wait` without `-as` has. (Fixed by ADR 0017: both
+  now use the session registered from their own harness process.)
 - On a machine with Claude Code configured, Grok also runs the hooks in
   `~/.claude/settings.json`, so a Grok session may see the reason twice.
   Harmless; not worked around.

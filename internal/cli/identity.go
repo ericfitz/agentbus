@@ -4,9 +4,13 @@ package cli
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/procs"
 	"github.com/ericfitz/agentbus/internal/repoconfig"
 )
 
@@ -24,6 +28,35 @@ func Identity(cwd string, out io.Writer) error {
 func identity(cwd string, out, warn io.Writer) error {
 	_, err := fmt.Fprint(out, identityLine(IdentityName(cwd, warn)))
 	return err
+}
+
+// findHarness finds the harness running this process: the first non-shell
+// ancestor (ADR 0014). Tests replace it.
+var findHarness = func() (procs.Ref, error) { return procs.FindHarness(procs.System, os.Getpid()) }
+
+// SessionIdentity is the identity of the session this process runs for
+// (ADR 0017): the live top-level session registered from the same harness
+// process, else IdentityName(cwd). IdentityName is only the name a session
+// asks for; a second session in the same repository gets a suffixed one.
+func SessionIdentity(b *bus.Bus, cwd string, warn io.Writer) string {
+	if h, err := findHarness(); err == nil {
+		if name, err := b.IdentityForHarness(h); err == nil && name != "" {
+			return name
+		}
+	}
+	return IdentityName(cwd, warn)
+}
+
+// WaitIdentity is SessionIdentity for a caller with no bus open: `agentbus
+// wait` without -as. If the bus cannot be opened it falls back to
+// IdentityName(cwd); the wait itself then reports the open error.
+func WaitIdentity(cfg config.Config, cwd string, warn io.Writer) string {
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		return IdentityName(cwd, warn)
+	}
+	defer func() { _ = b.Close() }()
+	return SessionIdentity(b, cwd, warn)
 }
 
 // IdentityName is the name identity would print, without the prompt.

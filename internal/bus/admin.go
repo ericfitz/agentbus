@@ -14,8 +14,16 @@ type Status struct {
 	BudgetBytes      int64     `json:"budget_bytes"`
 	Notice           string    `json:"notice,omitempty"`
 	EmbeddingBacklog int64     `json:"embedding_backlog"`
-	ConfigPath       string    `json:"config_path"`
-	DataDirectory    string    `json:"data_directory"`
+	// EmbeddingRejected counts memories the endpoint rejected on their own
+	// under the current model; they are not in the backlog (ADR 0018).
+	EmbeddingRejected int64 `json:"embedding_rejected"`
+	// EmbeddingError is the last embedding pass's error, from whichever
+	// process ran it, and EmbeddingErrorAt when (unix ms); empty once a pass
+	// succeeds (ADR 0018).
+	EmbeddingError   string `json:"embedding_error,omitempty"`
+	EmbeddingErrorAt int64  `json:"embedding_error_at,omitempty"`
+	ConfigPath       string `json:"config_path"`
+	DataDirectory    string `json:"data_directory"`
 }
 
 // liveSessions is the shared query behind Discover and StatusReport.
@@ -104,6 +112,13 @@ func (b *Bus) StatusReport() (Status, error) {
 		if err := b.db.QueryRow("SELECT count(*) "+unembeddedFrom, b.embedder.model).Scan(&st.EmbeddingBacklog); err != nil {
 			return st, internal(err)
 		}
+		if err := b.db.QueryRow("SELECT count(*) FROM embed_failures f JOIN messages m ON m.seq=f.seq WHERE f.model=? AND m.tombstone=0", b.embedder.model).Scan(&st.EmbeddingRejected); err != nil {
+			return st, internal(err)
+		}
+		err := b.db.QueryRow("SELECT message, set_at FROM notices WHERE kind='embedding'").Scan(&st.EmbeddingError, &st.EmbeddingErrorAt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return st, internal(err)
+		}
 	}
 	return st, nil
 }
@@ -121,7 +136,7 @@ func (b *Bus) Reset() error {
 		return internal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, t := range []string{"embeddings", "message_tags", "tag_subscription_tags", "tag_subscriptions", "messages", "memory_access", "subscriptions", "sessions", "channels", "receipts", "notices"} {
+	for _, t := range []string{"embeddings", "embed_failures", "message_tags", "tag_subscription_tags", "tag_subscriptions", "messages", "memory_access", "subscriptions", "sessions", "channels", "receipts", "notices"} {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 			return internal(err)
 		}

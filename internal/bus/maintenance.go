@@ -106,10 +106,8 @@ func (b *Bus) Tick(ctx context.Context) {
 				return nil
 			}
 			defer b.embedMu.Unlock()
-			// ponytail: embedBatch retries the same first-64 batch forever if one
-			// text is permanently rejected by the endpoint (e.g. malformed
-			// content). Upgrade path: mark per-row failures so a bad row is
-			// skipped instead of blocking the whole batch.
+			// A text the endpoint rejects on its own is recorded and skipped
+			// inside embedBatch (ADR 0018), so it cannot block this loop.
 			for i := 0; i < embedBatchesPT && tickCtx.Err() == nil; i++ {
 				n, err := b.embedBatch(tickCtx)
 				if err != nil || n == 0 {

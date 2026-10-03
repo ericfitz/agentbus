@@ -30,7 +30,15 @@ func Status(cfg config.Config, out io.Writer) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(out, "embedding backlog: %d\nsessions (%d):\n", st.EmbeddingBacklog, len(st.Sessions)); err != nil {
+	if _, err := fmt.Fprintf(out, "embedding backlog: %d (rejected %d)\n", st.EmbeddingBacklog, st.EmbeddingRejected); err != nil {
+		return err
+	}
+	if st.EmbeddingError != "" {
+		if _, err := fmt.Fprintf(out, "embedding error at %s: %s\n", time.UnixMilli(st.EmbeddingErrorAt).Format(time.RFC3339), st.EmbeddingError); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(out, "sessions (%d):\n", len(st.Sessions)); err != nil {
 		return err
 	}
 	for _, s := range st.Sessions {

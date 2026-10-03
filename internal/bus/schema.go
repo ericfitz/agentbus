@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS embeddings (
   model TEXT NOT NULL,
   vector BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS embed_failures (
+  seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  error TEXT NOT NULL,
+  failed_at INTEGER NOT NULL,
+  PRIMARY KEY (seq, model)
+);
 CREATE TABLE IF NOT EXISTS message_tags (
   seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
   tag TEXT NOT NULL,

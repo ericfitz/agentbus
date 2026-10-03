@@ -651,7 +651,10 @@ func (m Model) renderStatusBar() string {
 	embed := "unset"
 	if m.c.cfg.EmbeddingEndpoint != "" {
 		embed = th.Style(th.Health).Render("ok")
-		if m.search.semanticDown {
+		switch {
+		case m.status.EmbeddingError != "": // the embedding pass itself fails (ADR 0018)
+			embed = th.Style(th.Warn).Render("failing")
+		case m.search.semanticDown:
 			embed = th.Style(th.Warn).Render("unreachable")
 		}
 	}

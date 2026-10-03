@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/ericfitz/agentbus/internal/mcpserver"
 )
@@ -113,10 +114,22 @@ func (m Model) healthLines() []string {
 		p("%s unset\n", dim.Render("embeddings"))
 	} else {
 		state := ok.Render("ok")
-		if m.search.semanticDown {
+		switch {
+		case st.EmbeddingError != "":
+			state = warn.Render("failing")
+		case m.search.semanticDown:
 			state = warn.Render("unreachable")
 		}
 		p("%s %s · %s · %s\n", dim.Render("embeddings"), state, cfg.EmbeddingModel, cfg.EmbeddingEndpoint)
+		// The last embedding pass's error, from whichever process ran it
+		// (ADR 0018), wrapped so a long endpoint message stays readable.
+		if st.EmbeddingError != "" {
+			at := time.UnixMilli(st.EmbeddingErrorAt).Format("15:04:05")
+			p("  %s\n", warn.Render("last failure "+at))
+			for _, l := range strings.Split(ansi.Wordwrap(st.EmbeddingError, max(m.width-12, 30), " "), "\n") {
+				p("    %s\n", warn.Render(l))
+			}
+		}
 	}
 	lastQ := "none yet"
 	if !m.health.lastQueryAt.IsZero() {
@@ -127,7 +140,7 @@ func (m Model) healthLines() []string {
 			lastQ += warn.Render("text only")
 		}
 	}
-	p("%s %d · %s %v s · %s %s\n", dim.Render("backlog"), st.EmbeddingBacklog, dim.Render("query timeout"), cfg.EmbeddingQueryTimeoutSeconds, dim.Render("last query"), lastQ)
+	p("%s %d · %s %d · %s %v s · %s %s\n", dim.Render("backlog"), st.EmbeddingBacklog, dim.Render("rejected"), st.EmbeddingRejected, dim.Render("query timeout"), cfg.EmbeddingQueryTimeoutSeconds, dim.Render("last query"), lastQ)
 	p("%s %d h\n", dim.Render("task idle"), cfg.TaskIdleHours)
 	p("%s %d h\n", dim.Render("task expiry"), cfg.TaskExpiryHours)
 	p("%s %d h\n", dim.Render("memory expiry"), cfg.MemoryExpiryHours)

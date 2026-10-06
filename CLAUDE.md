@@ -4,7 +4,7 @@ agentbus: a Go CLI, MCP server and TUI for coordinating agents (see README.md an
 
 ## Commands
 
-- Build: `make build` (same flags as `release/release.sh`, `CGO_ENABLED=0`). Pure Go; SQLite is `modernc.org/sqlite`.
+- Build: `make build` (`CGO_ENABLED=0 -trimpath` like release.sh, without the version ldflags). Pure Go; SQLite is `modernc.org/sqlite`.
 - Tests: `make test`; `make test-race` for the race detector (slower).
 - Lint: `make lint` (golangci-lint v2 defaults), `make vet`, `make fmt-check`.
 - Done gate: `make verify` (build, vet, gofmt, lint, unit tests). Run it and show the result before claiming done. There is no CI; this gate is the only check before a push. Release signing and notarization (`release/release.sh`) are not part of it.

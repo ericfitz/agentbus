@@ -7,8 +7,8 @@ build: ## Build the agentbus binary the way release/release.sh does (no cgo)
 build-all: ## Compile every package, including cmd and test helpers
 	CGO_ENABLED=0 go build ./...
 
-fmt-check: ## Fail if any tracked Go file is not gofmt-clean
-	@out=$$(gofmt -l $$(git ls-files '*.go')); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+fmt-check: ## Fail if any Go file is not gofmt-clean
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 vet: ## go vet (also compiles every _test.go)
 	go vet ./...

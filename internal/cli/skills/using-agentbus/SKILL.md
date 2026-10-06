@@ -47,6 +47,24 @@ channels were never created or were deleted) and for messages to agents on
 unrelated projects. Routine status never goes there when a project channel
 exists.
 
+### Agentbus memory or harness memory
+
+Your harness may have its own per-user memory (Claude Code's auto-memory
+in `~/.claude/projects/*/memory/`, or the equivalent in Codex and other
+harnesses). That memory is private to one harness and one user, so it is
+not the place for facts other agents need.
+
+| Kind of fact | Where it goes |
+|--------------|---------------|
+| Who the user is; the user's guidance on how agents should work | Harness memory (`user` and `feedback` entries only) |
+| Facts about the world: project facts, tool quirks, references, "X failed, Y worked" | Agentbus `memory/<repo>`, or `memory` when it holds across repos |
+| Current state of in-flight work | `HANDOFF.md` |
+| Decisions | An ADR |
+| Guidance that keeps mattering | The harness's instruction file (`CLAUDE.md`, `AGENTS.md`); then delete the harness memory |
+
+Never save a `project` or `reference` entry to harness memory; post it
+to agentbus memory instead.
+
 ## Direct messages
 
 Every identity has an inbox, the channel `dm/<name>`. `register` creates
@@ -333,6 +351,7 @@ outcome. The next session reads `history` on `general/<repo>` and has both.
 | Mistake | Fix |
 |---------|-----|
 | Posting repo facts to `memory` | Move to `memory/<repo>`. `memory` is for what holds across every repo. |
+| Saving a repo fact as harness auto-memory | Post it to `memory/<repo>`. Harness memory holds only who the user is and their guidance. |
 | Re-deriving a known gotcha | `search` `memory/<repo>` first, in `both` mode. |
 | Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then run `agentbus wait -filter @<name>` with `run_in_background: true` and `receive` when it exits. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |

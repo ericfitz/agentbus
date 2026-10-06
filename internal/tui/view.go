@@ -418,7 +418,11 @@ func (m Model) renderRails() string {
 			if n == m.c.as {
 				ctx, name = "you", th.Style(th.User).Render(n)
 			}
-			row = m.senderIcon(n) + name + " " + dim.Render(ctx)
+			row = m.senderIcon(n) + name
+			// The repo is noise when the agent is named after it (#32).
+			if ctx != "" && ctx != n {
+				row += " " + dim.Render("("+ctx+")")
+			}
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
 			row = iconIdle + dim.Render(n+" "+shortDur(age))

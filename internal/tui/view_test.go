@@ -817,3 +817,38 @@ func TestHeaderRevisionIndicatorOrderAndNarrowCut(t *testing.T) {
 		t.Fatalf("no indicator, no trailing gap: %q", got)
 	}
 }
+
+// TestSessionRowShowsRepoOnlyWhenItDiffers covers #32: a live session's repo
+// is shown as "name (repo)" only when it differs from the name, and the
+// TUI's own row reads "name (you)".
+func TestSessionRowShowsRepoOnlyWhenItDiffers(t *testing.T) {
+	f := newFixture(t)
+	f.m.width = 200
+	f.m.status.Sessions = []bus.Session{
+		{Sender: "agentbus", Context: "agentbus"},
+		{Sender: "foo", Context: "reponame"},
+		{Sender: "blank", Context: ""},
+		{Sender: f.m.c.as, Context: "tui"},
+	}
+	for _, s := range f.m.status.Sessions {
+		f.m.sessionsSeen[s.Sender] = time.Now()
+	}
+	rows := map[string]string{}
+	for _, l := range strings.Split(ansi.Strip(f.m.renderRails()), "\n") {
+		for _, s := range f.m.status.Sessions {
+			if i := strings.Index(l, s.Sender); i >= 0 {
+				rows[s.Sender] = strings.TrimSpace(l[i:])
+			}
+		}
+	}
+	for sender, want := range map[string]string{
+		"agentbus": "agentbus",
+		"foo":      "foo (reponame)",
+		"blank":    "blank",
+		f.m.c.as:   f.m.c.as + " (you)",
+	} {
+		if got := rows[sender]; got != want {
+			t.Errorf("row for %s = %q, want %q", sender, got, want)
+		}
+	}
+}

@@ -335,6 +335,7 @@ function Invoke-Child([string]$Mode, [string]$ScriptPath, [string[]]$ScriptArgs)
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $eap }
     $out = $out -replace '\x1b\[[0-9;]*m', '' # pwsh 7 colors its error view
+    $out = $out -replace '(?m)^\s*\| ?', '' # and wraps a long message onto '| ' lines (windows.yml run 37665370795)
     return @{ Exit = $exit; Out = $out; Squashed = ($out -replace '\s', '') }
 }
 

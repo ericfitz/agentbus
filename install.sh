@@ -18,6 +18,7 @@ REPLACED-BY-release/embed-key.sh
 # END agentbus release public key
 
 BASE_URL="${AGENTBUS_BASE_URL:-https://github.com/ericfitz/agentbus}"
+BASE_URL="${BASE_URL%/}"
 ARCH="" TAG="" ASSET="" OPENSSL="" OLD_OPENSSL="" SHA_CMD="" SKIP_SIG=0 INSTALL_DIR="" TMP="" UPGRADE=0
 
 die() { printf 'agentbus install: %s\n' "$*" >&2; exit 1; }
@@ -56,6 +57,7 @@ detect_platform() {
     if [ -n "${AGENTBUS_INSTALL_DIR:-}" ]; then
         INSTALL_DIR="$AGENTBUS_INSTALL_DIR"
         case "$INSTALL_DIR" in /*) ;; *) die "AGENTBUS_INSTALL_DIR must be an absolute path, got '$INSTALL_DIR'" ;; esac
+        [ "$INSTALL_DIR" = / ] || INSTALL_DIR="${INSTALL_DIR%/}"
     else
         [ -n "${HOME:-}" ] || die "HOME is not set; set AGENTBUS_INSTALL_DIR to an absolute directory"
         INSTALL_DIR="$HOME/.local/bin"
@@ -108,10 +110,7 @@ resolve_version() {
         TAG="${loc##*/}"
         [ -n "$TAG" ] || die "could not determine the latest release from $BASE_URL/releases/latest; set AGENTBUS_VERSION=vX.Y.Z"
     fi
-    case "$TAG" in
-        v[0-9]*.[0-9]*.[0-9]*) ;;
-        *) die "version must look like vX.Y.Z, got '$TAG'" ;;
-    esac
+    printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || die "version must look like vX.Y.Z, got '$TAG'"
     ASSET="agentbus-$TAG-linux-$ARCH.tar.gz"
 }
 
@@ -126,6 +125,9 @@ download() {
 
 verify_signature() {
     [ "$SKIP_SIG" = 1 ] && return 0
+    case "$PUBKEY_PEM" in
+        *REPLACED-BY*) die "this copy of install.sh has no embedded release key; fetch it from $BASE_URL/releases/latest/download/install.sh" ;;
+    esac
     printf '%s\n' "$PUBKEY_PEM" > "$TMP/release.pub"
     "$OPENSSL" pkeyutl -verify -rawin -pubin -inkey "$TMP/release.pub" -in "$TMP/SHA256SUMS" -sigfile "$TMP/SHA256SUMS.sig" >/dev/null 2>&1 \
         || die "signature check of SHA256SUMS failed: the download is damaged, tampered with, or signed with a key this script does not know"
@@ -141,6 +143,7 @@ install_binary() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
     [ -d "$INSTALL_DIR" ] && [ -w "$INSTALL_DIR" ] \
         || die "cannot write to $INSTALL_DIR. Rerun with AGENTBUS_INSTALL_DIR=<a writable directory>, or for a system-wide install: curl -fsSL $BASE_URL/releases/latest/download/install.sh | sudo env AGENTBUS_INSTALL_DIR=/usr/local/bin sh"
+    [ ! -d "$INSTALL_DIR/agentbus" ] || die "$INSTALL_DIR/agentbus is a directory; remove it or choose another AGENTBUS_INSTALL_DIR"
     [ -x "$INSTALL_DIR/agentbus" ] && UPGRADE=1
     tar -xzf "$TMP/$ASSET" -C "$TMP" agentbus || die "could not extract $ASSET"
     cp "$TMP/agentbus" "$INSTALL_DIR/.agentbus.tmp.$$"
@@ -161,6 +164,7 @@ report() {
 }
 
 main() {
+    [ $# -eq 0 ] || die "this script takes no arguments; configure it with AGENTBUS_VERSION, AGENTBUS_INSTALL_DIR, AGENTBUS_BASE_URL, AGENTBUS_SKIP_SIGNATURE"
     detect_platform
     [ "$SKIP_SIG" = 1 ] || find_openssl
     resolve_version

@@ -2,24 +2,25 @@
 # universal binary on macOS, a static binary on Linux (amd64 and arm64).
 # Rendered from release/agentbus.rb.tmpl by release/release.sh; do not edit
 # the copy in the tap by hand.
+#
+# The host checks below are the layout Homebrew accepts for third-party taps
+# that ship platform-specific URLs: `url`/`sha256` are not allowed inside
+# `on_macos`/`on_linux` blocks (FormulaAudit/ComponentsOrder), and the
+# OnSystemConditionals cop exempts non-core taps from the on_* rewrite.
 class Agentbus < Formula
   desc "Local message bus and shared memory for coding agents"
   homepage "https://github.com/ericfitz/agentbus"
   license "Apache-2.0"
 
-  on_macos do
+  if OS.mac?
     url "__MACOS_URL__"
     sha256 "__MACOS_SHA256__"
-  end
-  on_linux do
-    on_intel do
-      url "__LINUX_AMD64_URL__"
-      sha256 "__LINUX_AMD64_SHA256__"
-    end
-    on_arm do
-      url "__LINUX_ARM64_URL__"
-      sha256 "__LINUX_ARM64_SHA256__"
-    end
+  elsif OS.linux? && Hardware::CPU.intel?
+    url "__LINUX_AMD64_URL__"
+    sha256 "__LINUX_AMD64_SHA256__"
+  elsif OS.linux? && Hardware::CPU.arm?
+    url "__LINUX_ARM64_URL__"
+    sha256 "__LINUX_ARM64_SHA256__"
   end
 
   def install

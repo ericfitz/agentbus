@@ -21,7 +21,7 @@ and notarizes darwin binaries alone, and the formula declares
 1. **Targets:** cloud servers (amd64, arm64) and Linux desktops.
 2. **Distribution:** release tarballs plus an `install.sh` that installs to
    `~/.local/bin` without root (the pattern Claude Code's and Codex's
-   Linux installers use), with Homebrew `on_linux` blocks as a secondary
+   Linux installers use), with a Homebrew formula (host OS/CPU conditionals) as a secondary
    path. No .deb or .rpm, and no apt or dnf repository.
 3. **Verification:** one `SHA256SUMS` over every tarball, signed with an
    Ed25519 key through OpenSSL 3, verified by `install.sh` with the public
@@ -59,6 +59,13 @@ Approved by Eric on 2026-10-07.
 9. **`AGENTBUS_SIGNING_KEY`** overrides the default signing key path
    `~/.keys/agentbus-release-ed25519.pem`. The path is passed only to
    `openssl`.
+10. **Formula layout A (user, 2026-10-07).** The formula uses top-level
+    `OS`/`Hardware::CPU` conditionals (not `on_macos`/`on_linux` blocks) so it
+    passes `brew style` and `brew audit --strict`. Trade-off: `brew fetch --os
+    linux` on a Mac fetches the macOS tarball, because the conditionals read
+    the host rather than Homebrew's simulated system; `brew install` on a real
+    host is correct. `release/test-render.sh` runs `brew style` and a
+    stubbed-host URL-selection check when brew is installed.
 
 ## Release assets
 
@@ -219,21 +226,20 @@ runs step 6. Any other value of the variable is rejected.
 `release/agentbus.rb.tmpl`:
 
 ```ruby
-on_macos do
+if OS.mac?
   url "__MACOS_URL__"
   sha256 "__MACOS_SHA256__"
-end
-on_linux do
-  on_intel do
-    url "__LINUX_AMD64_URL__"
-    sha256 "__LINUX_AMD64_SHA256__"
-  end
-  on_arm do
-    url "__LINUX_ARM64_URL__"
-    sha256 "__LINUX_ARM64_SHA256__"
-  end
+elsif OS.linux? && Hardware::CPU.intel?
+  url "__LINUX_AMD64_URL__"
+  sha256 "__LINUX_AMD64_SHA256__"
+elsif OS.linux? && Hardware::CPU.arm?
+  url "__LINUX_ARM64_URL__"
+  sha256 "__LINUX_ARM64_SHA256__"
 end
 ```
+
+(`on_macos`/`on_linux` blocks cannot hold `url`/`sha256`: `brew style` and
+`brew audit --strict` reject them. See decision 10.)
 
 `depends_on :macos` is removed, and the header comment no longer says
 macOS only. `release.sh` fills the placeholders from `SHA256SUMS`.

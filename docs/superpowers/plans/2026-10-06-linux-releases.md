@@ -22,7 +22,7 @@
 - Scripts that run on target hosts (`install.sh`, container commands) use `grep`/`sed`; the executor's own searches in plan steps use `rg PATTERN <path>`.
 - `install.sh` defaults: `AGENTBUS_BASE_URL=https://github.com/ericfitz/agentbus`, `AGENTBUS_INSTALL_DIR=$HOME/.local/bin`; `AGENTBUS_SKIP_SIGNATURE` accepts only unset/empty or `1`; `AGENTBUS_VERSION` must match `vX.Y.Z`. The script never runs `sudo`, never runs `agentbus init`.
 - OpenSSL command search order in `install.sh`: `openssl`, then `openssl3`; the first whose `version` reports major 3 or newer wins.
-- Homebrew formula: `on_macos`/`on_linux` + `on_intel`/`on_arm` blocks from `release/agentbus.rb.tmpl`; `depends_on :macos` removed; any leftover `__[A-Z0-9_]+__` after rendering is a failure; tap commit and push only when the rendered file differs.
+- Homebrew formula: top-level `OS.mac?` / `OS.linux? && Hardware::CPU.intel?|arm?` conditionals (layout A, see the spec) from `release/agentbus.rb.tmpl`; `depends_on :macos` removed; any leftover `__[A-Z0-9_]+__` after rendering is a failure; tap commit and push only when the rendered file differs.
 - `make release-check` (shellcheck, the three test scripts) needs Docker and stays out of `make verify`. `make verify` remains the done gate.
 - No step pushes, tags, creates a GitHub release, creates repositories or sets GitHub variables. Those are written as user instructions with an `Approve:` line.
 - American English throughout.
@@ -751,7 +751,7 @@ render_check "$HERE/agentbus.rb.tmpl" agentbus.rb ruby -c -- \
     MACOS_URL=https://example.invalid/m.tar.gz MACOS_SHA256=1111 \
     LINUX_AMD64_URL=https://example.invalid/a.tar.gz LINUX_AMD64_SHA256=2222 \
     LINUX_ARM64_URL=https://example.invalid/r.tar.gz LINUX_ARM64_SHA256=3333
-grep -q 'on_linux' "$WORK/agentbus.rb" || { echo "FAIL formula lacks on_linux"; FAIL=1; }
+grep -qF 'elsif OS.linux? && Hardware::CPU.arm?' "$WORK/agentbus.rb" || { echo "FAIL formula lacks the Linux arm branch"; FAIL=1; }
 grep -q 'depends_on :macos' "$WORK/agentbus.rb" && { echo "FAIL formula still macOS only"; FAIL=1; }
 
 # A template with an extra placeholder must fail (render_template's guard).
@@ -779,19 +779,15 @@ class Agentbus < Formula
   homepage "https://github.com/ericfitz/agentbus"
   license "Apache-2.0"
 
-  on_macos do
+  if OS.mac?
     url "__MACOS_URL__"
     sha256 "__MACOS_SHA256__"
-  end
-  on_linux do
-    on_intel do
-      url "__LINUX_AMD64_URL__"
-      sha256 "__LINUX_AMD64_SHA256__"
-    end
-    on_arm do
-      url "__LINUX_ARM64_URL__"
-      sha256 "__LINUX_ARM64_SHA256__"
-    end
+  elsif OS.linux? && Hardware::CPU.intel?
+    url "__LINUX_AMD64_URL__"
+    sha256 "__LINUX_AMD64_SHA256__"
+  elsif OS.linux? && Hardware::CPU.arm?
+    url "__LINUX_ARM64_URL__"
+    sha256 "__LINUX_ARM64_SHA256__"
   end
 
   def install

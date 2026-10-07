@@ -31,8 +31,8 @@ fail() { echo "error: $*" >&2; exit 1; }
 parse_args() {
     [[ $# -eq 1 ]] || usage
     TAG="$1"
-    [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
-        || { echo "error: tag must look like v1.2.3 (or v1.2.3-rc.1), got '$TAG'" >&2; exit 2; }
+    [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+        || { echo "error: tag must look like vX.Y.Z, got '$TAG'" >&2; exit 2; }
     VERSION="${TAG#v}"
 }
 
@@ -64,6 +64,11 @@ check_signing_key() {
 
 check_tag_exists() {
     git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null || fail "tag $TAG not found in $REPO_ROOT"
+}
+
+check_tag_pushed() {
+    git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 \
+        || fail "tag $TAG is not on origin; push it first (git push origin $TAG)"
 }
 
 # checkout_tag builds from the tagged source in a throwaway worktree, whatever HEAD is.
@@ -191,7 +196,7 @@ ensure_release() {
         echo "==> Creating GitHub release $TAG"
         local notes=() line
         while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)
-        gh release create "$TAG" --repo "$GH_REPO" --title "$TAG" "${notes[@]}"
+        gh release create "$TAG" --repo "$GH_REPO" --verify-tag --title "$TAG" "${notes[@]}"
     fi
 }
 
@@ -246,6 +251,7 @@ main() {
     require_tools
     check_signing_key
     check_tag_exists
+    check_tag_pushed
     check_installers_embedded
     checkout_tag
     build_macos

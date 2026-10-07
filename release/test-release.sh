@@ -74,9 +74,10 @@ check embed-usage 2 "usage" -- "$HERE/embed-key.sh"
 source "$HERE/release.sh"   # the main guard keeps it from running
 
 check args-none 2 "usage" -- parse_args
-check args-bad-tag 2 "tag must look like v1.2.3" -- parse_args 1.2.3
+check args-bad-tag 2 "tag must look like vX.Y.Z" -- parse_args 1.2.3
 check args-two 2 "usage" -- parse_args v1.2.3 extra
-check args-ok 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3-rc.1 && [[ \$VERSION == 1.2.3-rc.1 ]]"
+check args-ok 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 && [[ \$VERSION == 1.2.3 ]]"
+check args-prerelease 2 "tag must look like vX.Y.Z, got 'v1.2.3-rc.1'" -- parse_args v1.2.3-rc.1
 
 git init -q "$WORK/repo" && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init && git -C "$WORK/repo" tag v0.0.1
 check tag-exists 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_tag_exists"
@@ -117,6 +118,14 @@ check real-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_emb
 cp "$WORK/real-install.sh" "$WORK/repo/install.sh" && git -C "$WORK/repo" add install.sh && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m embedded && git -C "$WORK/repo" tag v0.0.4
 check preflight-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_installers_embedded"
 check preflight-no-installer 1 "v0.0.1 has no install.sh; the installer ships with every release, so tag a commit that includes it" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_installers_embedded"
+
+# check_tag_pushed against a local bare "origin" (no network). v0.0.4 is in the
+# clone; v0.0.5 is tagged afterwards and so is only local.
+git clone -q --bare "$WORK/repo" "$WORK/origin.git"
+git -C "$WORK/repo" remote add origin "$WORK/origin.git"
+git -C "$WORK/repo" tag v0.0.5
+check tag-pushed-ok 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_tag_pushed"
+check tag-pushed-missing 1 "tag v0.0.5 is not on origin; push it first (git push origin v0.0.5)" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.5; check_tag_pushed"
 
 # --- fixture-server.py ------------------------------------------------------
 mkdir -p "$WORK/fx/valid/v9.0.1"

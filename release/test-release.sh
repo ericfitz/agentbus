@@ -176,31 +176,6 @@ check brew-check-no-container-started 1 "" -- test -e "$WORK/docker-called"
 printf 'aaaa  agentbus-v1.0.0-windows-amd64.zip\nbbbb  agentbus-v1.0.0-windows-arm64.zip\ncccc  install.ps1\n' > "$WORK/dist/SHA256SUMS"
 check scoop-render 0 "" -- bash -c "source '$HERE/release.sh'; render_template '$HERE/agentbus.scoop.json.tmpl' '$WORK/scoop.json' VERSION=1.0.0 AMD64_URL=https://x/a.zip AMD64_SHA256=aaaa ARM64_URL=https://x/r.zip ARM64_SHA256=bbbb && python3 -I -m json.tool '$WORK/scoop.json' >/dev/null"
 check scoop-fields 0 "" -- bash -c "python3 -I -c \"import json,sys; m=json.load(open(sys.argv[1])); assert m['version']=='1.0.0' and m['bin']=='agentbus.exe' and m['architecture']['64bit']['hash']=='aaaa' and m['architecture']['arm64']['url']=='https://x/r.zip' and 'checkver' in m and 'autoupdate' in m\" '$WORK/scoop.json'"
-mkdir -p "$WORK/pe/windows-amd64" "$WORK/pe/windows-arm64"
-for a in amd64 arm64; do (cd "$WORK/repo" && printf 'package main\nfunc main(){}\n' > main.go && printf 'module t\n\ngo 1.27\n' > go.mod && CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o "$WORK/pe/windows-$a/agentbus.exe" .); done
-check pe-ok 0 "" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
-printf 'not a PE\n' > "$WORK/pe/windows-arm64/agentbus.exe"
-check pe-wrong 1 "windows/arm64 binary" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
-# check_windows_pe matches loosely, so a newer `file` phrasing still passes:
-# a stub `file` on PATH prints FILE_OUT_<arch> for the matching binary.
-mkdir -p "$WORK/filebin"
-cat > "$WORK/filebin/file" <<'STUB'
-#!/bin/sh
-case "$2" in
-*windows-amd64*) printf '%s\n' "$FILE_OUT_AMD64" ;;
-*) printf '%s\n' "$FILE_OUT_ARM64" ;;
-esac
-STUB
-chmod +x "$WORK/filebin/file"
-pe_stub() { # <name> <status> <message> <amd64 line> <arm64 line>
-    check "$1" "$2" "$3" -- env PATH="$WORK/filebin:$PATH" FILE_OUT_AMD64="$4" FILE_OUT_ARM64="$5" bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
-}
-pe_stub pe-old-phrasing 0 "" "PE32+ executable (console) x86-64, for MS Windows" "PE32+ executable (console) Aarch64, for MS Windows"
-pe_stub pe-new-phrasing 0 "" "PE32+ executable for MS Windows 5.02 (console), x86-64, 7 sections" "PE32+ executable for MS Windows 5.02 (console), Aarch64, 7 sections"
-pe_stub pe-case-folded 0 "" "pe32+ executable (console) X86-64, for ms windows" "PE32+ EXECUTABLE (console) AARCH64, for MS WINDOWS"
-pe_stub pe-swapped-arch 1 "windows/amd64 binary" "PE32+ executable (console) Aarch64, for MS Windows" "PE32+ executable (console) x86-64, for MS Windows"
-pe_stub pe-not-pe32plus 1 "windows/amd64 binary" "PE32 executable (console) Intel 80386, for MS Windows" "PE32+ executable (console) Aarch64, for MS Windows"
-pe_stub pe-not-windows 1 "windows/arm64 binary" "PE32+ executable (console) x86-64, for MS Windows" "ELF 64-bit LSB executable, ARM aarch64"
 # copy_scripts ships install.ps1 and refuses an unembedded one like install.sh.
 mkdir -p "$WORK/cs/src" "$WORK/cs/dist"
 cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
@@ -255,6 +230,106 @@ for n in v4 main short noref docker nocomment; do
 done
 check pins-missing-dir 1 "not found" -- "$HERE/check-pins.sh" "$WORK/pins-nonexistent"
 check pins-real-repo 0 "OK" -- "$HERE/check-pins.sh"
+
+# --- Actions release flow (#36) --------------------------------------------
+check removed-build-linux 1 "" -- bash -c "source '$HERE/release.sh'; declare -F build_linux"
+check removed-smoke-linux 1 "" -- bash -c "source '$HERE/release.sh'; declare -F smoke_linux"
+check removed-build-windows 1 "" -- bash -c "source '$HERE/release.sh'; declare -F build_windows"
+check removed-check-pe 1 "" -- bash -c "source '$HERE/release.sh'; declare -F check_windows_pe"
+check removed-ensure-release 1 "" -- bash -c "source '$HERE/release.sh'; declare -F ensure_release"
+check no-docker-in-release-sh 1 "" -- rg -q -i 'docker' "$HERE/release.sh"
+check args-no-publish-before 0 "" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish v1.2.3 && [[ \$NO_PUBLISH == 1 && \$TAG == v1.2.3 ]]"
+check args-no-publish-after 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --no-publish && [[ \$NO_PUBLISH == 1 ]]"
+check args-default-publish 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 && [[ \$NO_PUBLISH == 0 ]]"
+check args-no-publish-twice 2 "usage" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish --no-publish v1.2.3"
+check args-unknown-flag 2 "unknown option --foo" -- bash -c "source '$HERE/release.sh'; parse_args --foo v1.2.3"
+check args-flag-only 2 "usage" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish"
+check args-flag-prerelease 2 "tag must look like vX.Y.Z" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish v1.2.3-rc.1"
+
+# check_workflow_at_tag: v0.0.1 predates the workflow file; v0.0.92 has it.
+mkdir -p "$WORK/repo/.github/workflows" && printf 'name: x\n' > "$WORK/repo/.github/workflows/release-build.yml"
+git -C "$WORK/repo" add .github && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m wf && git -C "$WORK/repo" tag v0.0.92
+check workflow-at-tag-ok 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.92; check_workflow_at_tag"
+check workflow-at-tag-missing 1 "release-build.yml is not in tag v0.0.1" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_workflow_at_tag"
+
+# A stub gh records its arguments and answers from recorded output. A
+# "workflow run" swaps in $GH_RUNS_AFTER (when set) as the new run list, which
+# models the run that appears after the dispatch.
+cat > "$WORK/gh-stub.sh" <<'EOF'
+gh() {
+    printf '%s\n' "gh $*" >> "$GH_LOG"
+    case "$1 $2" in
+        "run list") local expr=""; while (($#)); do [[ "$1" == --jq ]] && expr="$2"; shift; done; jq -r "$expr" "$GH_RUNS" ;;
+        "release view") [[ -n "${GH_VIEW:-}" ]] && { printf '%s\n' "$GH_VIEW"; return 0; }; return 1 ;;
+        "workflow run") [[ -n "${GH_RUNS_AFTER:-}" ]] && cp "$GH_RUNS_AFTER" "$GH_RUNS"; return "${GH_RC:-0}" ;;
+        "release create"|"release edit"|"release download"|"run watch"|"attestation verify"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
+        *) echo "gh stub: unexpected call: $*" >&2; return 99 ;;
+    esac
+}
+EOF
+cat > "$WORK/runs.json" <<'EOF'
+[
+  {"databaseId": 101, "displayTitle": "release-build v1.2.3", "createdAt": "2026-10-07T10:00:00Z"},
+  {"databaseId": 102, "displayTitle": "release-build v1.2.3", "createdAt": "2026-10-07T10:05:00Z"},
+  {"databaseId": 103, "displayTitle": "release-build v9.9.9", "createdAt": "2026-10-07T10:06:00Z"}
+]
+EOF
+# Two stale runs for the tag dated far in the future, so the since bound in
+# dispatch_build (now minus a minute) cannot be what excludes them; the
+# recorded pre-dispatch ids must.
+cat > "$WORK/runs-stale.json" <<'EOF'
+[
+  {"databaseId": 201, "displayTitle": "release-build v1.2.3", "createdAt": "2099-01-01T00:00:00Z"},
+  {"databaseId": 202, "displayTitle": "release-build v1.2.3", "createdAt": "2099-01-01T00:01:00Z"}
+]
+EOF
+cat > "$WORK/runs-fresh.json" <<'EOF'
+[
+  {"databaseId": 201, "displayTitle": "release-build v1.2.3", "createdAt": "2099-01-01T00:00:00Z"},
+  {"databaseId": 202, "displayTitle": "release-build v1.2.3", "createdAt": "2099-01-01T00:01:00Z"},
+  {"databaseId": 203, "displayTitle": "release-build v1.2.3", "createdAt": "2099-01-01T00:02:00Z"}
+]
+EOF
+with_stub() { bash -c "source '$HERE/release.sh'; source '$WORK/gh-stub.sh'; export GH_LOG='$WORK/gh.log' GH_RUNS='$WORK/runs.json' FIND_RUN_TRIES=1 FIND_RUN_SLEEP=0; TAG=v1.2.3; VERSION=1.2.3; DIST='$WORK/dist'; REPO_ROOT='$WORK/repo'; $1"; }
+check find-run-newest 0 "102" -- with_stub "find_run 2026-10-07T09:00:00Z"
+check find-run-since 0 "102" -- with_stub "find_run 2026-10-07T10:04:00Z"
+check find-run-none 1 "could not find the dispatched run" -- with_stub "find_run 2026-10-07T10:30:00Z"
+check find-run-other-tag-ignored 1 "could not find the dispatched run" -- with_stub "TAG=v9.9.8; find_run 2026-10-07T09:00:00Z"
+check find-run-excludes-stale 0 "101" -- with_stub "find_run 2026-10-07T09:00:00Z 102"
+check find-run-excludes-all-stale 1 "could not find the dispatched run" -- with_stub "find_run 2026-10-07T09:00:00Z 101 102"
+check find-run-bad-exclude 1 "bad run id" -- with_stub "find_run 2026-10-07T09:00:00Z '1; drop'"
+check list-runs-for-tag 0 "101 102" -- with_stub "echo \$(list_run_ids | sort)"
+check list-runs-other-tag 0 "" -- with_stub "TAG=v8.8.8; [[ -z \$(list_run_ids) ]]"
+check dispatch-ignores-stale-run 1 "could not find the dispatched run" -- with_stub "export GH_RUNS='$WORK/runs-stale.json'; dispatch_build"
+check dispatch-adopts-new-run 0 "actions/runs/203" -- with_stub "cp '$WORK/runs-stale.json' '$WORK/runs-live.json'; export GH_RUNS='$WORK/runs-live.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build && [[ \$RUN_ID == 203 ]] && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3' '$WORK/gh.log'"
+check dispatch-failure-stops 1 "" -- with_stub "GH_RC=1 dispatch_build"
+check draft-created 0 "Creating draft release" -- with_stub ": > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--verify-tag.*--draft' '$WORK/gh.log'"
+check draft-reused 0 "Reusing draft release" -- with_stub "GH_VIEW=true ensure_draft && [[ \$PUBLISHED == 0 ]]"
+check draft-reuse-no-create 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft; ! grep -q 'release create' '$WORK/gh.log'"
+check draft-already-published 0 "already published" -- with_stub "GH_VIEW=false ensure_draft && [[ \$PUBLISHED == 1 ]]"
+check watch-fails-with-url 1 "actions/runs/102" -- with_stub "RUN_ID=102 GH_RC=1 watch_run"
+mkdir -p "$WORK/adist" && for a in linux-amd64.tar.gz linux-arm64.tar.gz windows-amd64.zip; do : > "$WORK/adist/agentbus-v1.2.3-$a"; done
+with_dist() { with_stub "DIST='$WORK/adist'; $1"; }
+check download-requires-four 1 "agentbus-v1.2.3-windows-arm64.zip" -- with_dist "download_archives"
+: > "$WORK/adist/agentbus-v1.2.3-windows-arm64.zip"
+check download-ok 0 "" -- with_dist "download_archives && [[ \${#ARCHIVES[@]} == 4 ]]"
+check download-keeps-macos-first 0 "" -- with_dist "ARCHIVES=(agentbus-v1.2.3-macos-universal.tar.gz); download_archives && [[ \${#ARCHIVES[@]} == 5 && \${ARCHIVES[0]} == agentbus-v1.2.3-macos-universal.tar.gz ]]"
+check attest-ok 0 "" -- with_dist ": > '$WORK/gh.log'; download_archives && verify_attestations && [[ \$(grep -c 'gh attestation verify' '$WORK/gh.log') == 4 ]] && grep -q -- '--repo ericfitz/agentbus' '$WORK/gh.log'"
+check attest-fails 1 "attestation" -- with_dist "download_archives; GH_RC=1 verify_attestations"
+check attest-skips-macos 0 "" -- with_dist ": > '$WORK/gh.log'; MACOS_ARCHIVE=agentbus-v1.2.3-macos-universal.tar.gz; ARCHIVES=(\$MACOS_ARCHIVE); download_archives; verify_attestations && ! grep -q macos '$WORK/gh.log' && [[ \$(grep -c 'gh attestation verify' '$WORK/gh.log') == 4 ]]"
+check no-publish-stops 0 "stopping before publish" -- with_stub ": > '$WORK/gh.log'; update_tap() { echo TAP; }; NO_PUBLISH=1 publish_release && ! grep -q 'release edit' '$WORK/gh.log'"
+check no-publish-skips-packagers 0 "" -- with_stub "update_tap() { echo TAP; }; update_scoop() { echo SCOOP; }; submit_winget() { echo WINGET; }; [[ -z \$(NO_PUBLISH=1 publish_release | grep -E '^(TAP|SCOOP|WINGET)\$') ]]"
+check publish-undrafts-then-packagers 0 "TAP SCOOP WINGET" -- with_stub ": > '$WORK/gh.log'; update_tap() { echo TAP >> '$WORK/order'; }; update_scoop() { echo SCOOP >> '$WORK/order'; }; submit_winget() { echo WINGET >> '$WORK/order'; }; : > '$WORK/order'; publish_release >/dev/null && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --draft=false' '$WORK/gh.log' && echo \$(cat '$WORK/order')"
+check publish-rerun-skips-edit 0 "" -- with_stub ": > '$WORK/gh.log'; update_tap() { :; }; update_scoop() { :; }; submit_winget() { :; }; PUBLISHED=1 publish_release >/dev/null && ! grep -q 'release edit' '$WORK/gh.log'"
+check publish-edit-failure-stops 1 "" -- with_stub "update_tap() { echo TAP; }; GH_RC=1 publish_release"
+check upload-assets 0 "" -- with_stub ": > '$WORK/gh.log'; mkdir -p '$WORK/udist'; MACOS_ARCHIVE=agentbus-v1.2.3-macos-universal.tar.gz; DIST='$WORK/udist'; upload_assets && grep -q 'gh release upload v1.2.3 --repo ericfitz/agentbus --clobber agentbus-v1.2.3-macos-universal.tar.gz install.sh install.ps1 SHA256SUMS SHA256SUMS.sig' '$WORK/gh.log'"
+check gh-auth-fails 1 "gh is not authenticated" -- with_stub "GH_RC=1 check_gh"
+check gh-ok 0 "" -- with_stub "check_gh"
+# main runs the steps in the order the spec pins; every step is replaced by a
+# recorder so nothing builds, dispatches or publishes.
+check main-order 0 "" -- bash -c "source '$HERE/release.sh'; : > '$WORK/steps'
+for f in require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_installers_embedded checkout_tag build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release; do eval \"\$f() { echo \$f >> '$WORK/steps'; }\"; done
+main v1.2.3 --no-publish && diff '$WORK/steps' <(printf '%s\n' require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_installers_embedded checkout_tag build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release)"
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

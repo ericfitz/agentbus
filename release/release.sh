@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build, sign and publish a release of agentbus, then update the Homebrew tap.
-# macOS: universal binary, codesigned and notarized here. Linux: static
-# amd64/arm64 binaries built here and smoke-tested in Docker. Windows:
-# amd64/arm64 zips built here, checked with `file`, run by the windows.yml
-# workflow and the VM. Every archive is listed in SHA256SUMS, signed with the
-# Ed25519 release key.
-#   ./release/release.sh v0.1.1
-# Builds from the tag, so HEAD may be anywhere. Reruns for the same tag reuse
-# the release and replace every asset (--clobber).
+# Build, sign and publish a release of agentbus, then update Homebrew, Scoop
+# and winget. macOS is built, codesigned and notarized here; the Linux and
+# Windows archives are built, run and attested by .github/workflows/
+# release-build.yml on native runners, dispatched on the tag. Every archive
+# is listed in SHA256SUMS, signed with the Ed25519 release key.
+#   ./release/release.sh v0.1.1              # full release
+#   ./release/release.sh v0.1.1 --no-publish # stop with a draft release (dry run)
+# Builds the macOS binary from the tag, so HEAD may be anywhere. Reruns for the
+# same tag reuse the draft release and replace every asset.
 # One-time setup: a notarytool keychain profile named $NOTARY_PROFILE
 # (`xcrun notarytool store-credentials`), and the release key pair (see
 # docs/superpowers/specs/2026-10-06-linux-releases-design.md, "Key setup").
@@ -29,13 +29,27 @@ DIST="${REPO_ROOT}/dist"
 OPENSSL=""  # Homebrew openssl@3, set by require_tools
 TAG="" VERSION="" SRC=""
 ARCHIVES=() # archive file names under $DIST, in SHA256SUMS order
+MACOS_ARCHIVE=""   # file name of the macOS tarball under $DIST
+NO_PUBLISH=0       # --no-publish: stop after signing, leave the draft
+PUBLISHED=0        # set when the release for $TAG is already public (rerun)
+RUN_ID=""          # the release-build.yml run this release used
+WORKFLOW="release-build.yml"
+FIND_RUN_TRIES="${FIND_RUN_TRIES:-30}"
+FIND_RUN_SLEEP="${FIND_RUN_SLEEP:-2}"
 
-usage() { echo "usage: release.sh <tag>" >&2; exit 2; }
+usage() { echo "usage: release.sh <tag> [--no-publish]" >&2; exit 2; }
 fail() { echo "error: $*" >&2; exit 1; }
 
 parse_args() {
-    [[ $# -eq 1 ]] || usage
-    TAG="$1"
+    local a
+    for a in "$@"; do
+        case "$a" in
+            --no-publish) [[ "$NO_PUBLISH" == 0 ]] || usage; NO_PUBLISH=1 ;;
+            --*) echo "error: unknown option $a" >&2; usage ;;
+            *) [[ -z "$TAG" ]] || usage; TAG="$a" ;;
+        esac
+    done
+    [[ -n "$TAG" ]] || usage
     [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
         || { echo "error: tag must look like vX.Y.Z, got '$TAG'" >&2; exit 2; }
     VERSION="${TAG#v}"
@@ -44,12 +58,11 @@ parse_args() {
 # require_tools fails once, naming everything that is missing.
 require_tools() {
     local missing=() t prefix
-    for t in gh git go lipo codesign xcrun shasum docker file zip komac; do
+    for t in gh git go lipo codesign xcrun shasum komac; do
         command -v "$t" >/dev/null 2>&1 || missing+=("$t")
     done
     prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
     if [[ -x "$prefix/bin/openssl" ]]; then OPENSSL="$prefix/bin/openssl"; else missing+=("openssl@3 (brew install openssl@3)"); fi
-    docker info >/dev/null 2>&1 || missing+=("a running Docker daemon")
     [[ -r "$SIGNING_KEY" ]] || missing+=("signing key $SIGNING_KEY (see the spec's Key setup)")
     [[ -r "$KOMAC_KEY_FILE" ]] || missing+=("komac token $KOMAC_KEY_FILE")
     [[ -r "$PUBKEY" ]] || missing+=("public key $PUBKEY (see the spec's Key setup)")
@@ -75,6 +88,18 @@ check_tag_exists() {
 check_tag_pushed() {
     git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 \
         || fail "tag $TAG is not on origin; push it first (git push origin $TAG)"
+}
+
+check_gh() {
+    gh auth status >/dev/null 2>&1 || fail "gh is not authenticated (gh auth login)"
+    gh attestation verify --help >/dev/null 2>&1 || fail "this gh cannot verify attestations; upgrade gh (brew upgrade gh)"
+}
+
+# A tag cut before the workflow landed cannot use this flow: the run would
+# use the workflow file as of the tag.
+check_workflow_at_tag() {
+    git -C "$REPO_ROOT" cat-file -e "$TAG:.github/workflows/$WORKFLOW" 2>/dev/null \
+        || fail ".github/workflows/$WORKFLOW is not in tag $TAG; tag a commit that has it"
 }
 
 # checkout_tag builds from the tagged source in a throwaway worktree, whatever HEAD is.
@@ -112,62 +137,7 @@ build_macos() {
     local archive="${BIN_NAME}-${TAG}-macos-universal.tar.gz"
     tar -C "$DIST/macos" -czf "$DIST/$archive" "$BIN_NAME"
     ARCHIVES+=("$archive")
-}
-
-# build_linux builds static linux binaries into $DIST/linux-<arch>/agentbus
-# and packages each as agentbus-<tag>-linux-<arch>.tar.gz.
-build_linux() {
-    local arch archive
-    for arch in amd64 arm64; do
-        echo "==> Building linux/$arch"
-        mkdir -p "$DIST/linux-$arch"
-        (cd "$SRC" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-            -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "$DIST/linux-$arch/$BIN_NAME" .)
-        archive="${BIN_NAME}-${TAG}-linux-${arch}.tar.gz"
-        tar -C "$DIST/linux-$arch" -czf "$DIST/$archive" "$BIN_NAME"
-        ARCHIVES+=("$archive")
-    done
-}
-
-# smoke_linux runs each linux binary in Alpine (Docker emulates the other
-# architecture) and requires `agentbus version` to print the version.
-smoke_linux() {
-    local arch got
-    for arch in amd64 arm64; do
-        echo "==> Smoke test linux/$arch"
-        got="$(docker run --rm --platform "linux/$arch" -v "$DIST/linux-$arch:/d:ro" alpine "/d/$BIN_NAME" version)"
-        [[ "$got" == "$VERSION" ]] || fail "linux/$arch binary printed '$got', want $VERSION"
-    done
-}
-
-# build_windows builds agentbus.exe into $DIST/windows-<arch>/ and packages
-# each as agentbus-<tag>-windows-<arch>.zip.
-build_windows() {
-    local arch archive
-    for arch in amd64 arm64; do
-        echo "==> Building windows/$arch"
-        mkdir -p "$DIST/windows-$arch"
-        (cd "$SRC" && CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath \
-            -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "$DIST/windows-$arch/$BIN_NAME.exe" .)
-        archive="${BIN_NAME}-${TAG}-windows-${arch}.zip"
-        (cd "$DIST/windows-$arch" && zip -q "$DIST/$archive" "$BIN_NAME.exe")
-        ARCHIVES+=("$archive")
-    done
-}
-
-# check_windows_pe: this host cannot run Windows binaries, so `file` must
-# report a PE32+ executable for the expected machine on MS Windows. The match
-# is loose (case-folded words, not one exact sentence) because the phrasing
-# differs across `file` versions. Actions (windows.yml) and the VM run them.
-check_windows_pe() {
-    local arch want got lower
-    for arch in amd64 arm64; do
-        case "$arch" in amd64) want="x86-64" ;; arm64) want="aarch64" ;; esac
-        got="$(file -b "$DIST/windows-$arch/$BIN_NAME.exe")"
-        lower="$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')"
-        [[ "$lower" == *"pe32+"* && "$lower" == *"$want"* && "$lower" == *"ms windows"* ]] \
-            || fail "windows/$arch binary: '$got' (want a PE32+ executable for $want on MS Windows)"
-    done
+    MACOS_ARCHIVE="$archive"
 }
 
 # copy_scripts puts the installer(s) from the tag's worktree into $DIST so
@@ -229,22 +199,125 @@ release_notes_args() {
     fi
 }
 
-# ensure_release creates the GitHub release for $TAG unless it already exists
-# (a rerun after a failure reuses it).
-ensure_release() {
-    if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-        echo "==> Release $TAG exists; replacing its assets"
-    else
-        echo "==> Creating GitHub release $TAG"
-        local notes=() line
-        while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)
-        gh release create "$TAG" --repo "$GH_REPO" --verify-tag --title "$TAG" "${notes[@]}"
+# ensure_draft creates the draft release for $TAG, reuses an existing draft
+# (rerun after a failure), or, after a warning, reuses a published release
+# (rerun that replaces public assets). releases/latest never resolves to a
+# draft, so the install scripts cannot see a partial release.
+ensure_draft() {
+    local draft
+    if draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>/dev/null)"; then
+        if [[ "$draft" == true ]]; then
+            echo "==> Reusing draft release $TAG"
+        else
+            echo "warning: release $TAG is already published; continuing replaces its public assets" >&2
+            PUBLISHED=1
+        fi
+        return
     fi
+    echo "==> Creating draft release $TAG"
+    local notes=() line
+    while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)
+    gh release create "$TAG" --repo "$GH_REPO" --verify-tag --title "$TAG" --draft "${notes[@]}"
 }
 
+# list_run_ids prints the ids of the existing $WORKFLOW runs titled for $TAG.
+list_run_ids() {
+    gh run list --repo "$GH_REPO" --workflow "$WORKFLOW" --event workflow_dispatch --limit 50 \
+        --json databaseId,displayTitle \
+        --jq ".[] | select(.displayTitle == \"release-build $TAG\") | .databaseId"
+}
+
+# dispatch_build runs the workflow on the tag itself (its github.ref is the
+# tag, and the workflow file used is the tag's) and records the run id. The
+# ids of the tag's earlier runs are recorded first and excluded, so a stale
+# run (a rerun within the clock slack) is never mistaken for this dispatch.
+dispatch_build() {
+    local existing since
+    existing="$(list_run_ids)" || fail "could not list the existing $WORKFLOW runs"
+    echo "==> Dispatching $WORKFLOW on $TAG"
+    since="$(date -u -v-60S +%Y-%m-%dT%H:%M:%SZ)" # one minute of clock slack
+    gh workflow run "$WORKFLOW" --repo "$GH_REPO" --ref "$TAG" -f "tag=$TAG"
+    local ids=() id
+    while IFS= read -r id; do
+        if [[ -n "$id" ]]; then ids+=("$id"); fi
+    done <<< "$existing"
+    RUN_ID="$(find_run "$since" ${ids[@]+"${ids[@]}"})"
+    echo "run: https://github.com/$GH_REPO/actions/runs/$RUN_ID"
+}
+
+# find_run <since> [excluded-run-id...]: the newest workflow_dispatch run of
+# $WORKFLOW created at or after <since> (RFC 3339 UTC) whose display title is
+# "release-build <tag>" and whose id is not excluded. Polls because the run
+# appears a moment after the dispatch.
+find_run() {
+    local since="$1" id i ex="" x; shift
+    for x in "$@"; do
+        [[ "$x" =~ ^[0-9]+$ ]] || fail "find_run: bad run id '$x'"
+        ex+="${ex:+,}$x"
+    done
+    for ((i = 0; i < FIND_RUN_TRIES; i++)); do
+        id="$(gh run list --repo "$GH_REPO" --workflow "$WORKFLOW" --event workflow_dispatch --limit 50 \
+            --json databaseId,displayTitle,createdAt \
+            --jq "[.[] | select(.createdAt >= \"$since\" and .displayTitle == \"release-build $TAG\" and (.databaseId as \$i | [$ex] | index(\$i) | not))] | sort_by(.createdAt) | last | .databaseId // empty")"
+        if [[ -n "$id" ]]; then printf '%s\n' "$id"; return 0; fi
+        sleep "$FIND_RUN_SLEEP"
+    done
+    fail "could not find the dispatched run of $WORKFLOW for $TAG"
+}
+
+watch_run() {
+    echo "==> Waiting for run $RUN_ID"
+    gh run watch "$RUN_ID" --repo "$GH_REPO" --exit-status \
+        || fail "$WORKFLOW failed; the draft stays for a rerun: https://github.com/$GH_REPO/actions/runs/$RUN_ID"
+}
+
+# download_archives fetches the four attested archives the workflow uploaded
+# to the draft and requires every one of them.
+download_archives() {
+    echo "==> Downloading the Linux and Windows archives"
+    gh release download "$TAG" --repo "$GH_REPO" --dir "$DIST" --clobber \
+        --pattern "${BIN_NAME}-${TAG}-linux-*.tar.gz" --pattern "${BIN_NAME}-${TAG}-windows-*.zip"
+    local a
+    for a in linux-amd64.tar.gz linux-arm64.tar.gz windows-amd64.zip windows-arm64.zip; do
+        [[ -f "$DIST/${BIN_NAME}-${TAG}-$a" ]] || fail "release $TAG lacks ${BIN_NAME}-${TAG}-$a; rerun the workflow"
+        ARCHIVES+=("${BIN_NAME}-${TAG}-$a")
+    done
+}
+
+# verify_attestations checks the Sigstore build provenance of every
+# downloaded archive against this repository before anything is signed.
+verify_attestations() {
+    echo "==> Verifying build attestations"
+    local a
+    for a in "${ARCHIVES[@]}"; do
+        [[ "$a" == "$MACOS_ARCHIVE" ]] && continue
+        gh attestation verify "$DIST/$a" --repo "$GH_REPO" >/dev/null \
+            || fail "attestation of $a does not verify against $GH_REPO"
+    done
+}
+
+# upload_assets adds what only this machine has to the draft; the four
+# archives are already there, uploaded by the workflow.
 upload_assets() {
-    echo "==> Uploading assets"
-    (cd "$DIST" && gh release upload "$TAG" --repo "$GH_REPO" --clobber "${ARCHIVES[@]}" install.sh install.ps1 SHA256SUMS SHA256SUMS.sig)
+    echo "==> Uploading the macOS tarball, the install scripts and SHA256SUMS"
+    (cd "$DIST" && gh release upload "$TAG" --repo "$GH_REPO" --clobber "$MACOS_ARCHIVE" install.sh install.ps1 SHA256SUMS SHA256SUMS.sig)
+}
+
+# publish_release makes the draft public and updates the package managers,
+# or stops with the draft in place under --no-publish.
+publish_release() {
+    if [[ "$NO_PUBLISH" == 1 ]]; then
+        echo "==> --no-publish: stopping before publish; draft: https://github.com/$GH_REPO/releases/tag/$TAG"
+        return 0
+    fi
+    if [[ "$PUBLISHED" == 0 ]]; then
+        echo "==> Publishing release $TAG"
+        gh release edit "$TAG" --repo "$GH_REPO" --draft=false
+    fi
+    update_tap
+    update_scoop
+    submit_winget
+    echo "==> Released ${TAG}: brew install ericfitz/tap/${BIN_NAME}; curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install.sh | sh; irm https://github.com/${GH_REPO}/releases/latest/download/install.ps1 | iex"
 }
 
 # render_template <tmpl> <out> KEY=VALUE... replaces every __KEY__ and fails
@@ -343,22 +416,21 @@ main() {
     check_signing_key
     check_tag_exists
     check_tag_pushed
+    check_gh
+    check_workflow_at_tag
     check_installers_embedded
     checkout_tag
     build_macos
-    build_linux
-    smoke_linux
-    build_windows
-    check_windows_pe
+    ensure_draft
+    dispatch_build
+    watch_run
+    download_archives
+    verify_attestations
     copy_scripts
     write_sums
     sign_sums
-    ensure_release
     upload_assets
-    update_tap
-    update_scoop
-    submit_winget
-    echo "==> Released ${TAG}: brew install ericfitz/tap/${BIN_NAME}; curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install.sh | sh; irm https://github.com/${GH_REPO}/releases/latest/download/install.ps1 | iex"
+    publish_release
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

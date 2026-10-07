@@ -20,13 +20,12 @@ the only way to stop billing, and it discards the identity validation.
 
 ## One-time setup
 
-1. In the personal Azure subscription: create an Artifact Signing account
-   (Basic), complete individual identity validation (the validation email
-   link expires after 7 days), and create a Public Trust certificate
-   profile. The signer name on the certificate is the validated individual
-   identity. Per Microsoft's quickstart:
-   - Register the `Microsoft.CodeSigning` resource provider in the
-     subscription.
+1. In the personal Azure subscription: first register the
+   `Microsoft.CodeSigning` resource provider in the subscription, then
+   create an Artifact Signing account (Basic), complete individual identity
+   validation (the validation email link expires after 7 days), and create a
+   Public Trust certificate profile. The signer name on the certificate is
+   the validated individual identity. Per Microsoft's quickstart:
    - The *Artifact Signing Identity Verifier* role is needed to create the
      identity validation.
    - Individual validation comes from the Azure billing account (Account
@@ -44,7 +43,8 @@ the only way to stop billing, and it discards the identity validation.
 3. In the repository, add a `v*` tag rule to the `release` environment
    (created on the first run if absent; Settings > Environments > release >
    Deployment branches and tags > tag pattern `v*`, creating the environment
-   there if absent), so only tags matching `v*` can deploy to it. `release.sh` dispatches the workflow on the tag itself
+   there if absent), so only tags matching `v*` can deploy to it.
+   `release.sh` dispatches the workflow on the tag itself
    (`gh workflow run --ref <tag>`), so the run's `github.ref` is the tag and
    the rule admits it. The `package-windows` job uses this environment for
    both `on` and `off` releases.
@@ -79,9 +79,12 @@ checks them again.
 - `--windows-signing=off`: no Azure step runs, and the release notes end
   with: "The Windows binaries in this release are not Authenticode-signed;
   they are covered by the signed SHA256SUMS and by build attestations."
-- A rerun may change the choice (for example `off` after a lapsed
-  subscription); every Windows asset is replaced and the notes line is
-  added or removed to match.
+- A rerun before publishing may change the choice (for example `off` after
+  a lapsed subscription); every Windows asset is replaced and the notes
+  line is added or removed to match. Do not flip the choice after
+  publishing: a rerun then replaces the public zips and `SHA256SUMS` (see
+  the public-asset warning in [#36](https://github.com/ericfitz/agentbus/issues/36))
+  and winget is not refreshed.
 
 ## Pausing and resuming
 

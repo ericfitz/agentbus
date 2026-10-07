@@ -52,5 +52,5 @@ machine or a cloud Windows VM with nested virtualization.
 - [ ] On a release made with `--windows-signing=on`:
       `Get-AuthenticodeSignature .\agentbus.exe` reports `Valid` with the
       expected signer, for the arm64 binary in the VM and for the amd64
-      binary (downloaded zip), and SmartScreen does not warn on first run (it may warn until the signing
-      identity has reputation).
+      binary (downloaded zip), and SmartScreen does not warn on first run
+      (it may warn until the signing identity has reputation).

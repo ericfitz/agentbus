@@ -125,3 +125,10 @@ update the variables. The workflow is unchanged either way.
 > #36's dry run is done on the next stable `vX.Y.Z` tag with `release.sh
 > --no-publish`; `release.sh` and `release-build.yml` accept stable tags only, so
 > read "pre-release dry run" here as that.
+
+## Implementation note (2026-10-07, controller ruling pending Eric's review)
+
+`docs/install.md` states that releases which are not Authenticode-signed say
+so in their notes, and that `Get-AuthenticodeSignature` is the way to tell
+whether a Windows binary is signed. The Documentation text above is kept as
+originally written.

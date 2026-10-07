@@ -18,7 +18,7 @@ REPLACED-BY-release/embed-key.sh
 # END agentbus release public key
 
 BASE_URL="${AGENTBUS_BASE_URL:-https://github.com/ericfitz/agentbus}"
-BASE_URL="${BASE_URL%/}"
+while [ "${BASE_URL%/}" != "$BASE_URL" ]; do BASE_URL="${BASE_URL%/}"; done
 ARCH="" TAG="" ASSET="" OPENSSL="" OLD_OPENSSL="" SHA_CMD="" SKIP_SIG=0 INSTALL_DIR="" TMP="" UPGRADE=0
 
 die() { printf 'agentbus install: %s\n' "$*" >&2; exit 1; }
@@ -57,7 +57,7 @@ detect_platform() {
     if [ -n "${AGENTBUS_INSTALL_DIR:-}" ]; then
         INSTALL_DIR="$AGENTBUS_INSTALL_DIR"
         case "$INSTALL_DIR" in /*) ;; *) die "AGENTBUS_INSTALL_DIR must be an absolute path, got '$INSTALL_DIR'" ;; esac
-        [ "$INSTALL_DIR" = / ] || INSTALL_DIR="${INSTALL_DIR%/}"
+        while [ "${INSTALL_DIR%/}" != "$INSTALL_DIR" ] && [ "$INSTALL_DIR" != / ]; do INSTALL_DIR="${INSTALL_DIR%/}"; done
     else
         [ -n "${HOME:-}" ] || die "HOME is not set; set AGENTBUS_INSTALL_DIR to an absolute directory"
         INSTALL_DIR="$HOME/.local/bin"
@@ -110,6 +110,8 @@ resolve_version() {
         TAG="${loc##*/}"
         [ -n "$TAG" ] || die "could not determine the latest release from $BASE_URL/releases/latest; set AGENTBUS_VERSION=vX.Y.Z"
     fi
+    case "$TAG" in *"
+"*) die "version must look like vX.Y.Z, got a value containing a newline" ;; esac
     printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || die "version must look like vX.Y.Z, got '$TAG'"
     ASSET="agentbus-$TAG-linux-$ARCH.tar.gz"
 }
@@ -125,9 +127,9 @@ download() {
 
 verify_signature() {
     [ "$SKIP_SIG" = 1 ] && return 0
-    case "$PUBKEY_PEM" in
-        *REPLACED-BY*) die "this copy of install.sh has no embedded release key; fetch it from $BASE_URL/releases/latest/download/install.sh" ;;
-    esac
+    placeholder="$(printf '%s\n%s\n%s' '-----BEGIN PUBLIC KEY-----' 'REPLACED-BY-release/embed-key.sh' '-----END PUBLIC KEY-----')"
+    [ "$PUBKEY_PEM" != "$placeholder" ] \
+        || die "this copy of install.sh has no embedded release key; fetch it from $BASE_URL/releases/latest/download/install.sh"
     printf '%s\n' "$PUBKEY_PEM" > "$TMP/release.pub"
     "$OPENSSL" pkeyutl -verify -rawin -pubin -inkey "$TMP/release.pub" -in "$TMP/SHA256SUMS" -sigfile "$TMP/SHA256SUMS.sig" >/dev/null 2>&1 \
         || die "signature check of SHA256SUMS failed: the download is damaged, tampered with, or signed with a key this script does not know"

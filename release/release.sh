@@ -139,7 +139,7 @@ copy_scripts() {
 # check_script_embedded <path> <name> fails when the installer still holds the
 # placeholder key block that embed-key.sh replaces.
 check_script_embedded() {
-    if grep -q 'REPLACED-BY' "$1"; then
+    if grep -qxF 'REPLACED-BY-release/embed-key.sh' "$1"; then
         fail "$2 has no embedded release key (placeholder still present); run release/embed-key.sh release/agentbus-release-ed25519.pub $2 and commit before tagging"
     fi
 }
@@ -148,7 +148,7 @@ check_script_embedded() {
 # from the tag, before anything is built.
 check_installers_embedded() {
     local tmp; tmp="$(mktemp)"
-    git -C "$REPO_ROOT" show "$TAG:install.sh" > "$tmp" || { rm -f "$tmp"; fail "$TAG has no install.sh"; }
+    git -C "$REPO_ROOT" show "$TAG:install.sh" > "$tmp" 2>/dev/null || { rm -f "$tmp"; fail "$TAG has no install.sh; the installer ships with every release, so tag a commit that includes it"; }
     local rc=0
     (check_script_embedded "$tmp" install.sh) || rc=$?
     rm -f "$tmp"

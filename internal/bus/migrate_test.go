@@ -2,6 +2,7 @@ package bus
 
 import (
 	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -687,5 +688,149 @@ func TestMigrateV8AddsSessionHarnessProcess(t *testing.T) {
 	}
 	if err := b.db.QueryRow("SELECT harness_pid, harness_start FROM sessions WHERE sender='New'").Scan(&pid, &start); err != nil || pid != 42 || start != 7 {
 		t.Fatalf("new row harness process = %d %d, %v", pid, start, err)
+	}
+}
+
+// schemaV9TagSubscriptionTags is tag_subscription_tags as schema v5 through
+// v9 created it, before #20 added the pattern range columns.
+const schemaV9TagSubscriptionTags = `
+CREATE TABLE tag_subscription_tags (
+  sender TEXT NOT NULL,
+  tags_key TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (sender, tags_key, tag),
+  FOREIGN KEY (sender, tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE CASCADE
+);`
+
+// shapeV9 writes a v9 database with one subscribed AND set (Kim: a,b) and
+// returns the config that opens it.
+func shapeV9(t *testing.T) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{schema, "DROP TABLE tag_subscription_tags", schemaV9TagSubscriptionTags, "PRAGMA user_version = 9",
+		"INSERT INTO tag_subscriptions(sender, tags_key, created_seq) VALUES('Kim','a,b',0)",
+		"INSERT INTO tag_subscription_tags(sender, tags_key, tag) VALUES('Kim','a,b','a'),('Kim','a,b','b')",
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// tagRanges reads (tag, lo, hi) for sender, ordered by tag.
+func tagRanges(t *testing.T, db *sql.DB, sender string) [][3]string {
+	t.Helper()
+	rows, err := db.Query("SELECT tag, lo, hi FROM tag_subscription_tags WHERE sender=? ORDER BY tag", sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out [][3]string
+	for rows.Next() {
+		var r [3]string
+		if err := rows.Scan(&r[0], &r[1], &r[2]); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// TestMigrateV9AddsTagRanges (#20): a v9 file's tag_subscription_tags
+// gains lo and hi with every existing row backfilled as an exact tag; a
+// second open (user_version already 10) runs nothing, so a range written
+// in between (here by hand; Task 5's SubscribeTags does it for real) is
+// not reset to lo=hi=tag by a repeated backfill.
+func TestMigrateV9AddsTagRanges(t *testing.T) {
+	cfg := shapeV9(t)
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v9 database: %v", err)
+	}
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	if got := tagRanges(t, b.db, "Kim"); len(got) != 2 || got[0] != [3]string{"a", "a", "a"} || got[1] != [3]string{"b", "b", "b"} {
+		t.Fatalf("backfill: %v", got)
+	}
+	if _, err := b.db.Exec("UPDATE tag_subscription_tags SET lo='env:', hi='env:~' WHERE sender='Kim' AND tag='a'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("reopen v10 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version after reopen = %d, %v", uv, err)
+	}
+	if got := tagRanges(t, b.db, "Kim"); len(got) != 2 || got[0] != [3]string{"a", "env:", "env:~"} || got[1] != [3]string{"b", "b", "b"} {
+		t.Fatalf("a second open must not re-run the backfill: %v", got)
+	}
+}
+
+// TestMigrateV9FailureLeavesV9AndRetries (#20): the step is one
+// transaction, so a failure after its writes leaves the file at v9 without
+// the columns, and the next open runs the step again and succeeds.
+func TestMigrateV9FailureLeavesV9AndRetries(t *testing.T) {
+	cfg := shapeV9(t)
+	orig := migrations[9]
+	migrations[9] = func(tx *sql.Tx) error {
+		if err := orig(tx); err != nil {
+			return err
+		}
+		return errors.New("injected failure after the step's writes")
+	}
+	t.Cleanup(func() { migrations[9] = orig })
+	if _, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+		t.Fatal("Open must fail when the migration step fails")
+	}
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uv, has int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 9 {
+		t.Fatalf("user_version after a failed step = %d, want 9, %v", uv, err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM pragma_table_info('tag_subscription_tags') WHERE name IN ('lo','hi')").Scan(&has); err != nil || has != 0 {
+		t.Fatalf("columns after a failed step = %d, want 0, %v", has, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrations[9] = orig
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open after the failed step: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	if got := tagRanges(t, b.db, "Kim"); len(got) != 2 || got[0] != [3]string{"a", "a", "a"} {
+		t.Fatalf("backfill on retry: %v", got)
 	}
 }

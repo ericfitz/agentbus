@@ -1,18 +1,24 @@
 package bus
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
 // AND set, so matching drives from these few rows into message_tags(tag,
 // seq) instead of scanning messages. ON DELETE CASCADE means every existing
 // DELETE FROM tag_subscriptions (receive.go, sessions.go, UnsubscribeTags)
-// cleans this table up without code changes.
+// cleans this table up without code changes. lo and hi (v10, #20) hold the
+// pattern's byte range (tagRange): lo = hi for an exact tag, [p, p~] for a
+// prefix p*. They carry a default so addTagRanges can ALTER them onto an
+// older file; a v4 file migrating straight through gets them from this DDL
+// in splitTagSets, which is why addTagRanges checks before adding.
 const tagSubscriptionTagsDDL = `
 CREATE TABLE IF NOT EXISTS tag_subscription_tags (
   sender TEXT NOT NULL,
   tags_key TEXT NOT NULL,
   tag TEXT NOT NULL,
+  lo TEXT NOT NULL DEFAULT '',
+  hi TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (sender, tags_key, tag),
   FOREIGN KEY (sender, tags_key) REFERENCES tag_subscriptions(sender, tags_key) ON DELETE CASCADE
 );

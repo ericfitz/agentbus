@@ -25,6 +25,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	6: addMemoryAccessAndDropTaskSubscriptions, // memory_access; drop task-list subscriptions (ADR 0013)
 	7: addSessionHarness,                       // sessions.harness, sessions.harness_version (ADR 0015)
 	8: addSessionHarnessProcess,                // sessions.harness_pid, sessions.harness_start (ADR 0017)
+	9: addTagRanges,                            // tag_subscription_tags.lo, .hi (#20, ADR 0009 amendment 2026-10-06)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -229,6 +230,39 @@ func addSessionHarnessProcess(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// addTagRanges (schema 9 -> 10, #20) adds the lo and hi columns that hold a
+// subscribed pattern's byte range (tagRange) and backfills every existing
+// row as an exact tag (lo = hi = tag): before patterns, every subscribed
+// tag was one. SQLite needs a default to add a NOT NULL column. Like
+// addSessionHarness, it skips a column the file already has: a v4 file
+// migrating straight through gets both from tagSubscriptionTagsDDL in
+// splitTagSets, with ” in every backfilled row, so the UPDATE always runs.
+// A file with no table at all (an older file whose chain skips v5, or a
+// test shaping one) has nothing to alter or backfill; the schema DDL that
+// runs after migrate creates it.
+func addTagRanges(tx *sql.Tx) error {
+	var exists int
+	if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='tag_subscription_tags'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return nil
+	}
+	for _, col := range []string{"lo", "hi"} {
+		var has int
+		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('tag_subscription_tags') WHERE name=?", col).Scan(&has); err != nil {
+			return err
+		}
+		if has == 0 {
+			if _, err := tx.Exec("ALTER TABLE tag_subscription_tags ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := tx.Exec("UPDATE tag_subscription_tags SET lo=tag, hi=tag")
+	return err
 }
 
 // dropMessagesBytes (schema 1 -> 2, ADR 0006 item 4) rebuilds messages

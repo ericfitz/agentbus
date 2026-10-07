@@ -184,7 +184,8 @@ func (m Model) viewHealth() string {
 	return m.overlay("health", m.theme.Health, strings.Join(lines, "\n"), m.hints("o", "open config in $EDITOR", "↑↓", "scroll", "?", "help", "esc", "close"))
 }
 
-// editorCommand runs $VISUAL, else $EDITOR, else vi, on path. A value that
+// editorCommand runs $VISUAL, else $EDITOR, else defaultEditor (vi; notepad
+// on Windows), on path. A value that
 // is itself an existing file is run as-is, so a bare path with spaces
 // ("/Applications/Visual Studio Code.app/Contents/MacOS/Code") works;
 // splitting it on whitespace used to break it at "/Applications/Visual".
@@ -201,6 +202,7 @@ func editorCommand(path string) *exec.Cmd {
 }
 
 // terminalEditors need the terminal, so a $VISUAL naming one still blocks.
+// Lookups fold case and drop a trailing ".exe" (Windows file names).
 // ponytail: fixed list; a terminal editor missing from it would run in the
 // background without a terminal, so add names as they come up.
 var terminalEditors = map[string]bool{
@@ -214,7 +216,7 @@ var terminalEditors = map[string]bool{
 // terminal editor, and the caller then blocks as before.
 func backgroundEditor(path string) (cmd *exec.Cmd, ok bool) {
 	ed := strings.TrimSpace(os.Getenv("VISUAL"))
-	if ed == "" || terminalEditors[filepath.Base(editorProgram(ed))] {
+	if ed == "" || terminalEditors[strings.TrimSuffix(strings.ToLower(filepath.Base(editorProgram(ed))), ".exe")] {
 		return nil, false
 	}
 	return editorCommand(path), true

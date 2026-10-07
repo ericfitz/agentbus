@@ -35,6 +35,7 @@ func TestSystemGone(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
 	pid := cmd.Process.Pid
 	start, err := System.StartTime(pid)
 	if err != nil {

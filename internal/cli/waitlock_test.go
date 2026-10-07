@@ -101,6 +101,7 @@ func TestAcquireWaitLockStaleNotSignaled(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
 	start, _ := procs.System.StartTime(cmd.Process.Pid)
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()

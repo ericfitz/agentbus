@@ -12,6 +12,9 @@ func TestShellEditorCommandWindows(t *testing.T) {
 	if cmd.SysProcAttr == nil || cmd.SysProcAttr.CmdLine != `cmd.exe /S /C ""C:\Program Files\Microsoft VS Code\Code.exe" --wait "C:\Users\pat h\config.json""` {
 		t.Fatalf("CmdLine = %q", cmd.SysProcAttr.CmdLine)
 	}
+	if got := strings.ToLower(cmd.Path); !strings.HasSuffix(got, `\system32\cmd.exe`) {
+		t.Fatalf("cmd.Path = %q, want the system directory's cmd.exe", cmd.Path)
+	}
 	if defaultEditor != "notepad" {
 		t.Fatalf("default editor = %q", defaultEditor)
 	}

@@ -52,21 +52,20 @@ func (systemTable) Comm(pid int) (string, error) {
 // StartTime is the creation time from GetProcessTimes, in 100 ns units
 // since 1601 (opaque: only equality matters). A pid that does not exist
 // returns ErrGone, as does a process that has exited but whose handle
-// someone still holds (its exit time is set). A live process this user may
-// not open returns 0 (unknown), like procs_other.go.
+// someone still holds (its exit time is set). When OpenProcess fails for any
+// other reason (typically ACCESS_DENIED for another user's process) the
+// snapshot decides: absent returns ErrGone, present returns 0 (unknown),
+// like procs_other.go.
 func (systemTable) StartTime(pid int) (int64, error) {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		switch {
-		case errors.Is(err, windows.ERROR_INVALID_PARAMETER):
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return 0, ErrGone
-		case errors.Is(err, windows.ERROR_ACCESS_DENIED):
-			if _, serr := snapshotEntry(pid); serr != nil {
-				return 0, serr
-			}
-			return 0, nil
 		}
-		return 0, err
+		if _, serr := snapshotEntry(pid); serr != nil {
+			return 0, serr
+		}
+		return 0, nil
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 	var creation, exit, kernel, user windows.Filetime

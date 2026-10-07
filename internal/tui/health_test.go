@@ -117,6 +117,8 @@ func TestVisualEditorRunsInBackground(t *testing.T) {
 		{"vim", false},
 		{"/usr/bin/nano -w", false},
 		{"'/opt/homebrew/bin/nvim'", false},
+		{"vim.exe", false},
+		{"VIM.EXE", false},
 		{"", false},
 	} {
 		t.Setenv("VISUAL", tc.visual)

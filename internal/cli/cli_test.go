@@ -135,6 +135,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Give every send a subject",
 		"- Tag what you send so others can find it and triage it",
 		"change plus\n  its area",
+		"env:prod",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)

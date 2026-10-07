@@ -132,8 +132,8 @@ const protocol = `Then follow this protocol:
 - Tag what you send so others can find it and triage it without reading
   it: the activity (deployment, release, migration), its outcome (started,
   succeeded, failed), what needs attention (blocked, needs-human, breaking),
-  and the environment (prod, staging). A changed interface is change plus
-  its area (api-schema, db-schema, config). Reuse the vocabulary in the
+  and the environment (env:prod, env:staging). A changed interface is change plus
+  its area (area:api-schema, area:db-schema, area:config). Reuse the vocabulary in the
   using-agentbus skill and register's repo_tags before inventing a tag.
   With tags carrying the category, keep the body to the facts.
 - Search the memory channels register returned before starting unfamiliar work,

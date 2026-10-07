@@ -322,6 +322,22 @@ func TestMigrateV4SplitsTagSets(t *testing.T) {
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("tag_subscription_tags after migration: %v, want %v", got, want)
 	}
+	lrows, err := b.db.Query("SELECT tag, lo, hi FROM tag_subscription_tags")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for lrows.Next() {
+		var tag, lo, hi string
+		if err := lrows.Scan(&tag, &lo, &hi); err != nil {
+			t.Fatal(err)
+		}
+		if lo != tag || hi != tag {
+			t.Fatalf("migrated row %q has lo=%q hi=%q, want both = tag", tag, lo, hi)
+		}
+	}
+	if err := lrows.Close(); err != nil {
+		t.Fatal(err)
+	}
 	var n int
 	if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='message_tags_tag'").Scan(&n); err != nil || n != 0 {
 		t.Fatalf("message_tags_tag must be dropped: %d %v", n, err)

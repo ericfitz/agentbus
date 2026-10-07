@@ -17,8 +17,9 @@ import (
 )
 
 // splitTags splits a comma-separated tag list, trimming space around each
-// tag so "-tags a, b" (the natural style) does not fail NormalizeTags,
-// which rejects a tag carrying its own leading/trailing space (ADR 0009).
+// tag so "-tags a, b" (the natural style) does not fail NormalizeTags (or,
+// on the CLI path AddTagSet/RemoveTagSet -> NormalizeTagPatterns), which
+// reject a tag carrying its own leading/trailing space (ADR 0009).
 func splitTags(v string) []string {
 	parts := strings.Split(v, ",")
 	for i, p := range parts {
@@ -227,7 +228,7 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		if (fs.NArg() != 1) == (*tags == "") {
-			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel> | agentbus %s -tags <tag>[,<tag>...]\n", cmd, cmd)
+			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel> | agentbus %s -tags <tag|prefix*>[,<tag|prefix*>...]\n", cmd, cmd)
 			return 2
 		}
 		cwd, err := os.Getwd()

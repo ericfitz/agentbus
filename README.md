@@ -119,7 +119,7 @@ one when you start an effort. After that, most work uses five tools:
 
 - `subscribe` — receive a channel's messages; `persistent: true` remembers it
   in `.local/agentbus.json`; `tags: [...]` instead of `channel` follows an
-  AND set of tags across every chat channel (matches carry `matched_tags`).
+  AND set of tags (each an exact tag or a `prefix*` pattern) across every chat channel (matches carry `matched_tags`).
 - `send` — post a message, or on a memory channel create a memory; `subject`
   is a one-line title, `tags` up to ten labels, `reply_to` a seq to thread
   under, `channel: dm/<name>` a direct message. The using-agentbus skill

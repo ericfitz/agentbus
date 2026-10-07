@@ -195,7 +195,7 @@ func addMemoryAccessAndDropTaskSubscriptions(tx *sql.Tx) error {
 
 // addSessionHarness (schema 7 -> 8, ADR 0015) adds the sessions columns that
 // hold the harness name and version from the MCP initialize handshake's
-// clientInfo. Existing rows get ” (unknown) until their next register. The
+// clientInfo. Existing rows get an empty string (unknown) until their next register. The
 // column checks keep the step safe on a file that already has them (a test
 // shaping an older version from a fresh file).
 func addSessionHarness(tx *sql.Tx) error {
@@ -238,7 +238,7 @@ func addSessionHarnessProcess(tx *sql.Tx) error {
 // tag was one. SQLite needs a default to add a NOT NULL column. Like
 // addSessionHarness, it skips a column the file already has: a v4 file
 // migrating straight through gets both from tagSubscriptionTagsDDL in
-// splitTagSets, with ” in every backfilled row, so the UPDATE always runs.
+// splitTagSets, with an empty string in every backfilled row, so the UPDATE always runs.
 // A file with no table at all (an older file whose chain skips v5, or a
 // test shaping one) has nothing to alter or backfill; the schema DDL that
 // runs after migrate creates it.

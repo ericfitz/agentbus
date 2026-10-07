@@ -12,8 +12,8 @@ import (
 // tagPanePrefix names a tag set's rail entry: "tags:" plus the sorted set
 // of patterns joined by commas (tags:env:*,failed). A tag may itself carry
 // one colon (#20), which is why the prefix is matched only at the start
-// and TrimPrefix leaves the set intact. No bus channel name begins with
-// this prefix (bus.ChannelNameRule; the list is synthetic anyway).
+// and TrimPrefix leaves the set intact. The rail list is synthetic
+// and the bus does not reserve the prefix.
 const tagPanePrefix = "tags:"
 
 const tagReadOnlyToast = "tag views are read-only; select a channel to post"

@@ -1,6 +1,6 @@
 # Structured tags and prefix matching
 
-Status: Approved 2026-10-06 (design; not yet implemented). Tracked in #20.
+Status: Approved 2026-10-06 (design). Implemented on branch impl/2026-10-07 (2026-10-07). Tracked in #20.
 Amends ADR 0009.
 
 ## Goal

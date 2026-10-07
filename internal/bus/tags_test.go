@@ -43,6 +43,100 @@ func TestNormalizeTags(t *testing.T) {
 	}
 }
 
+func TestNormalizeTagPatterns(t *testing.T) {
+	long32 := strings.Repeat("a", 32)
+	got, err := NormalizeTagPatterns([]string{"Failed", "ENV:*", "env*", "env:pr*", "failed", long32 + "*", long32})
+	want := []string{long32, long32 + "*", "env*", "env:*", "env:pr*", "failed"}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("%v %v, want %v", got, err, want)
+	}
+	if got, err := NormalizeTagPatterns(nil); err != nil || got != nil {
+		t.Fatalf("no patterns: %v %v", got, err)
+	}
+	for _, bad := range []string{"*", ":*", "e*v", "env**", "env_*", "*env", "env:*x", "", long32 + "b*", "a_b", "env::*"} {
+		wantCode(t, func() error { _, err := NormalizeTagPatterns([]string{bad}); return err }(), "validation")
+	}
+	eleven := make([]string, 11)
+	for i := range eleven {
+		eleven[i] = "t" + string(rune('a'+i)) + "*"
+	}
+	wantCode(t, func() error { _, err := NormalizeTagPatterns(eleven); return err }(), "validation")
+	_, err = NormalizeTagPatterns([]string{"A_b*"})
+	if err == nil || !strings.Contains(err.Error(), `tag pattern \"a_b*\" must be a tag, or a 1-32 character tag prefix followed by one *`) {
+		t.Fatalf("pattern error text: %v", err)
+	}
+}
+
+// TestMatchTagAgreesWithSQL: the Go rule and the BETWEEN range the SQL
+// paths use give the same answer on every case, including env* matching
+// env itself and env:* not matching env.
+func TestMatchTagAgreesWithSQL(t *testing.T) {
+	b := newTestBus(t)
+	cases := []struct {
+		pattern, tag string
+		want         bool
+	}{
+		{"env*", "env", true},
+		{"env*", "environment", true},
+		{"env*", "env:prod", true},
+		{"env*", "env-", true},
+		{"env*", "env9", true},
+		{"env*", "envz", true},
+		{"env*", "enw", false},
+		{"env:*", "env", false},
+		{"env:*", "env:prod", true},
+		{"env:*", "env:9", true},
+		{"env:*", "env:z-9", true},
+		{"env:*", "envy", false},
+		{"env:pr*", "env:prod", true},
+		{"env:pr*", "env:staging", false},
+		{"failed", "failed", true},
+		{"failed", "failed-again", false},
+		{"fail*", "failed", true},
+		{"a*", "b", false},
+	}
+	for _, c := range cases {
+		if got := MatchTag(c.pattern, c.tag); got != c.want {
+			t.Errorf("MatchTag(%q, %q) = %v, want %v", c.pattern, c.tag, got, c.want)
+		}
+		lo, hi := tagRange(c.pattern)
+		var n int
+		if err := b.db.QueryRow("SELECT ? BETWEEN ? AND ?", c.tag, lo, hi).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if (n == 1) != c.want {
+			t.Errorf("SQL %q BETWEEN %q AND %q = %d, want %v", c.tag, lo, hi, n, c.want)
+		}
+	}
+	if lo, hi := tagRange("env:*"); lo != "env:" || hi != "env:~" {
+		t.Fatalf("tagRange(env:*) = %q %q", lo, hi)
+	}
+	if lo, hi := tagRange("failed"); lo != "failed" || hi != "failed" {
+		t.Fatalf("tagRange(failed) = %q %q", lo, hi)
+	}
+}
+
+func TestMatchTags(t *testing.T) {
+	cases := []struct {
+		patterns, tags []string
+		want           bool
+	}{
+		{[]string{"failed"}, []string{"failed", "env:prod"}, true},
+		{[]string{"failed", "env:*"}, []string{"env:prod", "failed"}, true},
+		{[]string{"failed", "env:*"}, []string{"env:prod"}, false},
+		{[]string{"env:*", "env:prod"}, []string{"env:prod"}, true},
+		{[]string{"env:*", "env:prod"}, []string{"env:staging"}, false},
+		{[]string{"env:*"}, []string{"env"}, false},
+		{[]string{"env*"}, nil, false},
+		{nil, []string{"x"}, true},
+	}
+	for _, c := range cases {
+		if got := MatchTags(c.patterns, c.tags); got != c.want {
+			t.Errorf("MatchTags(%q, %q) = %v, want %v", c.patterns, c.tags, got, c.want)
+		}
+	}
+}
+
 func TestSendStoresTagsAndHistorySearchFilter(t *testing.T) {
 	b, sam, kim := setupTwo(t)
 	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "one", Tags: []string{"Release", "bug", "release"}}); err != nil {

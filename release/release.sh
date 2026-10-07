@@ -3,8 +3,8 @@
 # macOS: universal binary, codesigned and notarized here. Linux: static
 # amd64/arm64 binaries built here and smoke-tested in Docker. Windows:
 # amd64/arm64 zips built here, checked with `file`, run by the windows.yml
-# workflow and the VM. Every archive
-# is listed in SHA256SUMS, signed with the Ed25519 release key.
+# workflow and the VM. Every archive is listed in SHA256SUMS, signed with the
+# Ed25519 release key.
 #   ./release/release.sh v0.1.1
 # Builds from the tag, so HEAD may be anywhere. Reruns for the same tag reuse
 # the release and replace every asset (--clobber).
@@ -143,13 +143,13 @@ smoke_linux() {
 # build_windows builds agentbus.exe into $DIST/windows-<arch>/ and packages
 # each as agentbus-<tag>-windows-<arch>.zip.
 build_windows() {
-    local arch
+    local arch archive
     for arch in amd64 arm64; do
         echo "==> Building windows/$arch"
         mkdir -p "$DIST/windows-$arch"
         (cd "$SRC" && CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath \
             -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "$DIST/windows-$arch/$BIN_NAME.exe" .)
-        local archive="${BIN_NAME}-${TAG}-windows-${arch}.zip"
+        archive="${BIN_NAME}-${TAG}-windows-${arch}.zip"
         (cd "$DIST/windows-$arch" && zip -q "$DIST/$archive" "$BIN_NAME.exe")
         ARCHIVES+=("$archive")
     done
@@ -186,15 +186,14 @@ check_script_embedded() {
 }
 
 # check_installers_embedded is the cheap preflight form: it reads install.sh
-# from the tag, before anything is built.
+# and install.ps1 from the tag, before anything is built.
 check_installers_embedded() {
     local tmp; tmp="$(mktemp)"
     git -C "$REPO_ROOT" show "$TAG:install.sh" > "$tmp" 2>/dev/null || { rm -f "$tmp"; fail "$TAG has no install.sh; the installer ships with every release, so tag a commit that includes it"; }
     local rc=0
     (check_script_embedded "$tmp" install.sh) || rc=$?
-    # install.ps1 is checked whenever the tag has it (the Windows installer
-    # joins the release assets in a later step).
-    if [[ "$rc" -eq 0 ]] && git -C "$REPO_ROOT" show "$TAG:install.ps1" > "$tmp" 2>/dev/null; then
+    if [[ "$rc" -eq 0 ]]; then
+        git -C "$REPO_ROOT" show "$TAG:install.ps1" > "$tmp" 2>/dev/null || { rm -f "$tmp"; fail "$TAG has no install.ps1; the Windows installer ships with every release, so tag a commit that includes it"; }
         (check_script_embedded "$tmp" install.ps1) || rc=$?
     fi
     rm -f "$tmp"
@@ -279,11 +278,14 @@ update_tap() {
         "LINUX_AMD64_URL=$base/$la" "LINUX_AMD64_SHA256=$(sum_of "$la")" \
         "LINUX_ARM64_URL=$base/$lr" "LINUX_ARM64_SHA256=$(sum_of "$lr")"
     if cmp -s "$rendered" "$TAP_DIR/Formula/${BIN_NAME}.rb"; then
-        echo "formula unchanged"; return
+        echo "formula unchanged"
+    else
+        cp "$rendered" "$TAP_DIR/Formula/${BIN_NAME}.rb"
+        git -C "$TAP_DIR" add "Formula/${BIN_NAME}.rb"
+        git -C "$TAP_DIR" commit -m "${BIN_NAME} ${VERSION}"
     fi
-    cp "$rendered" "$TAP_DIR/Formula/${BIN_NAME}.rb"
-    git -C "$TAP_DIR" add "Formula/${BIN_NAME}.rb"
-    git -C "$TAP_DIR" commit -m "${BIN_NAME} ${VERSION}"
+    # Always push: a rerun after "commit ok, push failed" must publish the
+    # stranded commit, and the push is a no-op when up to date.
     git -C "$TAP_DIR" push
 }
 
@@ -299,11 +301,13 @@ update_scoop() {
         "ARM64_URL=$base/$wr" "ARM64_SHA256=$(sum_of "$wr")"
     mkdir -p "$SCOOP_DIR/bucket"
     if cmp -s "$rendered" "$SCOOP_DIR/bucket/${BIN_NAME}.json"; then
-        echo "scoop manifest unchanged"; return
+        echo "scoop manifest unchanged"
+    else
+        cp "$rendered" "$SCOOP_DIR/bucket/${BIN_NAME}.json"
+        git -C "$SCOOP_DIR" add "bucket/${BIN_NAME}.json"
+        git -C "$SCOOP_DIR" commit -m "${BIN_NAME} ${VERSION}"
     fi
-    cp "$rendered" "$SCOOP_DIR/bucket/${BIN_NAME}.json"
-    git -C "$SCOOP_DIR" add "bucket/${BIN_NAME}.json"
-    git -C "$SCOOP_DIR" commit -m "${BIN_NAME} ${VERSION}"
+    # Always push (see update_tap).
     git -C "$SCOOP_DIR" push
 }
 
@@ -314,7 +318,10 @@ update_scoop() {
 # GITHUB_TOKEN would override gh's own auth for the rest of the run.
 submit_winget() {
     echo "==> Submitting ${WINGET_ID} ${VERSION} to winget"
-    if [[ -n "$(gh pr list --repo microsoft/winget-pkgs --state open --search "${WINGET_ID} version ${VERSION} in:title" --json number --jq '.[].number')" ]]; then
+    local open
+    open="$(gh pr list --repo microsoft/winget-pkgs --state open --search "\"${WINGET_ID} version ${VERSION}\" in:title" --json number --jq '.[].number')" \
+        || fail "could not list open pull requests in microsoft/winget-pkgs; rerun once gh works (an open pull request for ${VERSION} would make komac open a duplicate)"
+    if [[ -n "$open" ]]; then
         echo "winget: an open pull request for ${VERSION} exists; nothing to do"; return
     fi
     local base="https://github.com/${GH_REPO}/releases/download/${TAG}"

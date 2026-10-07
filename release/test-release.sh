@@ -116,20 +116,24 @@ check real-unembedded 1 "no embedded release key" -- bash -c "source '$HERE/rele
 "$HERE/embed-key.sh" "$WORK/throwaway.pub" "$WORK/real-install.sh" >/dev/null
 check real-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.sh' install.sh"
 cp "$WORK/real-install.sh" "$WORK/repo/install.sh" && git -C "$WORK/repo" add install.sh && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m embedded && git -C "$WORK/repo" tag v0.0.4
-check preflight-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_installers_embedded"
+check preflight-no-ps1 1 "v0.0.4 has no install.ps1; the Windows installer ships with every release, so tag a commit that includes it" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_installers_embedded"
 # install.ps1 in the tag: unembedded refused, embedded accepted.
-awk '
-    /^# BEGIN agentbus release public key$/ { print; print "$PubKeyPem = @'"'"'"; print "-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----"; print "'"'"'@"; skip = 1; next }
-    /^# END agentbus release public key$/ { skip = 0 }
-    !skip { print }
-' "$HERE/../install.ps1" > "$WORK/real-install.ps1"
+# unembed_ps1 <in> <out> resets the key block of an install.ps1 to the placeholder.
+unembed_ps1() {
+    awk '
+        /^# BEGIN agentbus release public key$/ { print; print "$PubKeyPem = @'"'"'"; print "-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----"; print "'"'"'@"; skip = 1; next }
+        /^# END agentbus release public key$/ { skip = 0 }
+        !skip { print }
+    ' "$1" > "$2"
+}
+unembed_ps1 "$HERE/../install.ps1" "$WORK/real-install.ps1"
 check ps1-unembedded 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.ps1' install.ps1"
 cp "$WORK/real-install.ps1" "$WORK/repo/install.ps1" && git -C "$WORK/repo" add install.ps1 && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m ps1 && git -C "$WORK/repo" tag v0.0.90
 check preflight-ps1-placeholder 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.90; check_installers_embedded"
 "$HERE/embed-key.sh" "$WORK/throwaway.pub" "$WORK/real-install.ps1" >/dev/null
 check ps1-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.ps1' install.ps1"
 cp "$WORK/real-install.ps1" "$WORK/repo/install.ps1" && git -C "$WORK/repo" add install.ps1 && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m ps1e && git -C "$WORK/repo" tag v0.0.91
-check preflight-ps1-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.91; check_installers_embedded"
+check preflight-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.91; check_installers_embedded"
 check preflight-no-installer 1 "v0.0.1 has no install.sh; the installer ships with every release, so tag a commit that includes it" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_installers_embedded"
 
 # check_tag_pushed against a local bare "origin" (no network). v0.0.4 is in the
@@ -183,11 +187,34 @@ cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
 cp "$WORK/real-install.ps1" "$WORK/cs/src/install.ps1"
 check copy-scripts-ok 0 "" -- bash -c "source '$HERE/release.sh'; SRC='$WORK/cs/src'; DIST='$WORK/cs/dist'; copy_scripts && cmp '$WORK/cs/src/install.ps1' '$WORK/cs/dist/install.ps1' && cmp '$WORK/cs/src/install.sh' '$WORK/cs/dist/install.sh'"
 mkdir -p "$WORK/cs/dist2"
-cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
-awk '/^# BEGIN agentbus release public key$/ { print; print "$PubKeyPem = @'"'"'"; print "-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----"; print "'"'"'@"; skip = 1; next } /^# END agentbus release public key$/ { skip = 0 } !skip { print }' "$WORK/cs/src/install.ps1" > "$WORK/cs/src/install.ps1.new" && mv "$WORK/cs/src/install.ps1.new" "$WORK/cs/src/install.ps1"
+unembed_ps1 "$WORK/cs/src/install.ps1" "$WORK/cs/src/install.ps1.new" && mv "$WORK/cs/src/install.ps1.new" "$WORK/cs/src/install.ps1"
 check copy-scripts-ps1-unembedded 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; SRC='$WORK/cs/src'; DIST='$WORK/cs/dist2'; copy_scripts"
 check copy-scripts-ps1-not-copied 1 "" -- test -e "$WORK/cs/dist2/install.ps1"
 check sums-list-ps1 0 "" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/cs/dist'; ARCHIVES=(); cp '$WORK/cs/src/install.sh' '$WORK/cs/dist/install.sh'; cp '$WORK/real-install.ps1' '$WORK/cs/dist/install.ps1'; write_sums >/dev/null && awk '{print \$2}' '$WORK/cs/dist/SHA256SUMS' | diff - <(printf 'install.sh\ninstall.ps1\n')"
+
+# A rerun after "commit ok, push failed" must push (tap and Scoop bucket).
+# Local bare remote; a pre-receive hook makes the first push fail.
+git init -q --bare "$WORK/rp-origin.git"
+git clone -q "$WORK/rp-origin.git" "$WORK/rp-seed" 2>/dev/null
+mkdir -p "$WORK/rp-seed/Formula" "$WORK/rp-seed/bucket"
+touch "$WORK/rp-seed/Formula/.keep" "$WORK/rp-seed/bucket/.keep"
+git -C "$WORK/rp-seed" add -A && git -C "$WORK/rp-seed" -c user.email=t@t -c user.name=t commit -q -m seed && git -C "$WORK/rp-seed" push -q origin HEAD
+mkdir -p "$WORK/rp-dist"
+printf '1111  agentbus-v1.0.0-macos-universal.tar.gz\n2222  agentbus-v1.0.0-linux-amd64.tar.gz\n3333  agentbus-v1.0.0-linux-arm64.tar.gz\n4444  agentbus-v1.0.0-windows-amd64.zip\n5555  agentbus-v1.0.0-windows-arm64.zip\n' > "$WORK/rp-dist/SHA256SUMS"
+rerun_push_case() { # <function> <dir-var> <name>
+    local fn="$1" var="$2" name="$3" clone="$WORK/rp-$3"
+    git clone -q "$WORK/rp-origin.git" "$clone" 2>/dev/null
+    printf '#!/bin/sh\nexit 1\n' > "$WORK/rp-origin.git/hooks/pre-receive"; chmod +x "$WORK/rp-origin.git/hooks/pre-receive"
+    local run="source '$HERE/release.sh'; REPO_ROOT='$HERE/..'; DIST='$WORK/rp-dist'; TAG=v1.0.0; VERSION=1.0.0; $var='$clone'; export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t; $fn"
+    check "$name-first-push-fails" 1 "" -- bash -c "$run"
+    check "$name-commit-stranded" 0 "" -- bash -c "[[ \$(git -C '$clone' rev-list --count @{u}..HEAD) == 1 ]]"
+    rm -f "$WORK/rp-origin.git/hooks/pre-receive"
+    check "$name-rerun-pushes" 0 "" -- bash -c "$run"
+    check "$name-pushed" 0 "" -- bash -c "[[ \$(git -C '$clone' rev-list --count @{u}..HEAD) == 0 && \$(git -C '$WORK/rp-origin.git' log --oneline | wc -l) -ge 2 ]]"
+}
+rerun_push_case update_tap TAP_DIR tap
+git -C "$WORK/rp-origin.git" update-ref -d refs/heads/none 2>/dev/null || true
+rerun_push_case update_scoop SCOOP_DIR scoop
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

@@ -23,7 +23,7 @@ PEM="$(cat "$PUB")"
 
 for script in "$@"; do
     [[ -f "$script" ]] || { echo "error: no such script: $script" >&2; exit 1; }
-    if ! { grep -qF "$BEGIN" "$script" && grep -qF "$END" "$script"; }; then
+    if ! { grep -qxF "$BEGIN" "$script" && grep -qxF "$END" "$script"; }; then
         echo "error: $script has no '$BEGIN' / '$END' markers" >&2; exit 1
     fi
     case "$script" in
@@ -31,15 +31,21 @@ for script in "$@"; do
         *)     block="PUBKEY_PEM='$PEM'" ;;
     esac
     tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    cp -p "$script" "$tmp"   # carry the mode over; the redirect below keeps it
     # The block goes through the environment, not -v: awk -v would interpret
     # backslashes, and ENVIRON keeps the embedded newlines verbatim.
-    BLOCK="$block" awk -v begin="$BEGIN" -v end="$END" '
+    # A BEGIN with no later END (END before BEGIN) would swallow the rest of
+    # the file, so awk exits 1 in that case.
+    if ! BLOCK="$block" awk -v begin="$BEGIN" -v end="$END" '
         $0 == begin { print; print ENVIRON["BLOCK"]; skipping = 1; next }
         $0 == end   { skipping = 0 }
         !skipping   { print }
-    ' "$script" > "$tmp"
+        END         { if (skipping) exit 1 }
+    ' "$script" > "$tmp"; then
+        echo "error: $script: '$END' must follow '$BEGIN'" >&2; exit 1
+    fi
     if cmp -s "$tmp" "$script"; then rm -f "$tmp"; echo "$script: unchanged"; else
-        chmod "$(stat -f '%Lp' "$script")" "$tmp"   # BSD stat: this tooling runs on macOS
         mv "$tmp" "$script"; echo "$script: key embedded"
     fi
 done

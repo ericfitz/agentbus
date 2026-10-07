@@ -55,8 +55,9 @@ END;`
 
 // TestMigrateV1DropsMessagesBytes (ADR 0006 item 4): opening a schema
 // version 1 database rebuilds messages without bytes in one transaction,
-// keeps every row, embedding, and FTS entry, carries the AUTOINCREMENT
-// counter over, and stamps user_version 2.
+// keeps every row and FTS entry, carries the AUTOINCREMENT counter over,
+// and stamps user_version 2. The chain keeps every row and FTS entry, but
+// row 1's embedding is dropped because foldRefs changes its content.
 func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	// Row 1 carries refs (a path with a space, a URL with non-ASCII and a
 	// query string) so the v11 fold is proven through the messages_v2 and
@@ -926,7 +927,7 @@ func newV10RefsFile(t *testing.T, stmts ...string) config.Config {
 // refs, 6 an empty array, 7 malformed JSON, 8 a chat message, 9 a
 // tombstoned first revision, 10 its live second revision, 11 a memory
 // without refs, 12 an entry without a value; embeddings on 1 (folded),
-// 6 and 11 (untouched). Statements are raw strings, so the backslashes
+// 6 and 11 (untouched); embed_failures on 1 (folded) and 11 (untouched). Statements are raw strings, so the backslashes
 // reach SQLite as written and JSON decodes them.
 var v10RefsRows = []string{
 	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',1,'','issue link',1,1,'[{"kind":"url","value":"https://github.com/ericfitz/agentbus/issues/874"}]')`,
@@ -944,6 +945,8 @@ var v10RefsRows = []string{
 	"INSERT INTO embeddings(seq,model,vector) VALUES(1,'m',x'00')",
 	"INSERT INTO embeddings(seq,model,vector) VALUES(6,'m',x'00')",
 	"INSERT INTO embeddings(seq,model,vector) VALUES(11,'m',x'00')",
+	"INSERT INTO embed_failures(seq,model,error,failed_at) VALUES(1,'m','too long',1)",
+	"INSERT INTO embed_failures(seq,model,error,failed_at) VALUES(11,'m','too long',1)",
 }
 
 // foldedSeq1 is seq 1's content after the fold, asserted by several tests.
@@ -1024,7 +1027,10 @@ func TestMigrateV10FoldsRefs(t *testing.T) {
 		"/tmp/b":           5,
 		"example.com/chat": 8,
 		"example.com/rev2": 10,
-		"issue link":       1, // the old entry was replaced, not duplicated
+		"control":          4,  // quoted newline
+		"json":             7,  // Refs: not json
+		"kind":             12, // raw array
+		"issue link":       1,  // the old entry was replaced, not duplicated
 	} {
 		r, err := b.Search(sam, SearchInput{Query: q, Mode: "text"})
 		if err != nil || len(r.Hits) != 1 || r.Hits[0].Seq != seq {
@@ -1037,6 +1043,13 @@ func TestMigrateV10FoldsRefs(t *testing.T) {
 	}
 	if embedded != "6,11" {
 		t.Fatalf("embeddings after the fold: %q, want 6,11 (folded rows re-embed; untouched rows keep theirs)", embedded)
+	}
+	var failed string
+	if err := b.db.QueryRow("SELECT coalesce(group_concat(seq, ','), '') FROM (SELECT seq FROM embed_failures ORDER BY seq)").Scan(&failed); err != nil {
+		t.Fatal(err)
+	}
+	if failed != "11" {
+		t.Fatalf("embed_failures after the fold: %q, want 11 (a folded row's rejection concerned its old content)", failed)
 	}
 }
 

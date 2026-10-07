@@ -413,6 +413,7 @@ func foldRefs(tx *sql.Tx) error {
 			{"UPDATE messages SET content=? WHERE seq=?", []any{next, f.seq}},
 			{"INSERT INTO messages_fts(rowid, subject, content) VALUES(?, ?, ?)", []any{f.seq, f.subject, next}},
 			{"DELETE FROM embeddings WHERE seq=?", []any{f.seq}},
+			{"DELETE FROM embed_failures WHERE seq=?", []any{f.seq}},
 		} {
 			if _, err := tx.Exec(s.q, s.args...); err != nil {
 				return err

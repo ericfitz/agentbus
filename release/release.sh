@@ -93,6 +93,8 @@ check_tag_pushed() {
 check_gh() {
     gh auth status >/dev/null 2>&1 || fail "gh is not authenticated (gh auth login)"
     gh attestation verify --help >/dev/null 2>&1 || fail "this gh cannot verify attestations; upgrade gh (brew upgrade gh)"
+    gh workflow view "$WORKFLOW" --repo "$GH_REPO" >/dev/null 2>&1 \
+        || fail "$WORKFLOW is not on the default branch of $GH_REPO; merge it to main first"
 }
 
 # A tag cut before the workflow landed cannot use this flow: the run would
@@ -205,7 +207,7 @@ release_notes_args() {
 # draft, so the install scripts cannot see a partial release.
 ensure_draft() {
     local draft
-    if draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>/dev/null)"; then
+    if draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>&1)"; then
         if [[ "$draft" == true ]]; then
             echo "==> Reusing draft release $TAG"
         else
@@ -214,6 +216,9 @@ ensure_draft() {
         fi
         return
     fi
+    # Only "not found" means there is no release; any other error (network,
+    # rate limit, token) must not create a second draft for the same tag.
+    [[ "$draft" == *"release not found"* ]] || fail "could not query release $TAG: $draft"
     echo "==> Creating draft release $TAG"
     local notes=() line
     while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)
@@ -236,7 +241,8 @@ dispatch_build() {
     existing="$(list_run_ids)" || fail "could not list the existing $WORKFLOW runs"
     echo "==> Dispatching $WORKFLOW on $TAG"
     since="$(date -u -v-60S +%Y-%m-%dT%H:%M:%SZ)" # one minute of clock slack
-    gh workflow run "$WORKFLOW" --repo "$GH_REPO" --ref "$TAG" -f "tag=$TAG"
+    gh workflow run "$WORKFLOW" --repo "$GH_REPO" --ref "$TAG" -f "tag=$TAG" \
+        || fail "could not dispatch $WORKFLOW on $TAG"
     local ids=() id
     while IFS= read -r id; do
         if [[ -n "$id" ]]; then ids+=("$id"); fi
@@ -276,7 +282,8 @@ watch_run() {
 download_archives() {
     echo "==> Downloading the Linux and Windows archives"
     gh release download "$TAG" --repo "$GH_REPO" --dir "$DIST" --clobber \
-        --pattern "${BIN_NAME}-${TAG}-linux-*.tar.gz" --pattern "${BIN_NAME}-${TAG}-windows-*.zip"
+        --pattern "${BIN_NAME}-${TAG}-linux-*.tar.gz" --pattern "${BIN_NAME}-${TAG}-windows-*.zip" \
+        || fail "could not download the archives of $TAG; rerun the workflow"
     local a
     for a in linux-amd64.tar.gz linux-arm64.tar.gz windows-amd64.zip windows-arm64.zip; do
         [[ -f "$DIST/${BIN_NAME}-${TAG}-$a" ]] || fail "release $TAG lacks ${BIN_NAME}-${TAG}-$a; rerun the workflow"
@@ -291,7 +298,8 @@ verify_attestations() {
     local a
     for a in "${ARCHIVES[@]}"; do
         [[ "$a" == "$MACOS_ARCHIVE" ]] && continue
-        gh attestation verify "$DIST/$a" --repo "$GH_REPO" >/dev/null \
+        gh attestation verify "$DIST/$a" --repo "$GH_REPO" \
+            --signer-workflow "$GH_REPO/.github/workflows/$WORKFLOW" --source-ref "refs/tags/$TAG" >/dev/null \
             || fail "attestation of $a does not verify against $GH_REPO"
     done
 }
@@ -307,12 +315,15 @@ upload_assets() {
 # or stops with the draft in place under --no-publish.
 publish_release() {
     if [[ "$NO_PUBLISH" == 1 ]]; then
-        echo "==> --no-publish: stopping before publish; draft: https://github.com/$GH_REPO/releases/tag/$TAG"
+        local what=draft
+        [[ "$PUBLISHED" == 1 ]] && what=release
+        echo "==> --no-publish: stopping before publish; $what: https://github.com/$GH_REPO/releases/tag/$TAG"
         return 0
     fi
     if [[ "$PUBLISHED" == 0 ]]; then
         echo "==> Publishing release $TAG"
-        gh release edit "$TAG" --repo "$GH_REPO" --draft=false
+        gh release edit "$TAG" --repo "$GH_REPO" --draft=false \
+            || fail "could not publish $TAG; the draft stays"
     fi
     update_tap
     update_scoop

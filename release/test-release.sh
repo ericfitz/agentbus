@@ -223,11 +223,17 @@ pin_fixture short "uses: actions/checkout@${SHA:0:7} # v7"
 pin_fixture noref "uses: actions/checkout"
 pin_fixture docker "uses: docker://alpine:3.20"
 pin_fixture nocomment "uses: actions/checkout@$SHA"
+pin_fixture flow-v4 "{ uses: actions/checkout@v4 }"
+pin_fixture flow-ok "{ uses: actions/checkout@$SHA } # v7.0.1"
 check pins-sha-comment-ok 0 "OK" -- "$HERE/check-pins.sh" "$WORK/pins-ok"
 check pins-local-ok 0 "OK" -- "$HERE/check-pins.sh" "$WORK/pins-local"
-for n in v4 main short noref docker nocomment; do
+check pins-flow-map-ok 0 "OK" -- "$HERE/check-pins.sh" "$WORK/pins-flow-ok"
+for n in v4 main short noref docker nocomment flow-v4; do
     check "pins-$n-fails" 1 "w.yml:4" -- "$HERE/check-pins.sh" "$WORK/pins-$n"
 done
+# A grep that errors (exit 2) must fail the check, not read as "no uses: lines".
+mkdir -p "$WORK/badgrep" && printf '#!/bin/sh\nexit 2\n' > "$WORK/badgrep/grep" && chmod +x "$WORK/badgrep/grep"
+check pins-grep-error 1 "grep failed" -- env PATH="$WORK/badgrep:$PATH" "$HERE/check-pins.sh" "$WORK/pins-ok"
 check pins-missing-dir 1 "not found" -- "$HERE/check-pins.sh" "$WORK/pins-nonexistent"
 check pins-real-repo 0 "OK" -- "$HERE/check-pins.sh"
 
@@ -237,7 +243,7 @@ check removed-smoke-linux 1 "" -- bash -c "source '$HERE/release.sh'; declare -F
 check removed-build-windows 1 "" -- bash -c "source '$HERE/release.sh'; declare -F build_windows"
 check removed-check-pe 1 "" -- bash -c "source '$HERE/release.sh'; declare -F check_windows_pe"
 check removed-ensure-release 1 "" -- bash -c "source '$HERE/release.sh'; declare -F ensure_release"
-check no-docker-in-release-sh 1 "" -- rg -q -i 'docker' "$HERE/release.sh"
+check no-docker-in-release-sh 1 "" -- grep -qi docker "$HERE/release.sh"
 check args-no-publish-before 0 "" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish v1.2.3 && [[ \$NO_PUBLISH == 1 && \$TAG == v1.2.3 ]]"
 check args-no-publish-after 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --no-publish && [[ \$NO_PUBLISH == 1 ]]"
 check args-default-publish 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 && [[ \$NO_PUBLISH == 0 ]]"
@@ -260,9 +266,11 @@ gh() {
     printf '%s\n' "gh $*" >> "$GH_LOG"
     case "$1 $2" in
         "run list") local expr=""; while (($#)); do [[ "$1" == --jq ]] && expr="$2"; shift; done; jq -r "$expr" "$GH_RUNS" ;;
-        "release view") [[ -n "${GH_VIEW:-}" ]] && { printf '%s\n' "$GH_VIEW"; return 0; }; return 1 ;;
+        "release view") [[ -n "${GH_VIEW:-}" ]] && { printf '%s\n' "$GH_VIEW"; return 0; }; echo "${GH_VIEW_ERR:-release not found}" >&2; return 1 ;;
+        "workflow view") return "${GH_RC_WORKFLOW:-${GH_RC:-0}}" ;;
         "workflow run") [[ -n "${GH_RUNS_AFTER:-}" ]] && cp "$GH_RUNS_AFTER" "$GH_RUNS"; return "${GH_RC:-0}" ;;
-        "release create"|"release edit"|"release download"|"run watch"|"attestation verify"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
+        "release create"|"release edit"|"release download"|"run watch"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
+        "attestation verify") return "${GH_RC_ATTEST:-${GH_RC:-0}}" ;;
         *) echo "gh stub: unexpected call: $*" >&2; return 99 ;;
     esac
 }
@@ -302,8 +310,9 @@ check list-runs-for-tag 0 "101 102" -- with_stub "echo \$(list_run_ids | sort)"
 check list-runs-other-tag 0 "" -- with_stub "TAG=v8.8.8; [[ -z \$(list_run_ids) ]]"
 check dispatch-ignores-stale-run 1 "could not find the dispatched run" -- with_stub "export GH_RUNS='$WORK/runs-stale.json'; dispatch_build"
 check dispatch-adopts-new-run 0 "actions/runs/203" -- with_stub "cp '$WORK/runs-stale.json' '$WORK/runs-live.json'; export GH_RUNS='$WORK/runs-live.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build && [[ \$RUN_ID == 203 ]] && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3' '$WORK/gh.log'"
-check dispatch-failure-stops 1 "" -- with_stub "GH_RC=1 dispatch_build"
+check dispatch-failure-stops 1 "could not dispatch release-build.yml on v1.2.3" -- with_stub "GH_RC=1 dispatch_build"
 check draft-created 0 "Creating draft release" -- with_stub ": > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--verify-tag.*--draft' '$WORK/gh.log'"
+check draft-other-error-fails 1 "could not query release v1.2.3: HTTP 502" -- with_stub ": > '$WORK/gh.log'; GH_VIEW_ERR='HTTP 502: bad gateway' ensure_draft; rc=\$?; ! grep -q 'release create' '$WORK/gh.log' && exit \$rc"
 check draft-reused 0 "Reusing draft release" -- with_stub "GH_VIEW=true ensure_draft && [[ \$PUBLISHED == 0 ]]"
 check draft-reuse-no-create 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft; ! grep -q 'release create' '$WORK/gh.log'"
 check draft-already-published 0 "already published" -- with_stub "GH_VIEW=false ensure_draft && [[ \$PUBLISHED == 1 ]]"
@@ -311,19 +320,24 @@ check watch-fails-with-url 1 "actions/runs/102" -- with_stub "RUN_ID=102 GH_RC=1
 mkdir -p "$WORK/adist" && for a in linux-amd64.tar.gz linux-arm64.tar.gz windows-amd64.zip; do : > "$WORK/adist/agentbus-v1.2.3-$a"; done
 with_dist() { with_stub "DIST='$WORK/adist'; $1"; }
 check download-requires-four 1 "agentbus-v1.2.3-windows-arm64.zip" -- with_dist "download_archives"
+check download-failure-message 1 "could not download the archives of v1.2.3; rerun the workflow" -- with_dist "GH_RC=1 download_archives"
 : > "$WORK/adist/agentbus-v1.2.3-windows-arm64.zip"
 check download-ok 0 "" -- with_dist "download_archives && [[ \${#ARCHIVES[@]} == 4 ]]"
 check download-keeps-macos-first 0 "" -- with_dist "ARCHIVES=(agentbus-v1.2.3-macos-universal.tar.gz); download_archives && [[ \${#ARCHIVES[@]} == 5 && \${ARCHIVES[0]} == agentbus-v1.2.3-macos-universal.tar.gz ]]"
-check attest-ok 0 "" -- with_dist ": > '$WORK/gh.log'; download_archives && verify_attestations && [[ \$(grep -c 'gh attestation verify' '$WORK/gh.log') == 4 ]] && grep -q -- '--repo ericfitz/agentbus' '$WORK/gh.log'"
+check attest-ok 0 "" -- with_dist ": > '$WORK/gh.log'; download_archives && verify_attestations && [[ \$(grep -c 'gh attestation verify' '$WORK/gh.log') == 4 ]] && grep -q -- '--repo ericfitz/agentbus' '$WORK/gh.log' && [[ \$(grep -c -- '--signer-workflow ericfitz/agentbus/.github/workflows/release-build.yml --source-ref refs/tags/v1.2.3' '$WORK/gh.log') == 4 ]]"
 check attest-fails 1 "attestation" -- with_dist "download_archives; GH_RC=1 verify_attestations"
 check attest-skips-macos 0 "" -- with_dist ": > '$WORK/gh.log'; MACOS_ARCHIVE=agentbus-v1.2.3-macos-universal.tar.gz; ARCHIVES=(\$MACOS_ARCHIVE); download_archives; verify_attestations && ! grep -q macos '$WORK/gh.log' && [[ \$(grep -c 'gh attestation verify' '$WORK/gh.log') == 4 ]]"
 check no-publish-stops 0 "stopping before publish" -- with_stub ": > '$WORK/gh.log'; update_tap() { echo TAP; }; NO_PUBLISH=1 publish_release && ! grep -q 'release edit' '$WORK/gh.log'"
+check no-publish-says-draft 0 "draft: https://github.com/ericfitz/agentbus/releases/tag/v1.2.3" -- with_stub "NO_PUBLISH=1 publish_release"
+check no-publish-rerun-says-release 0 "release: https://github.com/ericfitz/agentbus/releases/tag/v1.2.3" -- with_stub "NO_PUBLISH=1 PUBLISHED=1 publish_release"
 check no-publish-skips-packagers 0 "" -- with_stub "update_tap() { echo TAP; }; update_scoop() { echo SCOOP; }; submit_winget() { echo WINGET; }; [[ -z \$(NO_PUBLISH=1 publish_release | grep -E '^(TAP|SCOOP|WINGET)\$') ]]"
 check publish-undrafts-then-packagers 0 "TAP SCOOP WINGET" -- with_stub ": > '$WORK/gh.log'; update_tap() { echo TAP >> '$WORK/order'; }; update_scoop() { echo SCOOP >> '$WORK/order'; }; submit_winget() { echo WINGET >> '$WORK/order'; }; : > '$WORK/order'; publish_release >/dev/null && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --draft=false' '$WORK/gh.log' && echo \$(cat '$WORK/order')"
 check publish-rerun-skips-edit 0 "" -- with_stub ": > '$WORK/gh.log'; update_tap() { :; }; update_scoop() { :; }; submit_winget() { :; }; PUBLISHED=1 publish_release >/dev/null && ! grep -q 'release edit' '$WORK/gh.log'"
-check publish-edit-failure-stops 1 "" -- with_stub "update_tap() { echo TAP; }; GH_RC=1 publish_release"
+check publish-edit-failure-stops 1 "could not publish v1.2.3; the draft stays" -- with_stub "update_tap() { echo TAP; }; GH_RC=1 publish_release"
 check upload-assets 0 "" -- with_stub ": > '$WORK/gh.log'; mkdir -p '$WORK/udist'; MACOS_ARCHIVE=agentbus-v1.2.3-macos-universal.tar.gz; DIST='$WORK/udist'; upload_assets && grep -q 'gh release upload v1.2.3 --repo ericfitz/agentbus --clobber agentbus-v1.2.3-macos-universal.tar.gz install.sh install.ps1 SHA256SUMS SHA256SUMS.sig' '$WORK/gh.log'"
 check gh-auth-fails 1 "gh is not authenticated" -- with_stub "GH_RC=1 check_gh"
+check gh-attest-missing 1 "cannot verify attestations" -- with_stub "GH_RC_ATTEST=1 check_gh"
+check gh-workflow-not-on-default 1 "release-build.yml is not on the default branch of ericfitz/agentbus; merge it to main first" -- with_stub "GH_RC_WORKFLOW=1 check_gh"
 check gh-ok 0 "" -- with_stub "check_gh"
 # main runs the steps in the order the spec pins; every step is replaced by a
 # recorder so nothing builds, dispatches or publishes.

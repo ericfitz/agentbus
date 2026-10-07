@@ -12,16 +12,18 @@ files=("$DIR"/*.yml "$DIR"/*.yaml)
 [[ ${#files[@]} -gt 0 ]] || { echo "error: no workflow files in $DIR" >&2; exit 1; }
 
 rc=0
-hits="$(rg -nH --no-heading '^\s*(-\s+)?uses:' "${files[@]}")" || rc=$?
+# grep -nHE (BSD and GNU): `uses:` as a block key, after a `- ` list dash, or
+# inside a flow map (`- { uses: ... }`).
+hits="$(grep -nHE '(^|[-{,])[[:space:]]*uses:' "${files[@]}")" || rc=$?
 case "$rc" in
     0) ;;
     1) echo "check-pins: no uses: lines in $DIR"; exit 0 ;;
-    *) echo "error: rg failed (exit $rc) reading $DIR" >&2; exit 1 ;;
+    *) echo "error: grep failed (exit $rc) reading $DIR" >&2; exit 1 ;;
 esac
 
 bad=0
-pin='^[^:]+:[0-9]+:[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]'
-local_ref='^[^:]+:[0-9]+:[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+\./'
+pin='^[^:]+:[0-9]+:[^#]*uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}[[:space:]]*\}?[[:space:]]+#[[:space:]]*v[0-9]'
+local_ref='^[^:]+:[0-9]+:[^#]*uses:[[:space:]]+\./'
 while IFS= read -r line; do
     if [[ "$line" =~ $local_ref ]] || [[ "$line" =~ $pin ]]; then continue; fi
     echo "error: unpinned action (want @<40-hex sha> # vX.Y.Z): $line" >&2

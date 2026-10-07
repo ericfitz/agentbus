@@ -48,7 +48,8 @@ With the GitHub CLI you can check that an archive was built from this
 repository by that workflow, in addition to the signature check:
 
 ```sh
-gh attestation verify agentbus-vX.Y.Z-linux-amd64.tar.gz --repo ericfitz/agentbus
+gh attestation verify agentbus-vX.Y.Z-linux-amd64.tar.gz --repo ericfitz/agentbus \
+  --signer-workflow ericfitz/agentbus/.github/workflows/release-build.yml
 ```
 
 Homebrew on Linux works too: `brew install ericfitz/tap/agentbus` installs

@@ -38,7 +38,7 @@ verify: ## Done gate: build, vet, vet-cross, gofmt, lint, tests, in that order
 	$(MAKE) test
 	@echo "verify: OK"
 
-release-check: ## Release tooling checks: actionlint, shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs actionlint, shellcheck, Docker, python3, ruby, openssl@3; not part of verify
+release-check: ## Release tooling checks: actionlint, shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs actionlint, shellcheck, jq, Docker, python3, ruby, openssl@3; not part of verify
 	actionlint .github/workflows/*.yml
 	release/check-pins.sh
 	shellcheck -x release/*.sh

@@ -45,6 +45,68 @@ grep agentbus-vX.Y.Z-linux-amd64.tar.gz SHA256SUMS | sha256sum -c
 Homebrew on Linux works too: `brew install ericfitz/tap/agentbus` installs
 the static amd64 or arm64 binary.
 
+## Windows: install script, Scoop, winget
+
+```powershell
+irm https://github.com/ericfitz/agentbus/releases/latest/download/install.ps1 | iex
+```
+
+Installs `agentbus.exe` into `%LocalAppData%\Programs\agentbus` (amd64 or
+arm64) and adds that directory to your user `PATH`; open a new terminal
+afterwards. Windows PowerShell 5.1 and PowerShell 7 both work. The script
+verifies the release's Ed25519-signed `SHA256SUMS` with OpenSSL 3 and then
+the zip's hash. It looks for OpenSSL 3 on `PATH` first, then in Git for
+Windows (`usr\bin\openssl.exe`, then `mingw64\bin\openssl.exe`);
+`winget install --id Git.Git -e` provides one, and without OpenSSL 3 the
+script refuses. Rerunning upgrades: a running `agentbus.exe` is renamed, not
+overwritten, so restart harness sessions and the TUI afterwards. The script
+never runs `agentbus init`; it prints the next steps.
+
+| Variable | Meaning |
+|---|---|
+| `AGENTBUS_VERSION` | Install this tag (`vX.Y.Z`) instead of the latest release. |
+| `AGENTBUS_INSTALL_DIR` | Absolute target directory (default `%LocalAppData%\Programs\agentbus`). |
+| `AGENTBUS_BASE_URL` | A mirror of `https://github.com/ericfitz/agentbus`. |
+| `AGENTBUS_SKIP_SIGNATURE` | `1` skips only the signature check; the hash is still verified. Unset is the default; any other value is rejected. |
+
+As on Linux, the script stops with a message instead of guessing when it is
+given positional arguments, an `AGENTBUS_VERSION` that is not exactly
+`vX.Y.Z`, a relative `AGENTBUS_INSTALL_DIR`, no `LocalAppData` and no
+`AGENTBUS_INSTALL_DIR`, a copy without an embedded release key, or when
+`<dir>\agentbus.exe` is a directory. It also stops when the target
+directory is not writable or when the installed binary does not run
+`agentbus version`. A refusal throws, so a piped `iex` leaves your session
+open.
+
+Package managers:
+
+```powershell
+scoop bucket add ericfitz https://github.com/ericfitz/scoop-bucket
+scoop install agentbus
+winget install ericfitz.agentbus
+```
+
+Stop agentbus sessions (MCP servers, `agentbus wait`, the TUI) before
+`scoop update agentbus` or `winget upgrade ericfitz.agentbus`: neither can
+replace the files of a running program.
+
+Windows paths: the configuration file is `%AppData%\agentbus\config.json`
+and the data directory `%LocalAppData%\agentbus` (Local, so the database
+does not roam with a domain profile). `AGENTBUS_CONFIG`, `AGENTBUS_DATA_DIR`
+and `data_directory` override them as on other platforms. `%AppData%` must
+be set (it is in a normal session); in a stripped environment pass
+`--config` or set `AGENTBUS_CONFIG`.
+
+## WSL
+
+Inside WSL use the Linux installer above. Windows and WSL each run their
+own bus: an agent in a Windows terminal and an agent in a WSL shell do not
+see each other. agentbus refuses a data directory that crosses the boundary
+(a `/mnt/c/...` path under WSL, or a `\\wsl$\...`, `\\wsl.localhost\...`
+or mapped-drive path on Windows), because SQLite's file locks do not work
+between Windows and WSL processes on one file and concurrent use could
+corrupt the database. Keep each side's database on its own disk.
+
 ## Or, build from source
 
 ```sh
@@ -134,7 +196,9 @@ The sections below describe what `init` sets up, for doing it by hand.
 
 ## Configuration (optional)
 
-Default path: `~/.config/agentbus/config.json`. No file means defaults.
+Default path: `~/.config/agentbus/config.json` (`%AppData%\agentbus\config.json`
+on Windows, where `%AppData%` must be set or you pass `--config` or
+`AGENTBUS_CONFIG`). No file means defaults.
 Override the path with `--config <path>` or the `AGENTBUS_CONFIG` environment
 variable; override the data directory alone with `AGENTBUS_DATA_DIR`.
 
@@ -353,7 +417,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   process (ADR 0017): the `agentbus mcp` server records the harness (its
   first non-shell ancestor) on each session it registers, and they use the
   live top-level session registered from their own harness. Without a match
-  (or on a platform other than macOS and Linux) they use the working
+  (or on a platform other than macOS, Linux and Windows) they use the working
   directory's identity, what `agentbus identity` prints. So a second session
   in one repository, registered as `<name>2`, gets its own hooks and wait.
 - `agentbus subagent-hook` is the Claude Code SubagentStart hook. It reads
@@ -432,7 +496,8 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   their registration and must register again. Message sequence numbers keep
   counting up across a reset rather than restarting at 1.
 - Logs never go to stdout or stderr. The default data directory is
-  `~/.local/share/agentbus` on macOS and Linux.
+  `~/.local/share/agentbus` on macOS and Linux, and `%LocalAppData%\agentbus` on
+  Windows.
 
 ## TUI theme
 

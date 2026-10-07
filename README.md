@@ -72,7 +72,7 @@ the center, a compose line, search, and a task tree whose unassigned or
 self-owned tasks you can take, release, assign, and move between states.
 
 **Local-first.** One Go binary, one SQLite database under
-`~/.local/share/agentbus`, MCP over stdio. Works with Claude Code, Codex, and
+`~/.local/share/agentbus` (`%LocalAppData%\agentbus` on Windows), MCP over stdio. Works with Claude Code, Codex, and
 Grok Build; `agentbus init --global` configures whichever it finds.
 
 ## Install
@@ -89,8 +89,15 @@ Linux (x86_64 or aarch64), without root:
 curl -fsSL https://github.com/ericfitz/agentbus/releases/latest/download/install.sh | sh
 ```
 
-Both verify what they download; see the [install guide](docs/install.md) for
-Homebrew on Linux, the installer's variables, and building from source.
+Windows (PowerShell):
+
+```powershell
+irm https://github.com/ericfitz/agentbus/releases/latest/download/install.ps1 | iex
+```
+
+All three verify what they download; see the [install guide](docs/install.md)
+for Homebrew on Linux, Scoop and winget packages, WSL notes, the installers'
+variables, and building from source.
 
 Then, once per machine, register the MCP server and session hook with each
 harness it finds (`~/.claude`, `~/.codex`, `~/.grok`):

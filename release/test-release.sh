@@ -118,5 +118,22 @@ cp "$WORK/real-install.sh" "$WORK/repo/install.sh" && git -C "$WORK/repo" add in
 check preflight-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_installers_embedded"
 check preflight-no-installer 1 "v0.0.1 has no install.sh; the installer ships with every release, so tag a commit that includes it" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_installers_embedded"
 
+# --- fixture-server.py ------------------------------------------------------
+mkdir -p "$WORK/fx/valid/v9.0.1"
+printf 'v9.0.1\n' > "$WORK/fx/valid/latest"
+printf 'hello\n' > "$WORK/fx/valid/v9.0.1/asset.txt"
+port=$(( 20000 + RANDOM % 20000 ))
+python3 -I "$HERE/testdata/fixture-server.py" "$WORK/fx" "$port" & server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null; rm -rf "$WORK"' EXIT
+for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+check server-latest-redirect 0 "/valid/releases/tag/v9.0.1" -- curl -sI -o /dev/null -w '%{redirect_url}' "http://127.0.0.1:$port/valid/releases/latest"
+check server-download 0 "hello" -- curl -fsS "http://127.0.0.1:$port/valid/releases/download/v9.0.1/asset.txt"
+check server-head 0 "200" -- curl -sI -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/valid/releases/download/v9.0.1/asset.txt"
+check server-404-asset 0 "404" -- curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/valid/releases/download/v9.0.1/nope"
+check server-404-variant 0 "404" -- curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/other/releases/latest"
+check server-traversal 0 "400" -- curl -s -o /dev/null -w '%{http_code}' --path-as-is "http://127.0.0.1:$port/valid/releases/download/../latest"
+kill "$server_pid"; wait "$server_pid" 2>/dev/null || true
+check server-stopped 1 "" -- kill -0 "$server_pid"
+
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

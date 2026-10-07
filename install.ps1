@@ -143,7 +143,8 @@ function Install-Binary([string]$Dir, [string]$Asset, [string]$InstallDir) {
     try {
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $probe = Join-Path $InstallDir ('.agentbus-write-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-        [IO.File]::WriteAllText($probe, 'x'); Remove-Item -LiteralPath $probe -Force
+        try { [IO.File]::WriteAllText($probe, 'x') }
+        finally { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
     } catch { throw "agentbus install: cannot write to $InstallDir. Set AGENTBUS_INSTALL_DIR to a writable directory" }
     $target = Join-Path $InstallDir 'agentbus.exe'
     if (Test-Path -LiteralPath $target -PathType Container) { throw "agentbus install: $target is a directory; remove it or choose another AGENTBUS_INSTALL_DIR" }
@@ -165,6 +166,18 @@ function Add-UserPath([string]$Dir) {
     if ($parts -contains $Dir) { return }
     [Environment]::SetEnvironmentVariable('Path', (($parts + $Dir) -join ';'), 'User')
     Write-Host "added $Dir to your user PATH; new terminals pick it up"
+}
+
+# Get-InstalledVersion runs the installed binary. The output is collected
+# whole (not piped to Select-Object -First 1, which stops the pipeline before
+# the native exit code is recorded) and the exit code is seeded non-zero so a
+# launch failure cannot read a stale 0.
+function Get-InstalledVersion([string]$Exe) {
+    $global:LASTEXITCODE = 1
+    $out = @()
+    try { $out = @(& $Exe version) } catch { $out = @() }
+    if ($LASTEXITCODE -ne 0 -or $out.Count -eq 0) { throw "agentbus install: $Exe does not run" }
+    return "$($out[0])"
 }
 
 function Main {
@@ -198,10 +211,7 @@ function Main {
         Test-Hash $tmp $asset
         Install-Binary $tmp $asset $installDir
         Add-UserPath $installDir
-        $global:LASTEXITCODE = 1
-        $v = $null
-        try { $v = (& (Join-Path $installDir 'agentbus.exe') version | Select-Object -First 1) } catch { $v = $null }
-        if ($LASTEXITCODE -ne 0 -or -not $v) { throw "agentbus install: $(Join-Path $installDir 'agentbus.exe') does not run" }
+        $v = Get-InstalledVersion (Join-Path $installDir 'agentbus.exe')
         Write-Host "installed agentbus $v to $installDir\agentbus.exe"
         Write-Host 'next: agentbus init --global (once per machine), then agentbus init inside each repository'
         if ($script:Upgrade) { Write-Host 'upgraded: restart every harness session and the TUI to pick up the new binary' }

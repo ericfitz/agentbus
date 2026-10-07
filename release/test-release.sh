@@ -168,5 +168,26 @@ chmod +x "$WORK/stubbin/docker"
 check brew-check-bad-arch-second 2 "unknown architecture 'bogus' (amd64 or arm64)" -- env PATH="$WORK/stubbin:$PATH" "$HERE/check-linux-brew.sh" amd64 bogus
 check brew-check-no-container-started 1 "" -- test -e "$WORK/docker-called"
 
+# --- Windows packaging (#35) ------------------------------------------------
+printf 'aaaa  agentbus-v1.0.0-windows-amd64.zip\nbbbb  agentbus-v1.0.0-windows-arm64.zip\ncccc  install.ps1\n' > "$WORK/dist/SHA256SUMS"
+check scoop-render 0 "" -- bash -c "source '$HERE/release.sh'; render_template '$HERE/agentbus.scoop.json.tmpl' '$WORK/scoop.json' VERSION=1.0.0 AMD64_URL=https://x/a.zip AMD64_SHA256=aaaa ARM64_URL=https://x/r.zip ARM64_SHA256=bbbb && python3 -I -m json.tool '$WORK/scoop.json' >/dev/null"
+check scoop-fields 0 "" -- bash -c "python3 -I -c \"import json,sys; m=json.load(open(sys.argv[1])); assert m['version']=='1.0.0' and m['bin']=='agentbus.exe' and m['architecture']['64bit']['hash']=='aaaa' and m['architecture']['arm64']['url']=='https://x/r.zip' and 'checkver' in m and 'autoupdate' in m\" '$WORK/scoop.json'"
+mkdir -p "$WORK/pe/windows-amd64" "$WORK/pe/windows-arm64"
+for a in amd64 arm64; do (cd "$WORK/repo" && printf 'package main\nfunc main(){}\n' > main.go && printf 'module t\n\ngo 1.27\n' > go.mod && CGO_ENABLED=0 GOOS=windows GOARCH=$a go build -o "$WORK/pe/windows-$a/agentbus.exe" .); done
+check pe-ok 0 "" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
+printf 'not a PE\n' > "$WORK/pe/windows-arm64/agentbus.exe"
+check pe-wrong 1 "windows/arm64 binary" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
+# copy_scripts ships install.ps1 and refuses an unembedded one like install.sh.
+mkdir -p "$WORK/cs/src" "$WORK/cs/dist"
+cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
+cp "$WORK/real-install.ps1" "$WORK/cs/src/install.ps1"
+check copy-scripts-ok 0 "" -- bash -c "source '$HERE/release.sh'; SRC='$WORK/cs/src'; DIST='$WORK/cs/dist'; copy_scripts && cmp '$WORK/cs/src/install.ps1' '$WORK/cs/dist/install.ps1' && cmp '$WORK/cs/src/install.sh' '$WORK/cs/dist/install.sh'"
+mkdir -p "$WORK/cs/dist2"
+cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
+awk '/^# BEGIN agentbus release public key$/ { print; print "$PubKeyPem = @'"'"'"; print "-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----"; print "'"'"'@"; skip = 1; next } /^# END agentbus release public key$/ { skip = 0 } !skip { print }' "$WORK/cs/src/install.ps1" > "$WORK/cs/src/install.ps1.new" && mv "$WORK/cs/src/install.ps1.new" "$WORK/cs/src/install.ps1"
+check copy-scripts-ps1-unembedded 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; SRC='$WORK/cs/src'; DIST='$WORK/cs/dist2'; copy_scripts"
+check copy-scripts-ps1-not-copied 1 "" -- test -e "$WORK/cs/dist2/install.ps1"
+check sums-list-ps1 0 "" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/cs/dist'; ARCHIVES=(); cp '$WORK/cs/src/install.sh' '$WORK/cs/dist/install.sh'; cp '$WORK/real-install.ps1' '$WORK/cs/dist/install.ps1'; write_sums >/dev/null && awk '{print \$2}' '$WORK/cs/dist/SHA256SUMS' | diff - <(printf 'install.sh\ninstall.ps1\n')"
+
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

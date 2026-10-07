@@ -30,6 +30,9 @@ render_check "$HERE/agentbus.rb.tmpl" agentbus.rb ruby -c -- \
 grep -q 'on_linux' "$WORK/agentbus.rb" || { echo "FAIL formula lacks on_linux"; FAIL=1; }
 if grep -q 'depends_on :macos' "$WORK/agentbus.rb"; then echo "FAIL formula still macOS only"; FAIL=1; fi
 
+render_check "$HERE/agentbus.scoop.json.tmpl" agentbus.json python3 -I -m json.tool -- \
+    VERSION=1.2.3 AMD64_URL=https://example.invalid/a.zip AMD64_SHA256=aaaa ARM64_URL=https://example.invalid/r.zip ARM64_SHA256=bbbb
+
 # A template with an extra placeholder must fail (render_template's guard).
 printf 'x __UNFILLED__\n' > "$WORK/bad.tmpl"
 if (render_template "$WORK/bad.tmpl" "$WORK/bad.out" A=1) 2>/dev/null; then echo "FAIL unfilled placeholder accepted"; FAIL=1; else echo "PASS unfilled placeholder rejected"; fi

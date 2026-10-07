@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Build, sign and publish a release of agentbus, then update the Homebrew tap.
 # macOS: universal binary, codesigned and notarized here. Linux: static
-# amd64/arm64 binaries built here and smoke-tested in Docker. Every archive
+# amd64/arm64 binaries built here and smoke-tested in Docker. Windows:
+# amd64/arm64 zips built here, checked with `file`, run by the windows.yml
+# workflow and the VM. Every archive
 # is listed in SHA256SUMS, signed with the Ed25519 release key.
 #   ./release/release.sh v0.1.1
 # Builds from the tag, so HEAD may be anywhere. Reruns for the same tag reuse
@@ -14,6 +16,9 @@ set -euo pipefail
 BIN_NAME="agentbus"
 GH_REPO="ericfitz/agentbus"
 TAP_DIR="${TAP_DIR:-$HOME/Projects/homebrew-tap}" # SSH clone of ericfitz/homebrew-tap
+SCOOP_DIR="${SCOOP_DIR:-$HOME/Projects/scoop-bucket}" # SSH clone of ericfitz/scoop-bucket
+KOMAC_KEY_FILE="$HOME/.keys/KOMAC_GITHUB_KEY"           # `export KOMAC_GITHUB_KEY='<PAT with public_repo>'`
+WINGET_ID="ericfitz.agentbus"
 SIGN_IDENTITY="Developer ID Application: Robert Fitzgerald (796T45968D)"
 NOTARY_PROFILE="sqdist-notary" # team-level credential, shared across projects
 VERSION_VAR="github.com/ericfitz/agentbus/internal/mcpserver.Version"
@@ -39,13 +44,14 @@ parse_args() {
 # require_tools fails once, naming everything that is missing.
 require_tools() {
     local missing=() t prefix
-    for t in gh git go lipo codesign xcrun shasum docker; do
+    for t in gh git go lipo codesign xcrun shasum docker file zip komac; do
         command -v "$t" >/dev/null 2>&1 || missing+=("$t")
     done
     prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
     if [[ -x "$prefix/bin/openssl" ]]; then OPENSSL="$prefix/bin/openssl"; else missing+=("openssl@3 (brew install openssl@3)"); fi
     docker info >/dev/null 2>&1 || missing+=("a running Docker daemon")
     [[ -r "$SIGNING_KEY" ]] || missing+=("signing key $SIGNING_KEY (see the spec's Key setup)")
+    [[ -r "$KOMAC_KEY_FILE" ]] || missing+=("komac token $KOMAC_KEY_FILE")
     [[ -r "$PUBKEY" ]] || missing+=("public key $PUBKEY (see the spec's Key setup)")
     (( ${#missing[@]} == 0 )) || fail "missing: $(printf '%s; ' "${missing[@]}")"
 }
@@ -134,11 +140,41 @@ smoke_linux() {
     done
 }
 
+# build_windows builds agentbus.exe into $DIST/windows-<arch>/ and packages
+# each as agentbus-<tag>-windows-<arch>.zip.
+build_windows() {
+    local arch
+    for arch in amd64 arm64; do
+        echo "==> Building windows/$arch"
+        mkdir -p "$DIST/windows-$arch"
+        (cd "$SRC" && CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath \
+            -ldflags "-s -w -X ${VERSION_VAR}=${VERSION}" -o "$DIST/windows-$arch/$BIN_NAME.exe" .)
+        local archive="${BIN_NAME}-${TAG}-windows-${arch}.zip"
+        (cd "$DIST/windows-$arch" && zip -q "$DIST/$archive" "$BIN_NAME.exe")
+        ARCHIVES+=("$archive")
+    done
+}
+
+# check_windows_pe: this host cannot run Windows binaries, so `file` must
+# report a PE32+ console executable for the expected machine. Actions
+# (windows.yml) and the VM run them.
+check_windows_pe() {
+    local arch want got
+    for arch in amd64 arm64; do
+        case "$arch" in amd64) want="x86-64" ;; arm64) want="Aarch64" ;; esac
+        got="$(file -b "$DIST/windows-$arch/$BIN_NAME.exe")"
+        [[ "$got" == "PE32+ executable (console) $want, for MS Windows"* ]] \
+            || fail "windows/$arch binary: '$got' (want PE32+ executable (console) $want)"
+    done
+}
+
 # copy_scripts puts the installer(s) from the tag's worktree into $DIST so
 # they are listed in SHA256SUMS and published with the archives.
 copy_scripts() {
     check_script_embedded "$SRC/install.sh" install.sh
+    check_script_embedded "$SRC/install.ps1" install.ps1
     cp "$SRC/install.sh" "$DIST/install.sh"
+    cp "$SRC/install.ps1" "$DIST/install.ps1"
 }
 
 # check_script_embedded <path> <name> fails when the installer still holds the
@@ -167,7 +203,7 @@ check_installers_embedded() {
 
 write_sums() {
     echo "==> Writing SHA256SUMS"
-    (cd "$DIST" && shasum -a 256 "${ARCHIVES[@]}" install.sh > SHA256SUMS)
+    (cd "$DIST" && shasum -a 256 "${ARCHIVES[@]}" install.sh install.ps1 > SHA256SUMS)
     cat "$DIST/SHA256SUMS"
 }
 
@@ -207,7 +243,7 @@ ensure_release() {
 
 upload_assets() {
     echo "==> Uploading assets"
-    (cd "$DIST" && gh release upload "$TAG" --repo "$GH_REPO" --clobber "${ARCHIVES[@]}" install.sh SHA256SUMS SHA256SUMS.sig)
+    (cd "$DIST" && gh release upload "$TAG" --repo "$GH_REPO" --clobber "${ARCHIVES[@]}" install.sh install.ps1 SHA256SUMS SHA256SUMS.sig)
 }
 
 # render_template <tmpl> <out> KEY=VALUE... replaces every __KEY__ and fails
@@ -251,6 +287,47 @@ update_tap() {
     git -C "$TAP_DIR" push
 }
 
+update_scoop() {
+    echo "==> Updating Scoop bucket"
+    [[ -d "$SCOOP_DIR" ]] || git clone git@github.com:ericfitz/scoop-bucket.git "$SCOOP_DIR"
+    git -C "$SCOOP_DIR" pull -q --ff-only
+    local base="https://github.com/${GH_REPO}/releases/download/${TAG}"
+    local wa="${BIN_NAME}-${TAG}-windows-amd64.zip" wr="${BIN_NAME}-${TAG}-windows-arm64.zip"
+    local rendered="$DIST/${BIN_NAME}.scoop.json"
+    render_template "$REPO_ROOT/release/${BIN_NAME}.scoop.json.tmpl" "$rendered" \
+        "VERSION=$VERSION" "AMD64_URL=$base/$wa" "AMD64_SHA256=$(sum_of "$wa")" \
+        "ARM64_URL=$base/$wr" "ARM64_SHA256=$(sum_of "$wr")"
+    mkdir -p "$SCOOP_DIR/bucket"
+    if cmp -s "$rendered" "$SCOOP_DIR/bucket/${BIN_NAME}.json"; then
+        echo "scoop manifest unchanged"; return
+    fi
+    cp "$rendered" "$SCOOP_DIR/bucket/${BIN_NAME}.json"
+    git -C "$SCOOP_DIR" add "bucket/${BIN_NAME}.json"
+    git -C "$SCOOP_DIR" commit -m "${BIN_NAME} ${VERSION}"
+    git -C "$SCOOP_DIR" push
+}
+
+# submit_winget opens the winget-pkgs pull request for this version with
+# komac. An open pull request for the version counts as done (rerun). A
+# komac failure does not fail the release: the exact rerun command is
+# printed. The token is scoped to the one command, because exporting
+# GITHUB_TOKEN would override gh's own auth for the rest of the run.
+submit_winget() {
+    echo "==> Submitting ${WINGET_ID} ${VERSION} to winget"
+    if [[ -n "$(gh pr list --repo microsoft/winget-pkgs --state open --search "${WINGET_ID} version ${VERSION} in:title" --json number --jq '.[].number')" ]]; then
+        echo "winget: an open pull request for ${VERSION} exists; nothing to do"; return
+    fi
+    local base="https://github.com/${GH_REPO}/releases/download/${TAG}"
+    local cmd=(komac update "$WINGET_ID" --version "$VERSION" --urls "$base/${BIN_NAME}-${TAG}-windows-amd64.zip" "$base/${BIN_NAME}-${TAG}-windows-arm64.zip" --submit)
+    if ! (
+        # shellcheck disable=SC1090
+        source "$KOMAC_KEY_FILE"
+        GITHUB_TOKEN="$KOMAC_GITHUB_KEY" "${cmd[@]}"
+    ); then
+        echo "warning: komac failed; the release stands. Rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+    fi
+}
+
 main() {
     parse_args "$@"
     require_tools
@@ -262,13 +339,17 @@ main() {
     build_macos
     build_linux
     smoke_linux
+    build_windows
+    check_windows_pe
     copy_scripts
     write_sums
     sign_sums
     ensure_release
     upload_assets
     update_tap
-    echo "==> Released ${TAG}: brew install ericfitz/tap/${BIN_NAME}; curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install.sh | sh"
+    update_scoop
+    submit_winget
+    echo "==> Released ${TAG}: brew install ericfitz/tap/${BIN_NAME}; curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install.sh | sh; irm https://github.com/${GH_REPO}/releases/latest/download/install.ps1 | iex"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

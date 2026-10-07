@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/ericfitz/agentbus/internal/filelock"
 	"github.com/ericfitz/agentbus/internal/procs"
@@ -25,11 +24,11 @@ func waitPidfile(dataDir, as string) string {
 	return filepath.Join(dataDir, "wait", name+".pid")
 }
 
-// flockFile takes an exclusive flock on path (created if missing) and returns
-// the release func. It guards only the read-signal-write sequence in
+// lockFile takes an exclusive filelock on path (created if missing) and returns
+// the release func. It guards only the read-terminate-write sequence in
 // acquireWaitLock and the compare-remove in release, never a whole wait, so a
 // crashed wait cannot hold it.
-func flockFile(path string) (func(), error) {
+func lockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -38,7 +37,7 @@ func flockFile(path string) (func(), error) {
 		_ = f.Close()
 		return nil, err
 	}
-	return func() { _ = f.Close() }, nil // closing also releases the flock
+	return func() { _ = f.Close() }, nil // closing also releases the lock
 }
 
 func readPidfile(path string) (procs.Ref, bool) {
@@ -59,10 +58,11 @@ func readPidfile(path string) (procs.Ref, bool) {
 }
 
 // acquireWaitLock makes self the one wait for identity as: it records self in
-// the pidfile and signals SIGTERM to the wait it replaces, if that process is
-// still alive. The recorded start time guards against a reused pid, so a
+// the pidfile and stops the wait it replaces (terminateWait: SIGTERM on Unix,
+// TerminateProcess with exit code 3 on Windows), if that process is still
+// alive. The recorded start time guards against a reused pid, so a
 // stale pidfile (process gone, or the pid now someone else's) is simply
-// overwritten and never signals anything. The returned release removes the
+// overwritten and never terminates anything. The returned release removes the
 // pidfile only if it still names self. Callers install their signal handler
 // before calling, so a replacement signal cannot arrive unhandled.
 func acquireWaitLock(dataDir, as string, self procs.Ref) (release func(), err error) {
@@ -70,13 +70,13 @@ func acquireWaitLock(dataDir, as string, self procs.Ref) (release func(), err er
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	unlock, err := flockFile(path + ".lock")
+	unlock, err := lockFile(path + ".lock")
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 	if old, ok := readPidfile(path); ok && old != self && procs.Alive(procs.System, old) {
-		_ = syscall.Kill(old.Pid, syscall.SIGTERM) // already gone is fine
+		_ = terminateWait(old.Pid) // already gone is fine
 	}
 	tmp := fmt.Sprintf("%s.%d.tmp", path, self.Pid)
 	if err := os.WriteFile(tmp, fmt.Appendf(nil, "%d %d\n", self.Pid, self.Start), 0o600); err != nil {
@@ -87,7 +87,7 @@ func acquireWaitLock(dataDir, as string, self procs.Ref) (release func(), err er
 		return nil, err
 	}
 	return func() {
-		unlock, err := flockFile(path + ".lock")
+		unlock, err := lockFile(path + ".lock")
 		if err != nil {
 			return
 		}

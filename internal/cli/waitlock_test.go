@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -32,11 +34,11 @@ func writeRef(t *testing.T, dir, as string, r procs.Ref) {
 
 func sprintRef(r procs.Ref) string { return fmt.Sprintf("%d %d\n", r.Pid, r.Start) }
 
-// startSleeper runs a `sleep 60` child, killed at cleanup, and returns its
+// startSleeper runs a sleeper helper child, killed at cleanup, and returns its
 // Ref and a channel closed once it has exited (and been reaped).
 func startSleeper(t *testing.T) (procs.Ref, <-chan error) {
 	t.Helper()
-	cmd := exec.Command("sleep", "60")
+	cmd := sleeperCommand()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +64,16 @@ func TestAcquireWaitLockReplacesLiveWait(t *testing.T) {
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("old wait should have died from SIGTERM")
+			t.Fatal("old wait should have been terminated")
+		}
+		if runtime.GOOS == "windows" {
+			var ee *exec.ExitError
+			if !errors.As(err, &ee) || ee.ExitCode() != 3 {
+				t.Fatalf("replaced wait must exit 3 on Windows, got %v", err)
+			}
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("old wait was not signaled")
+		t.Fatal("old wait was not terminated")
 	}
 	if got, ok := readPidfile(waitPidfile(dir, "Pat")); !ok || got != selfRef() {
 		t.Fatalf("pidfile = %+v, want ours", got)
@@ -89,7 +97,7 @@ func TestAcquireWaitLockStaleNotSignaled(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 	// A pid whose process is gone: acquire succeeds.
-	cmd := exec.Command("sleep", "60")
+	cmd := sleeperCommand()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +152,7 @@ func TestReleaseRemovesOwnPidfile(t *testing.T) {
 
 func TestWaitPidfileSanitizesIdentity(t *testing.T) {
 	got := waitPidfile("/d", "../a b/c")
-	if filepath.Dir(got) != "/d/wait" {
+	if filepath.Dir(got) != filepath.Join("/d", "wait") {
 		t.Fatalf("identity escaped the wait dir: %s", got)
 	}
 }

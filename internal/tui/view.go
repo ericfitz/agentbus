@@ -232,23 +232,14 @@ func (m Model) railWidth() int {
 // even when its monospace font has its own glyph at that codepoint. These
 // are vars, not consts: LoadIcons overwrites them per cfg.Icons.
 var (
-	iconChat = "\U0001F4AC\uFE0F " // speech balloon
-	iconMem  = "\U0001F4BE\uFE0F " // floppy disk
-	// ponytail: gear is Neutral width: Terminal.app draws it two cells wide but
-	// advances one, while lipgloss counts two. CSI 1C moves the cursor one
-	// cell (uncounted by lipgloss) so both agree; swap to a Wide emoji if a
-	// terminal that advances two ever matters. Robot U+1F916 was rejected:
-	// Source Code Pro ships its own glyph there and U+FE0F does not override it.
-	// CSI 1C skips its cell without writing it, so when a redraw moves the
-	// gear onto a line that held a wide emoji (a new session sorting above
-	// the user row) the old glyph's half stays on screen. CSI 2X (erase two
-	// cells, cursor stays, also uncounted) blanks both cells first.
-	iconAgent = "\x1b[2X\u2699\uFE0F\x1b[1C " // gear
-	iconUser  = "\U0001F9D1\uFE0F "           // adult
-	iconIdle  = "\U0001F4A4\uFE0F "           // sleeping sign
-	iconTasks = "\U0001F4CB\uFE0F "           // clipboard; Wide like chat and memory, so no CSI trick
-	iconArrow = " \u2192 "                    // rightwards arrow; ambiguous width, 1 column in Western setups
-	iconError = "\u2717 "                     // ballot X, the toast and overlay-footer error prefix
+	iconChat  = "\U0001F4AC\uFE0F " // speech balloon
+	iconMem   = "\U0001F4BE\uFE0F " // floppy disk
+	iconAgent = gearIcon            // gear; per OS, see icons_unix.go and icons_windows.go
+	iconUser  = "\U0001F9D1\uFE0F " // adult
+	iconIdle  = "\U0001F4A4\uFE0F " // sleeping sign
+	iconTasks = "\U0001F4CB\uFE0F " // clipboard; Wide like chat and memory, so no CSI trick
+	iconArrow = " \u2192 "          // rightwards arrow; ambiguous width, 1 column in Western setups
+	iconError = "\u2717 "           // ballot X, the toast and overlay-footer error prefix
 )
 
 // Task status marks. The stopwatch U+23F1 is text-presentation by default

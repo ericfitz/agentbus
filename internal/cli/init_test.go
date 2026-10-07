@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,7 +39,9 @@ func initOpts(t *testing.T, home string, f *fakeHarness) InitOptions {
 	t.Helper()
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
-	return InitOptions{Home: home, Cwd: t.TempDir(), LookPath: f.lookPath, Run: f.run, Config: cfg}
+	// OS is fixed so the fake LookPath (/fake/agentbus) never meets the
+	// Windows PATH check; TestInitOnWindowsRequiresThisBinaryOnPath covers it.
+	return InitOptions{Home: home, Cwd: t.TempDir(), LookPath: f.lookPath, Run: f.run, Config: cfg, OS: "linux"}
 }
 
 func readJSON(t *testing.T, path string) map[string]any {
@@ -421,5 +424,83 @@ func channelKinds(t *testing.T, cfg config.Config) map[string]string {
 func TestEmbeddedSkillHasLFLineEndings(t *testing.T) {
 	if bytes.Contains(skillMD, []byte("\r")) {
 		t.Fatal("embedded SKILL.md contains CR; check .gitattributes eol=lf")
+	}
+}
+
+// On Windows, init refuses to run unless the agentbus on PATH is this
+// binary: the harness configs start "agentbus" by name, so an unzipped
+// agentbus.exe that is not on PATH (or an older copy that is) would leave
+// every harness without a working MCP server.
+func TestInitOnWindowsRequiresThisBinaryOnPath(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "self", "agentbus.exe")
+	other := filepath.Join(dir, "other", "agentbus.exe")
+	for _, p := range []string{self, other} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name, onPath, want string
+	}{
+		{"missing", "", "agentbus.exe is not on your PATH"},
+		{"other copy", other, "is not this agentbus.exe"},
+		{"this binary", self, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			f := &fakeHarness{home: home}
+			o := initOpts(t, home, f)
+			o.Cwd = t.TempDir() // not a git repository: the global step
+			o.DryRun = true
+			o.OS = "windows"
+			o.Executable = func() (string, error) { return self, nil }
+			o.LookPath = func(name string) (string, error) {
+				if name == "agentbus" {
+					if tc.onPath == "" {
+						return "", exec.ErrNotFound
+					}
+					return tc.onPath, nil
+				}
+				return f.lookPath(name)
+			}
+			var out bytes.Buffer
+			err := Init(o, &out)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Init: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "install.ps1") {
+				t.Fatalf("Init error = %v, want %q and install.ps1", err, tc.want)
+			}
+			if out.Len() != 0 {
+				t.Fatalf("Init wrote before refusing:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// Other systems keep running init from anywhere (a Homebrew or install.sh
+// binary is on PATH; a developer may run a fresh build).
+func TestInitOffWindowsSkipsThePathCheck(t *testing.T) {
+	home := t.TempDir()
+	f := &fakeHarness{home: home}
+	o := initOpts(t, home, f)
+	o.Cwd = t.TempDir()
+	o.DryRun = true
+	o.OS = "darwin"
+	o.LookPath = func(name string) (string, error) {
+		if name == "agentbus" {
+			return "", exec.ErrNotFound
+		}
+		return f.lookPath(name)
+	}
+	if err := Init(o, io.Discard); err != nil {
+		t.Fatalf("Init: %v", err)
 	}
 }

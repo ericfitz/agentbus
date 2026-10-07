@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -82,7 +83,15 @@ type InitOptions struct {
 	// LookPath and Run are the harness CLI seams (exec.LookPath / exec.Command).
 	LookPath func(string) (string, error)
 	Run      func(name string, args ...string) error
+	// OS and Executable are the PATH check's seams (runtime.GOOS /
+	// os.Executable).
+	OS         string
+	Executable func() (string, error)
 }
+
+// installPS1 is the Windows installer one-liner; it puts agentbus.exe on the
+// user PATH.
+const installPS1 = "irm https://github.com/ericfitz/agentbus/releases/latest/download/install.ps1 | iex"
 
 // Init bootstraps Agentbus for the harnesses on this machine (global) or
 // for the repository containing cwd. Inside a git repository the repo step
@@ -112,16 +121,53 @@ func Init(o InitOptions, out io.Writer) error {
 			return cmd.Run()
 		}
 	}
+	if o.OS == "" {
+		o.OS = runtime.GOOS
+	}
+	if o.Executable == nil {
+		o.Executable = os.Executable
+	}
 	switch o.Harness {
 	case "", "claude", "codex", "grok":
 	default:
 		return fmt.Errorf("--harness must be claude, codex, or grok, got %q", o.Harness)
+	}
+	if o.OS == "windows" {
+		if err := requireOnPath(o.LookPath, o.Executable); err != nil {
+			return err
+		}
 	}
 	in := &initer{InitOptions: o, out: out}
 	if root := gitRoot(o.Cwd); root != "" && !o.Global {
 		return in.repo(root)
 	}
 	return in.global()
+}
+
+// requireOnPath refuses unless the agentbus that PATH resolves is this
+// binary. The harness configs and hooks start "agentbus" by name, and an
+// unzipped agentbus.exe is on no PATH, so on Windows init would otherwise
+// configure harnesses that cannot start it (or that start an older copy).
+func requireOnPath(lookPath func(string) (string, error), executable func() (string, error)) error {
+	found, err := lookPath("agentbus")
+	if err != nil {
+		return fmt.Errorf("agentbus.exe is not on your PATH, so the harnesses could not start it. Install it with:\n  %s\nthen open a new terminal and run agentbus init again", installPS1)
+	}
+	self, err := executable()
+	if err != nil {
+		return fmt.Errorf("finding this agentbus.exe: %w", err)
+	}
+	if !sameFile(found, self) {
+		return fmt.Errorf("the agentbus.exe on your PATH (%s) is not this agentbus.exe (%s), so the harnesses would start that one. Install with:\n  %s\nor put this one's directory first on PATH, then open a new terminal and run agentbus init again", found, self, installPS1)
+	}
+	return nil
+}
+
+// sameFile reports whether a and b name the same file.
+func sameFile(a, b string) bool {
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
 type initer struct {

@@ -127,3 +127,29 @@ to its own inbox. It applies to every unscoped search, not only tag
 filters. A search scoped to `dm/<other>` and `history` on another inbox
 still return not_found (ADR 0004). Spec:
 `docs/superpowers/specs/2026-09-29-tag-conventions-design.md`.
+
+## Amendment (2026-10-06): structured tags and prefix patterns
+
+**Human decisions (user, 2026-10-06), #20:** "maybe ":" is not special in
+any way, we just add it as an allowed character per tag ... and we extend
+filtering to do prefix matching, to support "env:*" kind of matches";
+"I do NOT want to build a vocabulary enforcement mechanism"; prefix
+matching "should work everywhere"; drop `_` from tags; a tag is at most 32
+characters.
+
+Item 1's tag rule becomes `^[a-z0-9-]+(:[a-z0-9-]+)?$`, 1-32 characters:
+at most one colon, never first or last, and no `_`. The bus gives the
+colon no meaning. Stored tags are not rewritten.
+
+Every tag filter (`history`, `search`, `subscribe`/`unsubscribe`,
+`.local/agentbus.json` `tag_subscriptions`, the TUI) accepts a pattern: an
+exact tag, or a prefix ending in `*` (`env:*`, `env*`). A pattern is
+matched as the byte range `[p, p~]`, never with `LIKE`, so it stays on the
+`message_tags(tag, seq)` index. Item 3's AND set counts distinct patterns,
+so one pattern matching two tags on a message counts once. Schema v10 adds
+`lo` and `hi` to `tag_subscription_tags`. `matched_tags` lists the
+message's tags, not the patterns.
+
+The bus does not enforce a vocabulary. The using-agentbus skill keys the
+dimensions (`env:`, `repo:`, `area:`, `kind:`) and keeps triage tags flat.
+Spec: `docs/superpowers/specs/2026-10-06-structured-tags-design.md`.

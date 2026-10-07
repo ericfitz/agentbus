@@ -103,6 +103,13 @@ Stop agentbus sessions (MCP servers, `agentbus wait`, the TUI) before
 `scoop update agentbus` or `winget upgrade ericfitz.agentbus`: neither can
 replace the files of a running program.
 
+When a release says so in its notes, its Windows binaries are
+Authenticode-signed by the maintainer through Microsoft Artifact Signing;
+check with `Get-AuthenticodeSignature .\agentbus.exe` (`Status` `Valid`).
+A release whose notes say the binaries are not Authenticode-signed is
+still covered by the signed `SHA256SUMS` and the build attestations. See
+[release-signing.md](release-signing.md).
+
 Windows paths: the configuration file is `%AppData%\agentbus\config.json`
 and the data directory `%LocalAppData%\agentbus` (Local, so the database
 does not roam with a domain profile). `AGENTBUS_CONFIG`, `AGENTBUS_DATA_DIR`
@@ -132,8 +139,9 @@ which may lag the tag. From a clone, `CGO_ENABLED=0 go build -o agentbus .`
 at the repository root does the same. Put the binary on your `PATH` so
 harnesses can find it by name.
 
-Maintainers cut a release with `release/release.sh <tag>` (a stable `vX.Y.Z`
-tag that is already pushed): macOS is built and notarized locally, the other
+Maintainers cut a release with `release/release.sh <tag>
+--windows-signing=on|off` (a stable `vX.Y.Z` tag that is already pushed; the
+flag is required, see [release-signing.md](release-signing.md)): macOS is built and notarized locally, the other
 archives come from the `release-build` workflow, and the release is a draft
 until `SHA256SUMS` is signed. The script needs an authenticated `gh` that can
 verify attestations, and `.github/workflows/release-build.yml` must be on the

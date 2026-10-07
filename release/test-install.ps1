@@ -215,7 +215,7 @@ function Build-Fixture {
     }
     # probe-find-openssl.ps1 dot-sources the install.ps1 copy and reports what
     # Find-OpenSsl does (it runs on any OS, unlike Main's drive-path checks).
-    [IO.File]::WriteAllText((Join-Path $Fx 'probe-find-openssl.ps1'), ". (Join-Path (Split-Path -Parent `$MyInvocation.MyCommand.Path) 'install.ps1')`ntry { `$null = Find-OpenSsl; Write-Output 'FOUND' } catch { Write-Output ('THREW: ' + `$_.Exception.Message) }`n")
+    [IO.File]::WriteAllText((Join-Path $Fx 'probe-find-openssl.ps1'), ". (Join-Path (Split-Path -Parent `$MyInvocation.MyCommand.Path) 'install.ps1')`ntry { `$f = Find-OpenSsl; Write-Output ('FOUND ' + `$f + ' Path=' + `$env:Path + ' PATH=' + `$env:PATH + ' ProgramFiles=' + `$env:ProgramFiles) } catch { Write-Output ('THREW: ' + `$_.Exception.Message) }`n")
     foreach ($tag in 'v9.0.0', 'v9.0.1') { New-Release 'valid' $tag $tag.Substring(1) }
     Set-Content -LiteralPath (Join-Path (Join-Path $Fx 'valid') 'latest') -Value 'v9.0.1'
     foreach ($v in 'tampered-zip', 'tampered-sums', 'tampered-sig', 'missing-entry', 'broken-exe', 'slow') {
@@ -381,7 +381,7 @@ function Invoke-SelfTest {
     $threw = $false
     try { Set-KeyBlock (Join-Path $Fx 'fakes/openssl.cmd') 'x' } catch { $threw = $true }
     Assert 'self: Set-KeyBlock refuses a file without markers' $threw
-    Expand-Archive -LiteralPath (Join-Path $Fx 'valid/v9.0.0/agentbus-v9.0.0-windows-amd64.zip') -DestinationPath (Join-Path $Work 'x') -Force
+    Expand-Archive -LiteralPath (Join-Path $Fx "valid/v9.0.0/agentbus-v9.0.0-windows-$(Get-HostArch).zip") -DestinationPath (Join-Path $Work 'x') -Force
     if (-not $IsWin) { & chmod +x (Join-Path $Work 'x/agentbus.exe') } # Expand-Archive drops the mode on Unix
     Assert 'self: stub prints its version' ((& (Join-Path $Work 'x/agentbus.exe') version) -eq '9.0.0')
     $other = if ((Get-HostArch) -eq 'amd64') { 'arm64' } else { 'amd64' }

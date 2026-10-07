@@ -35,6 +35,13 @@ tags, no tag subscriptions):
    vocabulary (see Conventions).
 6. **A tag is at most 32 characters in total** (was 20).
 
+## Human decisions (user, 2026-10-07)
+
+7. **`tagCond` uses a two-branch condition** (exact: `tag = lo AND seq > ?`;
+   prefix: `tag BETWEEN lo AND hi AND seq > ?`) instead of a single
+   `BETWEEN`, so exact tags keep the `(tag, seq)` seek above the cursor.
+   Proposed in the implementation plan; approved by Eric on 2026-10-07.
+
 Rejected: a vocabulary or key registry (decision 3); keying every tag,
 e.g. `status:failed` (decision 5); a per-part length limit (decision 6);
 prefix matching in filters only, with exact-tag subscriptions (decision
@@ -105,8 +112,11 @@ for `matched_tags` and the TUI, and is tested against the SQL path.
   and `hi TEXT NOT NULL`, computed when the set is subscribed. `tag`
   holds the pattern as written (`env:*`), and `tags_key` joins the sorted
   patterns, as today.
-- `tagCond` joins `message_tags mt ON mt.tag BETWEEN st.lo AND st.hi`
-  (keeping `mt.seq > floor AND mt.seq > ts.created_seq`), and a set
+- `tagCond` joins `message_tags mt` with a two-branch condition: an exact
+  tag (`st.lo = st.hi`) matches `mt.tag = st.lo AND mt.seq > ?`, a prefix
+  matches `mt.tag BETWEEN st.lo AND st.hi AND mt.seq > ?` (both keeping
+  `mt.seq > ts.created_seq`), so the planner can still seek on
+  `(tag, seq)` for exact tags (human decision 7), and a set
   matches when `count(DISTINCT st.tag)` equals the set's size, so a
   message carrying `env:prod` and `env:staging` counts once against
   `env:*`.

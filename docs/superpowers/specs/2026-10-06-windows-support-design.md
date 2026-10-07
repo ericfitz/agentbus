@@ -34,6 +34,19 @@ and testing.
 7. **Testing:** a GitHub Actions Windows workflow (amd64 and arm64) plus
    the user's Windows 11 ARM VM in VMware Fusion for harness checks.
 
+## Human decisions (user, 2026-10-07)
+
+Proposed in the implementation plan; approved by Eric on 2026-10-07.
+
+8. **`make verify` gains `vet-cross`:** compile-only `go vet` for
+   `windows/amd64`, `windows/arm64` and `linux/amd64`, plus golangci-lint on
+   the Windows build. The done gate grows; it still runs no tests on
+   another OS.
+9. **`install.ps1` reads `AGENTBUS_TEST_OSARCH`,** a test-only override of
+   the detected architecture, documented in the script header and set only
+   by `release/test-install.ps1` to exercise the unknown-architecture
+   refusal.
+
 Rejected: WSL only (no native port); one shared bus over a new IPC
 mechanism; allowing a cross-boundary database with a warning or silently;
 keeping `~/.config` and `~/.local/share` on Windows; `install.ps1` alone

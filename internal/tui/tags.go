@@ -10,8 +10,10 @@ import (
 )
 
 // tagPanePrefix names a tag set's rail entry: "tags:" plus the sorted set
-// joined by commas. bus channel names never contain ':' in that position
-// with this prefix (see bus.ChannelNameRule; the list is synthetic anyway).
+// of patterns joined by commas (tags:env:*,failed). A tag may itself carry
+// one colon (#20), which is why the prefix is matched only at the start
+// and TrimPrefix leaves the set intact. No bus channel name begins with
+// this prefix (bus.ChannelNameRule; the list is synthetic anyway).
 const tagPanePrefix = "tags:"
 
 const tagReadOnlyToast = "tag views are read-only; select a channel to post"
@@ -36,20 +38,15 @@ func (m *Model) tagPaneSources() []string {
 	return out
 }
 
-// tagPaneMsgs is the loaded messages of every tagPaneSources channel that
-// carry all of the pane's tags, ascending by seq.
+// tagPaneMsgs is the loaded messages of every tagPaneSources channel whose
+// tags satisfy all of the pane's patterns (bus.MatchTags, so env:* matches
+// env:prod), ascending by seq.
 func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 	set := tagPaneSet(ch)
 	var out []bus.Message
 	for _, c := range m.tagPaneSources() {
 		for _, x := range m.msgs[c] {
-			all := true
-			for _, t := range set {
-				if !slices.Contains(x.Tags, t) {
-					all = false
-				}
-			}
-			if all {
+			if bus.MatchTags(set, x.Tags) {
 				out = append(out, x)
 			}
 		}
@@ -59,7 +56,7 @@ func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 }
 
 // splitTags splits a comma-separated tag list, trimming space around each
-// tag so typing "a, b" (the natural style) does not fail NormalizeTags,
+// tag so typing "a, b" (the natural style) does not fail NormalizeTagPatterns,
 // which rejects a tag carrying its own leading/trailing space (ADR 0009).
 func splitTags(v string) []string {
 	parts := strings.Split(v, ",")
@@ -69,10 +66,11 @@ func splitTags(v string) []string {
 	return parts
 }
 
-// tagPrompt asks for a comma-separated tag set and subscribes to it; the
-// status refresh that follows adds it to the rail.
+// tagPrompt asks for a comma-separated set of tags or prefix patterns (env:*)
+// and subscribes to it; the status refresh that follows adds it to the rail
+// under its normalized name.
 func (m *Model) tagPrompt() tea.Cmd {
-	return m.openPrompt("tags <tag>[,<tag>...]", func(m *Model, v string) tea.Cmd {
+	return m.openPrompt("tags <tag|prefix*>[,...]", func(m *Model, v string) tea.Cmd {
 		c := m.c
 		tags := splitTags(v)
 		return func() tea.Msg { return subscribedMsg{channel: tagPanePrefix + v, err: c.b.SubscribeTags(c.as, tags)} }

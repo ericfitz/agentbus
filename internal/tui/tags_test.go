@@ -188,3 +188,52 @@ func TestDAndSOnATagSetUnfollowAndMoveTheSelection(t *testing.T) {
 		}
 	}
 }
+
+// TestTagPromptAcceptsPatternsAndPaneMatchesPrefix (#20): the t prompt
+// takes patterns with the usual spaces and case; the pane is named from the
+// normalized set and shows every loaded message whose tags satisfy it,
+// with chips showing whole tags.
+func TestTagPromptAcceptsPatternsAndPaneMatchesPrefix(t *testing.T) {
+	if got := splitTags("ENV:*, failed"); !slices.Equal(got, []string{"ENV:*", "failed"}) {
+		t.Fatalf("splitTags: %v", got)
+	}
+	f := newFixture(t)
+	f.key("esc")
+	f.key("t")
+	for _, r := range "ENV:*, failed" {
+		f.key(string(r))
+	}
+	f.key("enter")
+	sets, err := f.c.b.TagSubscriptions(f.c.as)
+	if err != nil || len(sets) != 1 || !slices.Equal(sets[0], []string{"env:*", "failed"}) {
+		t.Fatalf("t prompt subscribes a normalized pattern set: %v %v", sets, err)
+	}
+	for _, m := range []struct {
+		ch, content string
+		tags        []string
+	}{
+		{"dev", "prod failure", []string{"env:prod", "failed"}},
+		{"general", "staging failure", []string{"env:staging", "failed"}},
+		{"dev", "no env", []string{"failed"}},
+		{"dev", "no failed", []string{"env:prod"}},
+		{"dev", "flat env", []string{"env", "failed"}},
+		{"dev-notes", "memory failure", []string{"env:dev", "failed"}},
+	} {
+		if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: m.ch, Content: m.content, Tags: m.tags}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.receive(t)
+	f.selectTagPane(t, tagPanePrefix+"env:*,failed")
+	s := ansi.Strip(f.m.renderStream())
+	for _, want := range []string{"prod failure", "staging failure", "memory failure", "env:prod"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("pane lacks %q:\n%s", want, s)
+		}
+	}
+	for _, unwanted := range []string{"no env", "no failed", "flat env"} {
+		if strings.Contains(s, unwanted) {
+			t.Fatalf("pane shows %q, which does not satisfy env:* and failed:\n%s", unwanted, s)
+		}
+	}
+}

@@ -103,11 +103,11 @@ Stop agentbus sessions (MCP servers, `agentbus wait`, the TUI) before
 `scoop update agentbus` or `winget upgrade ericfitz.agentbus`: neither can
 replace the files of a running program.
 
-When a release says so in its notes, its Windows binaries are
-Authenticode-signed by the maintainer through Microsoft Artifact Signing;
-check with `Get-AuthenticodeSignature .\agentbus.exe` (`Status` `Valid`).
-A release whose notes say the binaries are not Authenticode-signed is
-still covered by the signed `SHA256SUMS` and the build attestations. See
+A release whose notes say its Windows binaries are not Authenticode-signed
+is still covered by the signed `SHA256SUMS` and the build attestations.
+Otherwise, from the first release made with signing on, they are signed by
+the maintainer through Microsoft Artifact Signing; check with
+`Get-AuthenticodeSignature .\agentbus.exe` (`Status` `Valid`). See
 [release-signing.md](release-signing.md).
 
 Windows paths: the configuration file is `%AppData%\agentbus\config.json`
@@ -141,8 +141,8 @@ harnesses can find it by name.
 
 Maintainers cut a release with `release/release.sh <tag>
 --windows-signing=on|off` (a stable `vX.Y.Z` tag that is already pushed; the
-flag is required, see [release-signing.md](release-signing.md)): macOS is built and notarized locally, the other
-archives come from the `release-build` workflow, and the release is a draft
+flag is required, see [release-signing.md](release-signing.md)): macOS is
+built and notarized locally, the other archives come from the `release-build` workflow, and the release is a draft
 until `SHA256SUMS` is signed. The script needs an authenticated `gh` that can
 verify attestations, and `.github/workflows/release-build.yml` must be on the
 default branch and in the tag, because `gh workflow run --ref <tag>` only

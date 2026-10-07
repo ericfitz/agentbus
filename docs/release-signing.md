@@ -24,7 +24,16 @@ the only way to stop billing, and it discards the identity validation.
    (Basic), complete individual identity validation (the validation email
    link expires after 7 days), and create a Public Trust certificate
    profile. The signer name on the certificate is the validated individual
-   identity.
+   identity. Per Microsoft's quickstart:
+   - Register the `Microsoft.CodeSigning` resource provider in the
+     subscription.
+   - The *Artifact Signing Identity Verifier* role is needed to create the
+     identity validation.
+   - Individual validation comes from the Azure billing account (Account
+     Type Individual, matching the government ID).
+   - The validated name becomes the certificate's common name, which is the
+     value of `AUTHENTICODE_SIGNER`; read it from the certificate profile's
+     Certificate subject preview.
 2. Register an Entra application with a federated credential whose subject
    is `repo:ericfitz/agentbus:environment:release` (issuer
    `https://token.actions.githubusercontent.com`, audience
@@ -33,8 +42,9 @@ the only way to stop billing, and it discards the identity validation.
    Signing Certificate Profile Signer* role on that certificate profile
    only.
 3. In the repository, add a `v*` tag rule to the `release` environment
-   (created on the first run if absent), so only tags matching `v*` can
-   deploy to it. `release.sh` dispatches the workflow on the tag itself
+   (created on the first run if absent; Settings > Environments > release >
+   Deployment branches and tags > tag pattern `v*`, creating the environment
+   there if absent), so only tags matching `v*` can deploy to it. `release.sh` dispatches the workflow on the tag itself
    (`gh workflow run --ref <tag>`), so the run's `github.ref` is the tag and
    the rule admits it. The `package-windows` job uses this environment for
    both `on` and `off` releases.

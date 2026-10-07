@@ -414,3 +414,12 @@ func channelKinds(t *testing.T, cfg config.Config) map[string]string {
 	}
 	return out
 }
+
+// The skill is embedded at build time, and release-build.yml builds the
+// Windows binaries on Windows runners: a CRLF checkout there would ship
+// CRLF in the installed SKILL.md. .gitattributes pins eol=lf.
+func TestEmbeddedSkillHasLFLineEndings(t *testing.T) {
+	if bytes.Contains(skillMD, []byte("\r")) {
+		t.Fatal("embedded SKILL.md contains CR; check .gitattributes eol=lf")
+	}
+}

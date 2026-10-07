@@ -166,8 +166,9 @@ func (f *File) setChannels(list []string) error {
 }
 
 // TagSubscriptions returns the persistent tag sets under "tag_subscriptions"
-// (a list of tag lists), each normalized; entries that are not a list of
-// valid tags are returned in bad and omitted. Absent key: none.
+// (a list of lists of tag patterns, bus.NormalizeTagPatterns), each
+// normalized; entries that are not a list of valid patterns are returned in
+// bad and omitted. Absent key: none.
 func (f *File) TagSubscriptions() (sets [][]string, bad []string) {
 	list, _ := f.Raw["tag_subscriptions"].([]any)
 	for _, e := range list {
@@ -178,7 +179,7 @@ func (f *File) TagSubscriptions() (sets [][]string, bad []string) {
 			ok = ok && isStr
 			tags = append(tags, s)
 		}
-		norm, err := bus.NormalizeTags(tags)
+		norm, err := bus.NormalizeTagPatterns(tags)
 		if !ok || err != nil || len(norm) == 0 {
 			bad = append(bad, fmt.Sprint(e))
 			continue
@@ -190,7 +191,8 @@ func (f *File) TagSubscriptions() (sets [][]string, bad []string) {
 
 // Tags returns the repository's own approved tags under "tags" (spec
 // 2026-09-29), normalized and deduplicated in file order; entries that are
-// not a valid tag are returned in bad and omitted. Absent key: none. The
+// not a valid tag (bus.NormalizeTags: a pattern with * is not one) are
+// returned in bad and omitted. Absent key: none. The
 // list is guidance register hands to agents; send does not enforce it.
 func (f *File) Tags() (tags []string, bad []string) {
 	list, _ := f.Raw["tags"].([]any)
@@ -208,11 +210,12 @@ func (f *File) Tags() (tags []string, bad []string) {
 	return tags, bad
 }
 
-// AddTagSet appends a normalized set (idempotent), writes, and returns the list.
+// AddTagSet appends a normalized pattern set (idempotent), writes, and
+// returns the list.
 func (f *File) AddTagSet(tags []string) ([][]string, error) {
-	norm, err := bus.NormalizeTags(tags)
+	norm, err := bus.NormalizeTagPatterns(tags)
 	if err != nil || len(norm) == 0 {
-		return nil, fmt.Errorf("tags %q: must be 1-10 tags of 1-20 characters a-z, 0-9, _ or -", tags)
+		return nil, fmt.Errorf("tags %q: must be 1-10 tags (1-32 characters of a-z, 0-9 and -, with at most one :) or tag prefixes ending in *", tags)
 	}
 	sets, _ := f.TagSubscriptions()
 	if !slices.ContainsFunc(sets, func(s []string) bool { return slices.Equal(s, norm) }) {
@@ -223,7 +226,7 @@ func (f *File) AddTagSet(tags []string) ([][]string, error) {
 
 // RemoveTagSet removes a set (a no-op that still writes when absent).
 func (f *File) RemoveTagSet(tags []string) ([][]string, error) {
-	norm, err := bus.NormalizeTags(tags)
+	norm, err := bus.NormalizeTagPatterns(tags)
 	if err != nil {
 		return nil, err
 	}

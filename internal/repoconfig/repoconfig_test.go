@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -274,14 +275,50 @@ func TestTagSubscriptionsRoundTrip(t *testing.T) {
 
 func TestTagsNormalizesDedupesAndReportsBad(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, `{"identity":"Sam","tags":["TMI","tmi","api-schema","repo:tmi","",7,"abcdefghijklmnopqrstu"]}`)
+	long33 := strings.Repeat("a", 33)
+	writeFile(t, dir, `{"identity":"Sam","tags":["TMI","tmi","api-schema","repo:tmi","",7,"a_b","env:*","`+long33+`"]}`)
 	f, _ := Load(dir)
 	got, bad := f.Tags()
-	if !reflect.DeepEqual(got, []string{"tmi", "api-schema"}) {
+	if !reflect.DeepEqual(got, []string{"tmi", "api-schema", "repo:tmi"}) {
 		t.Fatal(got)
 	}
-	if !reflect.DeepEqual(bad, []string{"repo:tmi", "", "7", "abcdefghijklmnopqrstu"}) {
+	if !reflect.DeepEqual(bad, []string{"", "7", "a_b", "env:*", long33}) {
 		t.Fatal(bad)
+	}
+}
+
+func TestTagSubscriptionsAcceptPatterns(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{"identity":"Sam","tag_subscriptions":[["ENV:*","failed"],["env_*"],["*"],["change","area:*"]]}`)
+	f, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sets, bad := f.TagSubscriptions()
+	if !reflect.DeepEqual(sets, [][]string{{"env:*", "failed"}, {"area:*", "change"}}) {
+		t.Fatalf("sets: %v", sets)
+	}
+	if !reflect.DeepEqual(bad, []string{"[env_*]", "[*]"}) {
+		t.Fatalf("bad: %v", bad)
+	}
+	if _, err := f.AddTagSet([]string{"repo:tmi*"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.AddTagSet([]string{"e*v"}); err == nil {
+		t.Fatal("an invalid pattern must be rejected")
+	}
+	sets, err = f.RemoveTagSet([]string{"FAILED", "env:*"})
+	if err != nil || !reflect.DeepEqual(sets, [][]string{{"area:*", "change"}, {"repo:tmi*"}}) {
+		t.Fatalf("remove by normalized pattern set: %v %v", sets, err)
+	}
+	g, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A write stores only the valid sets (setTagSets), so the two bad
+	// entries are gone from the file.
+	if sets, bad := g.TagSubscriptions(); !reflect.DeepEqual(sets, [][]string{{"area:*", "change"}, {"repo:tmi*"}}) || len(bad) != 0 {
+		t.Fatalf("written file: %v %v", sets, bad)
 	}
 }
 

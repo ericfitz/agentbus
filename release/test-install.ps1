@@ -43,22 +43,24 @@ function Get-OpenSsl3 {
 # line becomes a terminating NativeCommandError.
 function Invoke-Ssl([string[]]$SslArgs) {
     $ssl = Get-OpenSsl3
-    & $ssl @SslArgs | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "test-install.ps1: openssl $($SslArgs[0]) failed with exit code $LASTEXITCODE" }
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 1
+    try { & $ssl @SslArgs 2>&1 | Out-Null; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $eap }
+    if ($code -ne 0) { throw "test-install.ps1: openssl $($SslArgs[0]) failed with exit code $code" }
 }
 
 # Cleanup runs on every exit path (success, failure, Ctrl-C) and twice is fine.
 function Cleanup {
+    if ([Environment]::GetEnvironmentVariable('Path', 'User') -ne $SavedUserPath) {
+        [Environment]::SetEnvironmentVariable('Path', $SavedUserPath, 'User')
+    }
     if ($script:Server) {
         Stop-Process -Id $script:Server.Id -Force -ErrorAction SilentlyContinue
         $null = $script:Server.WaitForExit(3000)
         $script:Server = $null
     }
     # Only stubs started from this run's work directory: never the user's real agentbus sessions (the VM runs them).
-    Get-Process -Name agentbus -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Work*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    if ([Environment]::GetEnvironmentVariable('Path', 'User') -ne $SavedUserPath) {
-        [Environment]::SetEnvironmentVariable('Path', $SavedUserPath, 'User')
-    }
+    Get-Process -Name agentbus -ErrorAction SilentlyContinue | Where-Object { $p = $_.Path; $p -and ($p -like "$Work*") } | Stop-Process -Force -ErrorAction SilentlyContinue
     foreach ($i in 1..5) {
         if (-not (Test-Path -LiteralPath $Work)) { break }
         Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
@@ -202,8 +204,15 @@ function Start-Server {
 
 function Test-Verify([string]$Dir) {
     $ssl = Get-OpenSsl3
-    & $ssl pkeyutl -verify -rawin -pubin -inkey (Join-Path $Work 'key.pub') -in (Join-Path $Dir 'SHA256SUMS') -sigfile (Join-Path $Dir 'SHA256SUMS.sig') 2>&1 | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    # Windows PowerShell 5.1 turns captured stderr into a terminating error
+    # under 'Stop'; openssl writes to stderr on a bad signature.
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 1
+    try {
+        & $ssl pkeyutl -verify -rawin -pubin -inkey (Join-Path $Work 'key.pub') -in (Join-Path $Dir 'SHA256SUMS') -sigfile (Join-Path $Dir 'SHA256SUMS.sig') 2>&1 | Out-Null
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $eap }
+    return ($code -eq 0)
 }
 
 function Assert([string]$Name, [bool]$Ok) {
@@ -287,7 +296,7 @@ function Get-UserPathEntries { return @(([Environment]::GetEnvironmentVariable('
 function Invoke-SelfTest {
     Build-Fixture
     $v = Join-Path $Fx 'valid/v9.0.1'
-    Assert 'self: sums list three files' ((Get-Content -LiteralPath (Join-Path $v 'SHA256SUMS')).Count -eq 3)
+    Assert 'self: sums list three files' (@(Get-Content -LiteralPath (Join-Path $v 'SHA256SUMS')).Count -eq 3)
     Assert 'self: valid signature verifies' (Test-Verify $v)
     Assert 'self: tampered-sig fails' (-not (Test-Verify (Join-Path $Fx 'tampered-sig/v9.0.1')))
     Assert 'self: tampered-sums fails' (-not (Test-Verify (Join-Path $Fx 'tampered-sums/v9.0.1')))
@@ -301,7 +310,7 @@ function Invoke-SelfTest {
     Assert 'self: install.ps1 copy carries the throwaway key' ((Get-Content -LiteralPath (Join-Path $Fx 'install.ps1') -Raw).Contains($pem[1]))
     $ph = Get-Content -LiteralPath (Join-Path $Fx 'install-placeholder.ps1') -Raw
     Assert 'self: placeholder copy holds the placeholder and the rest of the script' ($ph.Contains("`nREPLACED-BY-release/embed-key.sh`n") -and -not $ph.Contains($pem[1]) -and $ph.Contains('function Main'))
-    Assert 'self: install.ps1 copy differs from the repo only in the key block' ((Get-Content -LiteralPath (Join-Path $Fx 'install.ps1')).Count -eq (Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1')).Count)
+    Assert 'self: install.ps1 copy differs from the repo only in the key block' (@(Get-Content -LiteralPath (Join-Path $Fx 'install.ps1')).Count -eq @(Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1')).Count)
     $threw = $false
     try { Set-KeyBlock (Join-Path $Fx 'fakes/openssl.cmd') 'x' } catch { $threw = $true }
     Assert 'self: Set-KeyBlock refuses a file without markers' $threw
@@ -395,15 +404,15 @@ function Invoke-Cases {
     $fakePath = @{ 'Path' = (Join-Path $Fx 'fakes') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
     $fake3Path = @{ 'Path' = (Join-Path $Fx 'fakes3') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
     Invoke-Case 'valid' 0 'installed agentbus 9.0.1' @{} $dir $null { (& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1' }
-    Invoke-Case 'path-added' 0 'added' @{} (Join-Path $Work 'bin2') $null { (Get-UserPathEntries) -contains (Join-Path $Work 'bin2') }
+    Invoke-Case 'path-added' 0 'to your user PATH' @{} (Join-Path $Work 'bin2') $null { (Get-UserPathEntries) -contains (Join-Path $Work 'bin2') }
     Invoke-Case 'pinned-version' 0 'installed agentbus 9.0.0' @{ 'AGENTBUS_VERSION' = 'v9.0.0' } $dir $null $null
     Invoke-Case 'version-no-v' 1 'version must look like vX.Y.Z' @{ 'AGENTBUS_VERSION' = '9.0.0' } $dir $null $null
-    Invoke-Case 'latest-unparsable' 1 'could not determine the latest release' @{ 'AGENTBUS_BASE_URL' = "$Base/nope" } $dir $null $null
+    Invoke-Case 'latest-404' 1 'could not determine the latest release' @{ 'AGENTBUS_BASE_URL' = "$Base/nope" } $dir $null $null
     Invoke-Case 'tampered-zip' 1 'checksum mismatch' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null
     Invoke-Case 'tampered-sums' 1 'signature check of SHA256SUMS failed' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-sums" } $dir $null $null
     Invoke-Case 'tampered-sig' 1 'signature check of SHA256SUMS failed' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-sig" } $dir $null $null
     Invoke-Case 'sums-missing-entry' 1 'SHA256SUMS has no entry for' @{ 'AGENTBUS_BASE_URL' = "$Base/missing-entry" } $dir $null $null
-    Invoke-Case 'no-openssl' 1 'winget install --id Git.Git -e' $noGit $dir $null $null
+    Invoke-Case 'no-openssl' 1 'none was found' $noGit $dir $null $null
     Invoke-Case 'openssl-too-old' 1 'OpenSSL 1.1.1w' $fakePath $dir $null $null
     Invoke-Case 'skip-signature-valid' 0 'skipping the signature check' ($noGit + @{ 'AGENTBUS_SKIP_SIGNATURE' = '1' }) $dir $null $null
     Invoke-Case 'skip-signature-tampered' 1 'checksum mismatch' @{ 'AGENTBUS_SKIP_SIGNATURE' = '1'; 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null
@@ -412,10 +421,10 @@ function Invoke-Cases {
     Invoke-Case 'relative-dir' 1 'must be an absolute path' @{} 'bin' $null $null
     $script:Running = $null
     Invoke-Case 'upgrade-while-running' 0 'upgraded: restart' @{} $dir { $script:Running = Start-Process -FilePath (Join-Path $dir 'agentbus.exe') -ArgumentList 'sleep' -PassThru @Hidden } {
-        ((& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1') -and ((Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 1)
+        ((& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1') -and (@(Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 1)
     }
     if ($script:Running) { Stop-Process -Id $script:Running.Id -Force; Start-Sleep -Milliseconds 500 }
-    Invoke-Case 'leftover-old-cleaned' 0 'installed agentbus' @{} $dir $null { (Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 0 }
+    Invoke-Case 'leftover-old-cleaned' 0 'installed agentbus' @{} $dir $null { @(Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 0 }
     # Two installers racing into a fresh directory. The environment is set
     # around both launches and put back at once: without it they would
     # install from github.com into the real install directory.
@@ -426,11 +435,14 @@ function Invoke-Cases {
         $c1 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru @Hidden
         $c2 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru @Hidden
     } finally { Restore-EnvMap $saved }
-    $c1.WaitForExit(); $c2.WaitForExit()
+    $done1 = $c1.WaitForExit(120000); $done2 = $c2.WaitForExit(120000)
+    if (-not ($done1 -and $done2)) { foreach ($c in $c1, $c2) { if (-not $c.HasExited) { Stop-Process -Id $c.Id -Force -ErrorAction SilentlyContinue } } }
     $served = $null
     if (Test-Path -LiteralPath (Join-Path $dir3 'agentbus.exe')) { $served = "$(& (Join-Path $dir3 'agentbus.exe') version)" }
-    Assert 'concurrent' (($c1.ExitCode -eq 0) -and ($c2.ExitCode -eq 0) -and ($served -eq '9.0.1'))
-    Invoke-Case 'failed-run-leaves-no-temp' 1 'checksum mismatch' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null { (Get-ChildItem ([IO.Path]::GetTempPath()) -Filter 'agentbus-install-*' -Directory).Count -eq 0 }
+    $ok = $done1 -and $done2 -and ($c1.ExitCode -eq 0) -and ($c2.ExitCode -eq 0) -and ($served -eq '9.0.1')
+    Assert 'concurrent' $ok
+    if (-not $ok) { Write-Host "    finished=$done1/$done2 exit codes: $(if ($done1) { $c1.ExitCode }) and $(if ($done2) { $c2.ExitCode }); served version: '$served' (want 9.0.1)" }
+    Invoke-Case 'failed-run-leaves-no-temp' 1 'checksum mismatch' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null { @(Get-ChildItem ([IO.Path]::GetTempPath()) -Filter 'agentbus-install-*' -Directory).Count -eq 0 }
 
     # Refusals and paths install.ps1 has beyond the plan.
     Invoke-Case 'version-suffix' 1 'version must look like vX.Y.Z' @{ 'AGENTBUS_VERSION' = 'v9.0.0-rc1' } $dir $null $null

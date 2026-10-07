@@ -138,5 +138,13 @@ check server-no-args 2 "usage: fixture-server.py <root> <port>" -- python3 -I "$
 check server-bad-port 2 "port must be an integer" -- python3 -I "$HERE/testdata/fixture-server.py" "$WORK/fx" abc
 check server-missing-root 2 "$WORK/nope" -- python3 -I "$HERE/testdata/fixture-server.py" "$WORK/nope" 20000
 
+# check-linux-brew.sh validates every argument before starting any container
+check brew-check-bad-arch 2 "unknown architecture 'bogus' (amd64 or arm64)" -- "$HERE/check-linux-brew.sh" bogus
+mkdir -p "$WORK/stubbin"
+printf '#!/bin/sh\necho called >> "%s/docker-called"\nexit 1\n' "$WORK" > "$WORK/stubbin/docker"
+chmod +x "$WORK/stubbin/docker"
+check brew-check-bad-arch-second 2 "unknown architecture 'bogus' (amd64 or arm64)" -- env PATH="$WORK/stubbin:$PATH" "$HERE/check-linux-brew.sh" amd64 bogus
+check brew-check-no-container-started 1 "" -- test -e "$WORK/docker-called"
+
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

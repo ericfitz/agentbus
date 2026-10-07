@@ -31,7 +31,7 @@ verify: ## Done gate: build, vet, gofmt, lint, tests, in that order
 	$(MAKE) test
 	@echo "verify: OK"
 
-release-check: ## Release tooling checks: shellcheck, template rendering, install.sh in containers. Needs Docker, python3, openssl@3; not part of verify
+release-check: ## Release tooling checks: shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs shellcheck, Docker, python3, ruby, openssl@3; not part of verify
 	shellcheck -x release/*.sh
 	shellcheck -s sh install.sh
 	release/test-release.sh

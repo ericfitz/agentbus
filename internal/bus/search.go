@@ -163,7 +163,7 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 		offset = o
 	}
 	var err error
-	if in.Tags, err = NormalizeTags(in.Tags); err != nil {
+	if in.Tags, err = NormalizeTagPatterns(in.Tags); err != nil {
 		return SearchResult{}, err
 	}
 	if in.Mode == "" {

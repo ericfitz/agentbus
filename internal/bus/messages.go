@@ -462,7 +462,7 @@ func (b *Bus) History(as, channel string, before, after *int64, count int, tags 
 	if count > b.cfg.ReceiveMaxCount {
 		count = b.cfg.ReceiveMaxCount
 	}
-	tags, err := NormalizeTags(tags)
+	tags, err := NormalizeTagPatterns(tags)
 	if err != nil {
 		return nil, err
 	}

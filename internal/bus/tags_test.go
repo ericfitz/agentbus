@@ -618,3 +618,71 @@ func TestWaitWakesOnTagMatch(t *testing.T) {
 		t.Fatalf("wait peeks the tag source with matched_tags: %+v %v", msgs, err)
 	}
 }
+
+func TestHistoryAndSearchMatchTagPatterns(t *testing.T) {
+	b, sam, _ := setupTwo(t)
+	sendTagged(t, b, sam, "dev", "prod deploy", "deployment", "env:prod")
+	sendTagged(t, b, sam, "dev", "staging deploy", "deployment", "env:staging")
+	sendTagged(t, b, sam, "dev", "old style", "prod")
+	sendTagged(t, b, sam, "dev", "envelope", "envelope")
+	sendTagged(t, b, sam, "dev", "plain")
+	contents := func(ms []Message) []string {
+		var out []string
+		for _, m := range ms {
+			out = append(out, m.Content)
+		}
+		return out
+	}
+	h, err := b.History(sam, "dev", nil, nil, 10, "env:*")
+	if err != nil || !slices.Equal(contents(h), []string{"prod deploy", "staging deploy"}) {
+		t.Fatalf("env:* : %v %v", contents(h), err)
+	}
+	h, err = b.History(sam, "dev", nil, nil, 10, "env*")
+	if err != nil || !slices.Equal(contents(h), []string{"prod deploy", "staging deploy", "envelope"}) {
+		t.Fatalf("env* : %v %v", contents(h), err)
+	}
+	h, err = b.History(sam, "dev", nil, nil, 10, "ENV:prod", "prod")
+	if err != nil || !slices.Equal(contents(h), []string{"prod deploy", "old style"}) {
+		t.Fatalf("mixed exact, lowercased: %v %v", contents(h), err)
+	}
+	for _, bad := range []string{"env_*", "*", "e*v"} {
+		wantCode(t, func() error { _, err := b.History(sam, "dev", nil, nil, 10, bad); return err }(), "validation")
+	}
+	eleven := make([]string, 11)
+	for i := range eleven {
+		eleven[i] = "t" + string(rune('a'+i)) + "*"
+	}
+	wantCode(t, func() error { _, err := b.History(sam, "dev", nil, nil, 10, eleven...); return err }(), "validation")
+
+	s, err := b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"env:st*"}})
+	if err != nil || len(s.Hits) != 1 || s.Hits[0].Content != "staging deploy" {
+		t.Fatalf("search prefix: %+v %v", s.Hits, err)
+	}
+	s, err = b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"env:*", "prod"}})
+	if err != nil || len(s.Hits) != 2 {
+		t.Fatalf("search mixed: %+v %v", s.Hits, err)
+	}
+	wantCode(t, func() error {
+		_, err := b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"e*v"}})
+		return err
+	}(), "validation")
+	wantCode(t, func() error {
+		_, err := b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: eleven})
+		return err
+	}(), "validation")
+}
+
+// A tag stored under the old rule (one with _) is not rewritten: history
+// still returns it, but it can no longer be named in a filter.
+func TestLegacyUnderscoreTagStaysReadableButNotFilterable(t *testing.T) {
+	b, sam, _ := setupTwo(t)
+	r := sendTagged(t, b, sam, "dev", "legacy")
+	if _, err := b.db.Exec("INSERT INTO message_tags(seq, tag) VALUES(?, 'a_b')", r.Seq); err != nil {
+		t.Fatal(err)
+	}
+	h, err := b.History(sam, "dev", nil, nil, 10)
+	if err != nil || len(h) != 1 || !slices.Equal(h[0].Tags, []string{"a_b"}) {
+		t.Fatalf("history keeps the stored tag: %+v %v", h, err)
+	}
+	wantCode(t, func() error { _, err := b.History(sam, "dev", nil, nil, 10, "a_b"); return err }(), "validation")
+}

@@ -141,17 +141,22 @@ func tagsOf(q querier, seq int64) ([]string, error) {
 	return out, rows.Err()
 }
 
-// tagsFilter is the any-of tags clause for History and search: messages
-// carrying at least one of tags. Empty tags adds nothing.
-func tagsFilter(alias string, tags []string) (string, []any) {
-	if len(tags) == 0 {
+// tagsFilter is the any-of clause for History and search: messages
+// carrying a tag in the range of at least one pattern (BETWEEN, so the
+// comparison is BINARY and can use the (seq, tag) key; see tagRange).
+// Empty patterns adds nothing.
+func tagsFilter(alias string, patterns []string) (string, []any) {
+	if len(patterns) == 0 {
 		return "", nil
 	}
-	args := make([]any, len(tags))
-	for i, t := range tags {
-		args[i] = t
+	conds := make([]string, len(patterns))
+	args := make([]any, 0, 2*len(patterns))
+	for i, p := range patterns {
+		lo, hi := tagRange(p)
+		conds[i] = "t.tag BETWEEN ? AND ?"
+		args = append(args, lo, hi)
 	}
-	return " AND EXISTS (SELECT 1 FROM message_tags t WHERE t.seq=" + alias + ".seq AND t.tag IN (" + strings.Repeat("?,", len(tags)-1) + "?))", args
+	return " AND EXISTS (SELECT 1 FROM message_tags t WHERE t.seq=" + alias + ".seq AND (" + strings.Join(conds, " OR ") + "))", args
 }
 
 // tagSource is the pseudo-subscription row that carries the cursor, pending

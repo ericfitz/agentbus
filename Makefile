@@ -28,7 +28,7 @@ vet-cross: ## Compile every package and test for the other release targets; lint
 test-race: ## Unit tests under the race detector (slower; the mcpserver tests rebuild the child binary with -race)
 	go test -race ./...
 
-verify: ## Done gate: build, vet, gofmt, lint, tests, in that order
+verify: ## Done gate: build, vet, vet-cross, gofmt, lint, tests, in that order
 	$(MAKE) build
 	$(MAKE) build-all
 	$(MAKE) vet
@@ -38,9 +38,11 @@ verify: ## Done gate: build, vet, gofmt, lint, tests, in that order
 	$(MAKE) test
 	@echo "verify: OK"
 
-release-check: ## Release tooling checks: shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs shellcheck, Docker, python3, ruby, openssl@3; not part of verify
+release-check: ## Release tooling checks: actionlint, shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs actionlint, shellcheck, Docker, python3, ruby, openssl@3; not part of verify
+	actionlint .github/workflows/*.yml
 	shellcheck -x release/*.sh
 	shellcheck -s sh install.sh
+	@echo "note: release/test-install.ps1 runs on Windows only (windows.yml, release/test-windows.ps1)"
 	release/test-release.sh
 	release/test-render.sh
 	release/test-install.sh

@@ -96,3 +96,9 @@ The user explicitly selected or required the following during initial discussion
 - A separate cross-session cursor-copy operation, semantic search, native Windows runtime, and a human monitoring UI are outside the initial implementation.
 
 No implementation has begun. Frameworks/libraries and role taxonomy remain unselected.
+
+## Amendment (2026-10-07)
+
+Superseded in part: native Windows runtime support is now in scope (#35). See
+[docs/superpowers/specs/2026-10-06-windows-support-design.md](../superpowers/specs/2026-10-06-windows-support-design.md).
+The text above is the original decision and is left unchanged.

@@ -74,8 +74,8 @@ given positional arguments, an `AGENTBUS_VERSION` that is not exactly
 `vX.Y.Z`, a relative `AGENTBUS_INSTALL_DIR`, no `LocalAppData` and no
 `AGENTBUS_INSTALL_DIR`, a copy without an embedded release key, or when
 `<dir>\agentbus.exe` is a directory. It also stops when the target
-directory is not writable or when the installed binary does not run
-`agentbus version`. A refusal throws, so a piped `iex` leaves your session
+directory is not writable, and it fails after installing if the installed
+binary does not run `agentbus version`. A refusal throws, so a piped `iex` leaves your session
 open.
 
 Package managers:
@@ -85,6 +85,8 @@ scoop bucket add ericfitz https://github.com/ericfitz/scoop-bucket
 scoop install agentbus
 winget install ericfitz.agentbus
 ```
+
+The winget command works once the winget package is published.
 
 Stop agentbus sessions (MCP servers, `agentbus wait`, the TUI) before
 `scoop update agentbus` or `winget upgrade ericfitz.agentbus`: neither can
@@ -103,7 +105,7 @@ Inside WSL use the Linux installer above. Windows and WSL each run their
 own bus: an agent in a Windows terminal and an agent in a WSL shell do not
 see each other. agentbus refuses a data directory that crosses the boundary
 (a `/mnt/c/...` path under WSL, or a `\\wsl$\...`, `\\wsl.localhost\...`
-or mapped-drive path on Windows), because SQLite's file locks do not work
+or a drive mapped to one of those on Windows), because SQLite's file locks do not work
 between Windows and WSL processes on one file and concurrent use could
 corrupt the database. Keep each side's database on its own disk.
 

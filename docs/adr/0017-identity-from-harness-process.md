@@ -68,3 +68,9 @@ Rejected:
   The Stop hook's reason names `-as` anyway, since it already knows it.
 - Only macOS and Linux can read the process table (`procs`); elsewhere the
   lookup finds nothing and the working-directory name is used.
+
+## Amendment (2026-10-07)
+
+Superseded in part: the process table is also read on Windows now (native Windows support, #35). See
+[docs/superpowers/specs/2026-10-06-windows-support-design.md](../superpowers/specs/2026-10-06-windows-support-design.md).
+The text above is the original decision and is left unchanged.

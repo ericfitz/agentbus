@@ -103,7 +103,14 @@ check embedded-placeholder-hint 1 "embed-key.sh" -- bash -c "source '$HERE/relea
 check embedded-ok 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/script.sh' install.sh"
 cp "$WORK/unembedded.sh" "$WORK/repo/install.sh" && git -C "$WORK/repo" add install.sh && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m inst && git -C "$WORK/repo" tag v0.0.3
 check preflight-placeholder 1 "no embedded release key" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.3; check_installers_embedded"
-cp "$HERE/../install.sh" "$WORK/real-install.sh"
+# Build the unembedded copy from install.sh with its key block reset to the
+# placeholder, so this case does not depend on whether the repo has embedded
+# the real key yet.
+awk '
+    /^# BEGIN agentbus release public key$/ { print; print "PUBKEY_PEM='"'"'-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----'"'"'"; skip = 1; next }
+    /^# END agentbus release public key$/ { skip = 0 }
+    !skip { print }
+' "$HERE/../install.sh" > "$WORK/real-install.sh"
 check real-unembedded 1 "no embedded release key" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.sh' install.sh"
 "$HERE/embed-key.sh" "$WORK/throwaway.pub" "$WORK/real-install.sh" >/dev/null
 check real-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.sh' install.sh"

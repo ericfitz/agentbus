@@ -13,6 +13,10 @@ const (
 	exitNotExecutable   = 126
 )
 
+// editorMissing is false: the shell's exit 127 already reports a missing
+// editor.
+func editorMissing(string) bool { return false }
+
 // shellEditorCommand runs an editor setting through the shell the way git
 // runs GIT_EDITOR, with the file as $1, so arguments and quoting work.
 func shellEditorCommand(ed, path string) *exec.Cmd {

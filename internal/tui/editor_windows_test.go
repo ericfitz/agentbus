@@ -27,3 +27,14 @@ func TestEditorErrTextExplainsMissingCommandWindows(t *testing.T) {
 		t.Fatalf("editorErrText(%v) = %q", err, got)
 	}
 }
+
+// An editor that runs and fails is not reported as missing: cmd.exe exits 1
+// either way, so the lookup is what tells the two apart. findstr is on PATH
+// and exits 1 when its pattern ("x.md") is not in its empty stdin.
+func TestEditorErrTextKeepsFailureOfFoundEditorWindows(t *testing.T) {
+	t.Setenv("VISUAL", "findstr")
+	err := editorCommand("x.md").Run()
+	if got := editorErrText(err); strings.Contains(got, "not found") || !strings.Contains(got, "exit status 1") {
+		t.Fatalf("editorErrText(%v) = %q", err, got)
+	}
+}

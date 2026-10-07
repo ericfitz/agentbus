@@ -251,16 +251,17 @@ func editorSetting() (ed, source string) {
 }
 
 // editorErrText explains an editor failure for a toast. The shell's "not
-// found" and "not executable" exits (editor_unix.go, editor_windows.go)
-// usually mean a stale $VISUAL or $EDITOR, so name the setting.
+// found" and "not executable" exits, or on Windows a program missing from
+// PATH (editor_unix.go, editor_windows.go), usually mean a stale $VISUAL or
+// $EDITOR, so name the setting.
 func editorErrText(err error) string {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		ed, source := editorSetting()
-		switch ee.ExitCode() {
-		case exitCommandNotFound:
+		switch code := ee.ExitCode(); {
+		case code == exitCommandNotFound || editorMissing(ed):
 			return fmt.Sprintf("editor: command not found: %s (from %s)", ed, source)
-		case exitNotExecutable:
+		case code == exitNotExecutable:
 			return fmt.Sprintf("editor: not executable: %s (from %s)", ed, source)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ericfitz/agentbus/internal/filelock"
 	"github.com/ericfitz/agentbus/internal/procs"
 )
 
@@ -33,7 +34,7 @@ func flockFile(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f); err != nil {
 		_ = f.Close()
 		return nil, err
 	}

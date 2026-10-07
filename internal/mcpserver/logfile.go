@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/ericfitz/agentbus/internal/filelock"
 )
 
 // rotatingWriter appends to path and rotates to path.1 .. path.(keep-1) when
@@ -16,8 +16,8 @@ import (
 // log file, so every Write holds an exclusive cross-process flock
 // (path+".lock") for its whole critical section: reopen path if another
 // process rotated it since our last write, rotate if the fresh size calls
-// for it, then append. darwin and linux only, matching this project's
-// targets. One flock per log line is fine for a local log file.
+// for it, then append. The lock is flock on Unix and LockFileEx on Windows
+// (internal/filelock). One lock per log line is fine for a local log file.
 type rotatingWriter struct {
 	path     string
 	maxBytes int64
@@ -64,7 +64,7 @@ func (w *rotatingWriter) lockAcrossProcesses() (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(lf); err != nil {
 		_ = lf.Close()
 		return nil, err
 	}

@@ -58,6 +58,11 @@ END;`
 // keeps every row, embedding, and FTS entry, carries the AUTOINCREMENT
 // counter over, and stamps user_version 2.
 func TestMigrateV1DropsMessagesBytes(t *testing.T) {
+	// Row 1 carries refs (a path with a space, a URL with non-ASCII and a
+	// query string) so the v11 fold is proven through the messages_v2 and
+	// addSubject rebuilds (ADR 0019).
+	const v1Refs = `[{"kind":"unix_path","value":"/Users/sam/release notes.md"},{"kind":"url","value":"https://example.com/café?q=ü&r=1"}]`
+	const wantRow1 = "remember me\n\nRefs:\n- /Users/sam/release notes.md\n- https://example.com/café?q=ü&r=1"
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
 	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
@@ -73,10 +78,12 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	// skips messages because it already exists), stamped 1.
 	for _, s := range []string{schemaV1Messages, schema, schemaV5FTS, "PRAGMA user_version = 1",
 		"INSERT INTO channels(name,kind,created_seq) VALUES('memory','memory',0)",
-		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,bytes) VALUES('memory','sam','r',1,'','remember me',1,1,42)",
+		"INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,bytes,refs) VALUES('memory','sam','r',1,'','remember me',1,1,42,'" + v1Refs + "')",
 		"INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('general','sam','r',2,'','hello world',42)",
-		"INSERT INTO embeddings(seq,model,vector) VALUES(1,'m',x'00')",
-		"DELETE FROM messages WHERE seq=2", // counter (2) now exceeds max(seq) (1)
+		"INSERT INTO messages(channel,sender,context,created_at,type,content,bytes) VALUES('general','sam','r',3,'','doomed',42)",
+		"INSERT INTO embeddings(seq,model,vector) VALUES(1,'m',x'00')", // dropped by the fold (row 1 has refs)
+		"INSERT INTO embeddings(seq,model,vector) VALUES(2,'m',x'00')", // kept: row 2 has no refs
+		"DELETE FROM messages WHERE seq=3", // counter (3) now exceeds max(seq) (2)
 	} {
 		if _, err := db.Exec(s); err != nil {
 			t.Fatalf("%s: %v", s, err)
@@ -113,12 +120,15 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 		t.Fatalf("refs column survived the full chain: %s", cols)
 	}
 	var content string
-	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != "remember me" {
-		t.Fatalf("row 1 after rebuild: %q, %v", content, err)
+	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != wantRow1 {
+		t.Fatalf("row 1 after rebuild: %q, %v; want %q", content, err, wantRow1)
+	}
+	if _, err := b.db.Exec("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')"); err != nil {
+		t.Fatalf("fts integrity-check after the full chain: %v", err)
 	}
 	var n int
 	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&n); err != nil || n != 1 {
-		t.Fatalf("embeddings after rebuild: %d, %v (want 1: rebuild must not cascade)", n, err)
+		t.Fatalf("embeddings after rebuild: %d, %v (want 1: the fold drops row 1's, the rebuilds must not cascade to row 2's)", n, err)
 	}
 	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'remember'").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("fts after rebuild: %d, %v", n, err)
@@ -128,14 +138,14 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 			t.Fatalf("%s not recreated after rebuild", obj)
 		}
 	}
-	// seq stays monotonic: the next message must get 3, not 2.
+	// seq stays monotonic: the next message must get 4, not 3.
 	sam := reg(t, b, "sam")
 	r, err := b.Send(sam, SendInput{Channel: "general", Content: "after"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Seq != 3 {
-		t.Fatalf("seq after migration = %d, want 3 (AUTOINCREMENT counter not carried over)", r.Seq)
+	if r.Seq != 4 {
+		t.Fatalf("seq after migration = %d, want 4 (AUTOINCREMENT counter not carried over)", r.Seq)
 	}
 	if _, err := b.Search(sam, SearchInput{Query: "remember", Mode: "text"}); err != nil {
 		t.Fatalf("search after rebuild: %v", err)
@@ -1054,5 +1064,91 @@ func TestMigrateV10DropsRefsWhenNothingToFold(t *testing.T) {
 	var contents string
 	if err := b.db.QueryRow("SELECT group_concat(content, '|') FROM (SELECT content FROM messages ORDER BY seq)").Scan(&contents); err != nil || contents != "gone|kept" {
 		t.Fatalf("contents = %q, %v; want unchanged", contents, err)
+	}
+}
+
+// TestMigrateV10FoldRefsReopenRunsNothing (ADR 0019): a second open of
+// the folded file starts at the stored user_version, so the step does not
+// run again and no row is folded twice.
+func TestMigrateV10FoldRefsReopenRunsNothing(t *testing.T) {
+	cfg := newV10RefsFile(t, v10RefsRows...)
+	for i := 0; i < 2; i++ {
+		b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		var uv int
+		var content string
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if uv != schemaVersion || content != foldedSeq1 {
+			t.Fatalf("open %d: user_version %d, content %q", i, uv, content)
+		}
+	}
+}
+
+// TestMigrateV10FoldRefsFailureLeavesPreviousVersion (ADR 0019): a step
+// that fails after its writes rolls every one of them back (one
+// transaction), so the file stays at version 10 with its refs, content
+// and embeddings intact, and the next open runs the step again and
+// succeeds.
+func TestMigrateV10FoldRefsFailureLeavesPreviousVersion(t *testing.T) {
+	cfg := newV10RefsFile(t, v10RefsRows...)
+	orig := migrations[10]
+	migrations[10] = func(tx *sql.Tx) error {
+		if err := orig(tx); err != nil {
+			return err
+		}
+		return errors.New("injected after the fold")
+	}
+	t.Cleanup(func() { migrations[10] = orig })
+	if _, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil || !strings.Contains(err.Error(), "injected after the fold") {
+		t.Fatalf("Open must fail with the injected error, got %v", err)
+	}
+
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uv, embedded int
+	var content, refs string
+	if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT content, refs FROM messages WHERE seq=1").Scan(&content, &refs); err != nil {
+		t.Fatalf("refs column must survive the failed step: %v", err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if uv != 10 || content != "issue link" || refs != `[{"kind":"url","value":"https://github.com/ericfitz/agentbus/issues/874"}]` || embedded != 3 {
+		t.Fatalf("after the failed step: user_version %d, content %q, refs %q, %d embeddings; want 10, unfolded, intact, 3", uv, content, refs, embedded)
+	}
+
+	migrations[10] = orig
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open after the failed step must succeed: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != foldedSeq1 {
+		t.Fatalf("content after the retried step = %q, %v", content, err)
 	}
 }

@@ -1,5 +1,5 @@
 # agentbus build and verification targets. `make verify` is the done gate.
-.PHONY: build build-all fmt-check vet lint test test-race verify
+.PHONY: build build-all fmt-check vet lint test test-race verify release-check
 
 build: ## Build the agentbus binary the way release/release.sh does (no cgo)
 	CGO_ENABLED=0 go build -trimpath -o agentbus .
@@ -30,3 +30,10 @@ verify: ## Done gate: build, vet, gofmt, lint, tests, in that order
 	$(MAKE) lint
 	$(MAKE) test
 	@echo "verify: OK"
+
+release-check: ## Release tooling checks: shellcheck, template rendering, install.sh in containers. Needs Docker, python3, openssl@3; not part of verify
+	shellcheck -x release/*.sh
+	shellcheck -s sh install.sh
+	release/test-release.sh
+	release/test-render.sh
+	release/test-install.sh

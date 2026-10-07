@@ -8,11 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-type Ref struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
-}
-
 type SendInput struct {
 	Channel        string            `json:"channel"`
 	Subject        string            `json:"subject,omitempty" jsonschema:"optional one-line summary (at most 200 characters) shown as the message's title; without one, readers see the first line of content"`
@@ -20,7 +15,6 @@ type SendInput struct {
 	Type           string            `json:"type,omitempty"`
 	ReplyTo        *int64            `json:"reply_to,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
-	Refs           []Ref             `json:"refs,omitempty"`
 	Tags           []string          `json:"tags,omitempty"`
 	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 }
@@ -42,7 +36,6 @@ type Message struct {
 	Content  string            `json:"content"`
 	ReplyTo  *int64            `json:"reply_to,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
-	Refs     []Ref             `json:"refs,omitempty"`
 	MemoryID *int64            `json:"memory_id,omitempty"`
 	Revision *int64            `json:"revision,omitempty"`
 	// Tags is the message's lowercase tag set, sorted; empty when the
@@ -58,23 +51,18 @@ type Message struct {
 // (seq, tag), so the ordered subquery walks the primary key and the string
 // comes back sorted; scanMessages splits it on spaces.
 func messageCols(alias string) string {
-	cols := strings.Split("seq, channel, sender, context, created_at, type, subject, content, reply_to, metadata, refs, memory_id, revision", ", ")
+	cols := strings.Split("seq, channel, sender, context, created_at, type, subject, content, reply_to, metadata, memory_id, revision", ", ")
 	for i, c := range cols {
 		cols[i] = alias + "." + c
 	}
 	return strings.Join(cols, ", ") + ", (SELECT group_concat(tag, ' ') FROM (SELECT tag FROM message_tags WHERE seq=" + alias + ".seq ORDER BY tag))"
 }
 
-// decodeJSONFields unmarshals the metadata/refs JSON columns (NULL as nil)
-// into m, shared by scanMessages and search's dedicated row scan.
-func decodeJSONFields(m Message, meta, refs *string) (Message, error) {
+// decodeJSONFields unmarshals the metadata JSON column (NULL as nil) into
+// m, shared by scanMessages and search's dedicated row scan.
+func decodeJSONFields(m Message, meta *string) (Message, error) {
 	if meta != nil {
 		if err := json.Unmarshal([]byte(*meta), &m.Metadata); err != nil {
-			return m, err
-		}
-	}
-	if refs != nil {
-		if err := json.Unmarshal([]byte(*refs), &m.Refs); err != nil {
 			return m, err
 		}
 	}
@@ -85,11 +73,11 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 	out := []Message{}
 	for rows.Next() {
 		var m Message
-		var meta, refs, tags *string
-		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Subject, &m.Content, &m.ReplyTo, &meta, &refs, &m.MemoryID, &m.Revision, &tags); err != nil {
+		var meta, tags *string
+		if err := rows.Scan(&m.Seq, &m.Channel, &m.Sender, &m.Context, &m.CreatedAt, &m.Type, &m.Subject, &m.Content, &m.ReplyTo, &meta, &m.MemoryID, &m.Revision, &tags); err != nil {
 			return nil, err
 		}
-		m, err := decodeJSONFields(m, meta, refs)
+		m, err := decodeJSONFields(m, meta)
 		if err != nil {
 			return nil, err
 		}
@@ -108,29 +96,16 @@ func envelopeBytes(m Message) int {
 	return len(j)
 }
 
-var refKinds = map[string]bool{"url": true, "unix_path": true, "windows_path": true}
-
-// validateRefs checks ref shape only: no mutable-state read. Shared by
-// validateSendShape and EditMemory's own pre-receipt shape check.
-func validateRefs(refs []Ref) error {
-	for _, r := range refs {
-		if !refKinds[r.Kind] || r.Value == "" {
-			return errf("validation", false, "ref kind must be url, unix_path, or windows_path with a nonempty value")
-		}
-	}
-	return nil
-}
-
-// validateSendShape checks in without touching mutable state: required
-// fields and ref kinds. It runs before the idempotency receipt lookup (R2)
-// so a keyed retry is judged by its own payload, not by a downstream lookup
-// that can fail for reasons unrelated to whether this exact payload was
-// already accepted (e.g. its channel or reply_to target being evicted since).
+// validateSendShape checks in without touching mutable state: the required
+// fields. It runs before the idempotency receipt lookup (R2) so a keyed
+// retry is judged by its own payload, not by a downstream lookup that can
+// fail for reasons unrelated to whether this exact payload was already
+// accepted (e.g. its channel or reply_to target being evicted since).
 func validateSendShape(in SendInput) error {
 	if in.Channel == "" || in.Content == "" {
 		return errf("validation", false, "channel and content are required")
 	}
-	return validateRefs(in.Refs)
+	return nil
 }
 
 // maxSubjectRunes bounds a message subject (ADR 0010).
@@ -191,8 +166,8 @@ const (
 // maximum digit width instead. memory_id and revision are omitempty pointer
 // fields that are only ever set on a memory-channel write (memoryKind),
 // so they're sized the same way, but only then. Sender, context, channel,
-// type, content, metadata, and refs are all real values already known at
-// call time, so no padding is needed for them (R4).
+// type, subject, content, metadata, and tags are all real values already
+// known at call time, so no padding is needed for them (R4).
 func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) int {
 	m := Message{
 		Channel:  in.Channel,
@@ -203,7 +178,6 @@ func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) i
 		Content:  in.Content,
 		ReplyTo:  in.ReplyTo,
 		Metadata: in.Metadata,
-		Refs:     in.Refs,
 		Tags:     in.Tags,
 	}
 	size := envelopeBytes(m)
@@ -224,7 +198,7 @@ func envelopeUpperBound(sender, context string, in SendInput, memoryKind bool) i
 // insertMessage writes one row inside tx and returns its seq. For memory channels
 // it sets memory_id = seq and revision = 1.
 func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind string) (int64, error) {
-	var meta, refs any
+	var meta any
 	if in.Metadata != nil {
 		j, err := json.Marshal(in.Metadata)
 		if err != nil {
@@ -232,15 +206,8 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		}
 		meta = string(j)
 	}
-	if in.Refs != nil {
-		j, err := json.Marshal(in.Refs)
-		if err != nil {
-			return 0, err
-		}
-		refs = string(j)
-	}
-	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,subject,content,reply_to,metadata,refs) VALUES(?,?,?,?,?,?,?,?,?,?)",
-		in.Channel, as, context, b.nowMs(), in.Type, in.Subject, in.Content, in.ReplyTo, meta, refs)
+	res, err := tx.Exec("INSERT INTO messages(channel,sender,context,created_at,type,subject,content,reply_to,metadata) VALUES(?,?,?,?,?,?,?,?,?)",
+		in.Channel, as, context, b.nowMs(), in.Type, in.Subject, in.Content, in.ReplyTo, meta)
 	if err != nil {
 		return 0, err
 	}

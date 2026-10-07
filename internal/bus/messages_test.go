@@ -65,7 +65,7 @@ func TestSendAndHistory(t *testing.T) {
 	sam := reg(t, b, "Sam")
 	_, _ = b.CreateChannel(sam, "dev", "ordinary")
 	one := int64(1)
-	r1, err := b.Send(sam, SendInput{Channel: "dev", Content: "first", Refs: []Ref{{Kind: "windows_path", Value: `C:\x\y`}}})
+	r1, err := b.Send(sam, SendInput{Channel: "dev", Content: "first"})
 	if err != nil || r1.Seq != 1 {
 		t.Fatalf("%+v %v", r1, err)
 	}
@@ -74,7 +74,7 @@ func TestSendAndHistory(t *testing.T) {
 		t.Fatal(r2.Seq)
 	}
 	h, err := b.History(sam, "dev", nil, nil, 10)
-	if err != nil || len(h) != 2 || h[0].Content != "first" || h[1].ReplyTo == nil || *h[1].ReplyTo != 1 || h[0].Refs[0].Value != `C:\x\y` || h[1].Metadata["k"] != "v" {
+	if err != nil || len(h) != 2 || h[0].Content != "first" || h[1].ReplyTo == nil || *h[1].ReplyTo != 1 || h[1].Metadata["k"] != "v" {
 		t.Fatalf("%+v %v", h, err)
 	}
 	before := int64(2)
@@ -122,7 +122,6 @@ func TestSendValidation(t *testing.T) {
 		{Channel: "nope", Content: "x"},
 		{Channel: "dev", Content: ""},
 		{Channel: "dev", Content: strings.Repeat("x", 65*1024)},
-		{Channel: "dev", Content: "x", Refs: []Ref{{Kind: "ftp", Value: "v"}}},
 		{Channel: "dev", Content: "x", ReplyTo: new(int64)},
 	}
 	for i, c := range cases {

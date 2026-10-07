@@ -15,7 +15,6 @@ type EditInput struct {
 	Content  string            `json:"content"`
 	Type     string            `json:"type,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
-	Refs     []Ref             `json:"refs,omitempty"`
 	// Tags is nil to keep the current revision's tags; an empty list clears
 	// them.
 	Tags           []string `json:"tags,omitempty"`
@@ -118,9 +117,6 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if in.Content == "" {
 		return EditResult{}, errf("validation", false, "content is required")
 	}
-	if err := validateRefs(in.Refs); err != nil {
-		return EditResult{}, err
-	}
 	if in.Subject != nil {
 		s, err := normalizeSubject(*in.Subject)
 		if err != nil {
@@ -183,7 +179,7 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	if err != nil {
 		return EditResult{}, err
 	}
-	send := SendInput{Channel: channel, Subject: subject, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Refs: in.Refs, Tags: tags}
+	send := SendInput{Channel: channel, Subject: subject, Content: in.Content, Type: in.Type, Metadata: in.Metadata, Tags: tags}
 
 	// Preflight envelope-size gate (C1): must run before inspect and
 	// checkCapacity so an oversized input can never trigger the hook or

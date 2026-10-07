@@ -129,6 +129,7 @@ one when you start an effort. After that, most work uses five tools:
   the previous batch token or the batch is redelivered.
 - `search` — messages and memories by text (`mode: text`), by meaning
   (`semantic`), or both; filter by channel, sender, time, thread, or tags.
+  A word ending in `*` matches by prefix (`e159e8c*` finds a full hash).
 - `history` — read a channel's past messages, optionally narrowed by tags.
 
 Task lists add `task_create`, `task_claim`, `task_release`, `task_update`,

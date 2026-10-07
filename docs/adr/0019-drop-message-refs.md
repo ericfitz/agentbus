@@ -1,6 +1,6 @@
 # ADR 0019: Drop message refs; references live in the text
 
-Status: Accepted 2026-10-06 (design; not yet implemented). Decided by the
+Status: Accepted 2026-10-06; implemented as schema v11. Decided by the
 user. Tracked in #33.
 
 ## Context

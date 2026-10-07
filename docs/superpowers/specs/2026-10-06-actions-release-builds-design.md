@@ -24,13 +24,17 @@ Rejected: Linux only (Windows would keep a second, unattested build path).
 
 ## Release flow (release.sh)
 
-1. **Preflight** as in #34, plus `gh auth status` and that the workflow
-   `release-build.yml` exists on the default branch.
+1. **Preflight** as in #34, plus `gh auth status` and that
+   `.github/workflows/release-build.yml` exists at the tag (`git cat-file
+   -e <tag>:.github/workflows/release-build.yml`); a tag cut before the
+   workflow landed cannot use this flow.
 2. **macOS:** build, sign and notarize as today.
 3. **Draft release:** create it with `gh release create <tag> --draft`, or
    reuse an existing draft for the tag. `releases/latest` never resolves to
    a draft, so the install scripts cannot see a partial release.
-4. **Build:** `gh workflow run release-build.yml -f tag=<tag>`; find the run
+4. **Build:** `gh workflow run release-build.yml --ref <tag> -f tag=<tag>`
+   (the run uses the workflow file as of the tag, and its `github.ref` is
+   the tag); find the run
    (the newest `workflow_dispatch` run of that workflow created after the
    dispatch, matched on its `tag` input via the run's display title); `gh
    run watch <id> --exit-status`. On failure, stop and print the run URL.
@@ -63,8 +67,9 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
 
 - **Trigger:** `workflow_dispatch` with a required `tag` input;
   `run-name: release-build ${{ inputs.tag }}`. The first step rejects a tag
-  not matching `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$` or not present
-  in the repository.
+  not matching `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`, not present
+  in the repository, or not equal to `github.ref_name` (the run must be
+  dispatched on the tag).
 - **build** job, `permissions: contents: read`, matrix:
 
   | runner | GOOS/GOARCH | archive |

@@ -235,5 +235,26 @@ rerun_push_case() { # <function> <dir-var> <name>
 rerun_push_case update_tap TAP_DIR tap
 rerun_push_case update_scoop SCOOP_DIR scoop
 
+# --- check-pins.sh ----------------------------------------------------------
+SHA=3d3c42e5aac5ba805825da76410c181273ba90b1
+pin_fixture() { # <name> <uses-line>
+    mkdir -p "$WORK/pins-$1"; printf 'jobs:\n  j:\n    steps:\n      - %s\n' "$2" > "$WORK/pins-$1/w.yml"
+}
+pin_fixture ok "uses: actions/checkout@$SHA # v7.0.1"
+pin_fixture local "uses: ./.github/actions/x"
+pin_fixture v4 "uses: actions/checkout@v4"
+pin_fixture main "uses: actions/checkout@main"
+pin_fixture short "uses: actions/checkout@${SHA:0:7} # v7"
+pin_fixture noref "uses: actions/checkout"
+pin_fixture docker "uses: docker://alpine:3.20"
+pin_fixture nocomment "uses: actions/checkout@$SHA"
+check pins-sha-comment-ok 0 "OK" -- "$HERE/check-pins.sh" "$WORK/pins-ok"
+check pins-local-ok 0 "OK" -- "$HERE/check-pins.sh" "$WORK/pins-local"
+for n in v4 main short noref docker nocomment; do
+    check "pins-$n-fails" 1 "w.yml:4" -- "$HERE/check-pins.sh" "$WORK/pins-$n"
+done
+check pins-missing-dir 1 "not found" -- "$HERE/check-pins.sh" "$WORK/pins-nonexistent"
+check pins-real-repo 0 "OK" -- "$HERE/check-pins.sh"
+
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

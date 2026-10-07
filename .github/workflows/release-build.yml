@@ -32,7 +32,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::tag '$TAG' must look like v1.2.3 or v1.2.3-rc.1"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag '$TAG' must be a stable release tag like v1.2.3 (prereleases are not supported)"; exit 1; }
           git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "::error::tag $TAG not found in the repository"; exit 1; }
           [[ "$GITHUB_REF_NAME" == "$TAG" ]] || { echo "::error::dispatched on '$GITHUB_REF_NAME', not on tag $TAG; use: gh workflow run release-build.yml --ref $TAG -f tag=$TAG"; exit 1; }
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"

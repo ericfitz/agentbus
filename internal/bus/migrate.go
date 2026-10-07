@@ -3,8 +3,12 @@ package bus
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // migrations[v] upgrades a database at user_version v to v+1. Each step runs
@@ -17,15 +21,16 @@ import (
 // file refuses it (ADR 0003 A6); every running old-binary session must be
 // restarted.
 var migrations = map[int]func(tx *sql.Tx) error{
-	1: dropMessagesBytes,
-	2: addTables,                               // message_tags (ADR 0009)
-	3: addTables,                               // tag_subscriptions (ADR 0009)
-	4: splitTagSets,                            // tag_subscription_tags (#13)
-	5: addSubject,                              // messages.subject, FTS over subject and content (ADR 0010)
-	6: addMemoryAccessAndDropTaskSubscriptions, // memory_access; drop task-list subscriptions (ADR 0013)
-	7: addSessionHarness,                       // sessions.harness, sessions.harness_version (ADR 0015)
-	8: addSessionHarnessProcess,                // sessions.harness_pid, sessions.harness_start (ADR 0017)
-	9: addTagRanges,                            // tag_subscription_tags.lo, .hi (#20, ADR 0009 amendment 2026-10-06)
+	1:  dropMessagesBytes,
+	2:  addTables,                               // message_tags (ADR 0009)
+	3:  addTables,                               // tag_subscriptions (ADR 0009)
+	4:  splitTagSets,                            // tag_subscription_tags (#13)
+	5:  addSubject,                              // messages.subject, FTS over subject and content (ADR 0010)
+	6:  addMemoryAccessAndDropTaskSubscriptions, // memory_access; drop task-list subscriptions (ADR 0013)
+	7:  addSessionHarness,                       // sessions.harness, sessions.harness_version (ADR 0015)
+	8:  addSessionHarnessProcess,                // sessions.harness_pid, sessions.harness_start (ADR 0017)
+	9:  addTagRanges,                            // tag_subscription_tags.lo, .hi (#20, ADR 0009 amendment 2026-10-06)
+	10: foldRefs,                                // fold messages.refs into content and drop the column (ADR 0019)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -312,5 +317,110 @@ func dropMessagesBytes(tx *sql.Tx) error {
 		return err
 	}
 	_, err := tx.Exec("INSERT INTO sqlite_sequence(name, seq) SELECT 'messages', ? WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='messages')", counter)
+	return err
+}
+
+// refsBlock renders a messages.refs value as the text foldRefs appends to
+// the row's content, or "" when there is nothing to fold (ADR 0019). A JSON
+// array of {kind, value} entries becomes a "Refs:" line and one "- value"
+// line per entry, values verbatim (no decoding, normalization or URI
+// conversion; the kind is not written); an empty or null array folds
+// nothing. Anything else (malformed JSON, an entry without a value) is
+// appended as "Refs: <raw>" rather than failing: a failed step would leave
+// the bus unable to open.
+func refsBlock(raw string) string {
+	var refs []struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(raw), &refs); err != nil {
+		return "\n\nRefs: " + refLine(raw)
+	}
+	if len(refs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\nRefs:")
+	for _, r := range refs {
+		if r.Value == "" {
+			return "\n\nRefs: " + refLine(raw)
+		}
+		sb.WriteString("\n- " + refLine(r.Value))
+	}
+	return sb.String()
+}
+
+// refLine keeps one ref on one line: a value containing a control
+// character (newline, tab, and so on) is written in strconv.Quote form.
+// Every other value, quotes and backslashes included, is returned as is.
+func refLine(v string) string {
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return strconv.Quote(v)
+		}
+	}
+	return v
+}
+
+// foldRefs (schema 10 -> 11, ADR 0019) moves each live row's refs into its
+// content as a trailing "Refs:" block (refsBlock) and drops the column.
+// messages_fts has insert and delete triggers only, so the index entry is
+// replaced by hand around the UPDATE, and the row's embedding is deleted so
+// the next pass recomputes it from the new text. Tombstoned rows are not
+// folded: nothing reads their content again. The rows are read in full
+// before the first write so no Exec runs against the transaction while a
+// result set is open on it. The column check keeps the step safe on a file
+// that already lacks the column (a test shaping an older version from a
+// fresh file, whose DDL no longer has it).
+func foldRefs(tx *sql.Tx) error {
+	var has int
+	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('messages') WHERE name='refs'").Scan(&has); err != nil {
+		return err
+	}
+	if has == 0 {
+		return nil
+	}
+	type fold struct {
+		seq                     int64
+		subject, content, block string // block is the text appended to content
+	}
+	rows, err := tx.Query("SELECT seq, subject, content, refs FROM messages WHERE refs IS NOT NULL AND tombstone=0 ORDER BY seq")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var folds []fold
+	for rows.Next() {
+		var f fold
+		var refs string
+		if err := rows.Scan(&f.seq, &f.subject, &f.content, &refs); err != nil {
+			return err
+		}
+		if f.block = refsBlock(refs); f.block != "" {
+			folds = append(folds, f)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+	for _, f := range folds {
+		next := f.content + f.block
+		for _, s := range []struct {
+			q    string
+			args []any
+		}{
+			{"INSERT INTO messages_fts(messages_fts, rowid, subject, content) VALUES('delete', ?, ?, ?)", []any{f.seq, f.subject, f.content}},
+			{"UPDATE messages SET content=? WHERE seq=?", []any{next, f.seq}},
+			{"INSERT INTO messages_fts(rowid, subject, content) VALUES(?, ?, ?)", []any{f.seq, f.subject, next}},
+			{"DELETE FROM embeddings WHERE seq=?", []any{f.seq}},
+		} {
+			if _, err := tx.Exec(s.q, s.args...); err != nil {
+				return err
+			}
+		}
+	}
+	// SQLite 3.35+; modernc v1.58.0 bundles a newer one. No index, trigger
+	// or view names the column, so the drop is a plain table rewrite.
+	_, err = tx.Exec("ALTER TABLE messages DROP COLUMN refs")
 	return err
 }

@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -90,7 +90,6 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   reply_to INTEGER,
   metadata TEXT,
-  refs TEXT,
   memory_id INTEGER,
   revision INTEGER,
   tombstone INTEGER NOT NULL DEFAULT 0,

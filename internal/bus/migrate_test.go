@@ -109,6 +109,9 @@ func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	if !strings.Contains(cols, "subject") {
 		t.Fatalf("subject column missing after the full chain: %s", cols)
 	}
+	if strings.Contains(cols, "refs") {
+		t.Fatalf("refs column survived the full chain: %s", cols)
+	}
 	var content string
 	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != "remember me" {
 		t.Fatalf("row 1 after rebuild: %q, %v", content, err)
@@ -848,5 +851,208 @@ func TestMigrateV9FailureLeavesV9AndRetries(t *testing.T) {
 	}
 	if got := tagRanges(t, b.db, "Kim"); len(got) != 2 || got[0] != [3]string{"a", "a", "a"} {
 		t.Fatalf("backfill on retry: %v", got)
+	}
+}
+
+// TestRefsBlock (ADR 0019): the text foldRefs appends for one stored refs
+// value. Values are verbatim; a control character puts the value in
+// strconv.Quote form; an empty or null array folds nothing; anything that
+// is not an array of {kind, value} with values is appended raw.
+func TestRefsBlock(t *testing.T) {
+	cases := []struct{ name, raw, want string }{
+		{"url", `[{"kind":"url","value":"https://a/b"}]`, "\n\nRefs:\n- https://a/b"},
+		{"two refs", `[{"kind":"unix_path","value":"/a b/c"},{"kind":"url","value":"https://d"}]`, "\n\nRefs:\n- /a b/c\n- https://d"},
+		{"newline", `[{"kind":"unix_path","value":"a\nb"}]`, "\n\nRefs:\n- \"a\\nb\""},
+		{"tab", `[{"kind":"unix_path","value":"a\tb"}]`, "\n\nRefs:\n- \"a\\tb\""},
+		{"windows path", `[{"kind":"windows_path","value":"C:\\x\\y"}]`, "\n\nRefs:\n- C:\\x\\y"},
+		{"percent encoded", `[{"kind":"url","value":"https://a/My%20Docs"}]`, "\n\nRefs:\n- https://a/My%20Docs"},
+		{"empty", `[]`, ""},
+		{"null", `null`, ""},
+		{"malformed", `not json`, "\n\nRefs: not json"},
+		{"malformed with tab", "not\tjson", "\n\nRefs: \"not\\tjson\""},
+		{"missing value", `[{"kind":"url"}]`, "\n\nRefs: [{\"kind\":\"url\"}]"},
+		{"object", `{"kind":"url","value":"x"}`, "\n\nRefs: {\"kind\":\"url\",\"value\":\"x\"}"},
+		{"wrong element type", `[1]`, "\n\nRefs: [1]"},
+	}
+	for _, c := range cases {
+		if got := refsBlock(c.raw); got != c.want {
+			t.Errorf("%s: refsBlock(%q) = %q, want %q", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+// newV10RefsFile creates a schema version 10 database (the current DDL
+// plus the messages.refs column that version 11 folds away, ADR 0019),
+// runs stmts against it, and returns the config that opens it. No channel
+// rows are created: the fold and search do not need them, and Open's
+// ensureDefaults adds general and memory afterwards.
+func newV10RefsFile(t *testing.T, stmts ...string) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := append([]string{schema, "ALTER TABLE messages ADD COLUMN refs TEXT", "PRAGMA user_version = 10"}, stmts...)
+	for _, s := range all {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// v10RefsRows shapes every case the fold must handle: seq 1 a URL, 2 a
+// path with spaces, 3 a Windows path, 4 a value with a newline, 5 two
+// refs, 6 an empty array, 7 malformed JSON, 8 a chat message, 9 a
+// tombstoned first revision, 10 its live second revision, 11 a memory
+// without refs, 12 an entry without a value; embeddings on 1 (folded),
+// 6 and 11 (untouched). Statements are raw strings, so the backslashes
+// reach SQLite as written and JSON decodes them.
+var v10RefsRows = []string{
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',1,'','issue link',1,1,'[{"kind":"url","value":"https://github.com/ericfitz/agentbus/issues/874"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',2,'','path with spaces',2,1,'[{"kind":"unix_path","value":"/Users/sam/release notes.md"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',3,'','windows path',3,1,'[{"kind":"windows_path","value":"C:\\Users\\sam\\view.go"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',4,'','control chars',4,1,'[{"kind":"unix_path","value":"a\nb"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',5,'','two refs',5,1,'[{"kind":"url","value":"https://example.com/a"},{"kind":"unix_path","value":"/tmp/b"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',6,'','empty refs',6,1,'[]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',7,'','malformed',7,1,'not json')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,refs) VALUES('general','sam','r',8,'','chat with ref','[{"kind":"url","value":"https://example.com/chat"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,tombstone,tombstone_at,refs) VALUES('memory','sam','r',9,'','old revision',9,1,1,9,'[{"kind":"url","value":"https://example.com/rev1"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',10,'','new revision',9,2,'[{"kind":"url","value":"https://example.com/rev2"}]')`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision) VALUES('memory','sam','r',11,'','no refs',11,1)`,
+	`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',12,'','missing value',12,1,'[{"kind":"url"}]')`,
+	"INSERT INTO embeddings(seq,model,vector) VALUES(1,'m',x'00')",
+	"INSERT INTO embeddings(seq,model,vector) VALUES(6,'m',x'00')",
+	"INSERT INTO embeddings(seq,model,vector) VALUES(11,'m',x'00')",
+}
+
+// foldedSeq1 is seq 1's content after the fold, asserted by several tests.
+const foldedSeq1 = "issue link\n\nRefs:\n- https://github.com/ericfitz/agentbus/issues/874"
+
+// TestMigrateV10FoldsRefs (ADR 0019): opening a v10 file folds every live
+// row's refs into its content exactly as the spec shows, leaves tombstoned
+// rows and empty arrays alone, keeps messages_fts consistent (integrity
+// check and search by each ref), drops the embeddings of folded rows only,
+// drops the column, and stamps the current version.
+func TestMigrateV10FoldsRefs(t *testing.T) {
+	cfg := newV10RefsFile(t, v10RefsRows...)
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v10 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var cols string
+	if err := b.db.QueryRow("SELECT group_concat(name, ',') FROM pragma_table_info('messages')").Scan(&cols); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cols, "refs") {
+		t.Fatalf("refs column survived: %s", cols)
+	}
+	want := map[int64]string{
+		1:  foldedSeq1,
+		2:  "path with spaces\n\nRefs:\n- /Users/sam/release notes.md",
+		3:  "windows path\n\nRefs:\n- C:\\Users\\sam\\view.go",
+		4:  "control chars\n\nRefs:\n- \"a\\nb\"",
+		5:  "two refs\n\nRefs:\n- https://example.com/a\n- /tmp/b",
+		6:  "empty refs",
+		7:  "malformed\n\nRefs: not json",
+		8:  "chat with ref\n\nRefs:\n- https://example.com/chat",
+		9:  "old revision",
+		10: "new revision\n\nRefs:\n- https://example.com/rev2",
+		11: "no refs",
+		12: "missing value\n\nRefs: [{\"kind\":\"url\"}]",
+	}
+	rows, err := b.db.Query("SELECT seq, content FROM messages ORDER BY seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64]string{}
+	for rows.Next() {
+		var seq int64
+		var content string
+		if err := rows.Scan(&seq, &content); err != nil {
+			t.Fatal(err)
+		}
+		got[seq] = content
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d rows after migration, want %d", len(got), len(want))
+	}
+	for seq, w := range want {
+		if got[seq] != w {
+			t.Errorf("seq %d content = %q, want %q", seq, got[seq], w)
+		}
+	}
+	// The index was maintained by hand around each UPDATE; the external
+	// content check must agree with the table.
+	if _, err := b.db.Exec("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')"); err != nil {
+		t.Fatalf("messages_fts integrity-check: %v", err)
+	}
+	sam := reg(t, b, "sam")
+	for q, seq := range map[string]int64{
+		"issues/874":       1,
+		"release notes.md": 2,
+		"view.go":          3,
+		"/tmp/b":           5,
+		"example.com/chat": 8,
+		"example.com/rev2": 10,
+		"issue link":       1, // the old entry was replaced, not duplicated
+	} {
+		r, err := b.Search(sam, SearchInput{Query: q, Mode: "text"})
+		if err != nil || len(r.Hits) != 1 || r.Hits[0].Seq != seq {
+			t.Fatalf("search %q after the fold: %+v %v, want only seq %d", q, r.Hits, err, seq)
+		}
+	}
+	var embedded string
+	if err := b.db.QueryRow("SELECT coalesce(group_concat(seq, ','), '') FROM (SELECT seq FROM embeddings ORDER BY seq)").Scan(&embedded); err != nil {
+		t.Fatal(err)
+	}
+	if embedded != "6,11" {
+		t.Fatalf("embeddings after the fold: %q, want 6,11 (folded rows re-embed; untouched rows keep theirs)", embedded)
+	}
+}
+
+// TestMigrateV10DropsRefsWhenNothingToFold (ADR 0019): a v10 file whose
+// refs are all on tombstoned rows or empty arrays folds nothing, but the
+// column is still dropped and the version stamped.
+func TestMigrateV10DropsRefsWhenNothingToFold(t *testing.T) {
+	cfg := newV10RefsFile(t,
+		`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,tombstone,tombstone_at,refs) VALUES('memory','sam','r',1,'','gone',1,1,1,1,'[{"kind":"url","value":"https://example.com/gone"}]')`,
+		`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',2,'','kept',2,1,'[]')`,
+	)
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v10 database: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM pragma_table_info('messages') WHERE name='refs'").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refs column must be dropped even with nothing to fold: %d %v", n, err)
+	}
+	var contents string
+	if err := b.db.QueryRow("SELECT group_concat(content, '|') FROM (SELECT content FROM messages ORDER BY seq)").Scan(&contents); err != nil || contents != "gone|kept" {
+		t.Fatalf("contents = %q, %v; want unchanged", contents, err)
 	}
 }

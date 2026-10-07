@@ -187,12 +187,13 @@ func TestDataDirEnvOverrideAndTilde(t *testing.T) {
 	if c.DataDirectory != filepath.Join(home, "x") {
 		t.Fatalf("tilde not resolved: %s", c.DataDirectory)
 	}
-	t.Setenv("AGENTBUS_DATA_DIR", "/tmp/override")
+	override := filepath.Join(t.TempDir(), "override")
+	t.Setenv("AGENTBUS_DATA_DIR", override)
 	c, _, err = Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DataDirectory != "/tmp/override" {
+	if c.DataDirectory != override {
 		t.Fatalf("env override ignored: %s", c.DataDirectory)
 	}
 }

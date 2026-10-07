@@ -60,7 +60,7 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		DataDirectory:                "~/.local/share/agentbus",
+		DataDirectory:                defaultDataDirectory(),
 		SQLiteBudgetMiB:              2048,
 		MessageRetentionHours:        168,
 		CleanupFreePercent:           25,
@@ -200,13 +200,11 @@ func defaultTUIName() string {
 	return strings.ReplaceAll(name, "/", "-")
 }
 
-// DefaultPath is the config file used when neither --config nor AGENTBUS_CONFIG is set.
+// DefaultPath is the config file used when neither --config nor AGENTBUS_CONFIG
+// is set: ~/.config/agentbus/config.json on Unix, %AppData%\agentbus\config.json
+// on Windows.
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
-	}
-	return filepath.Join(home, ".config", "agentbus", "config.json"), nil
+	return defaultConfigPath()
 }
 
 // Load reads path (or AGENTBUS_CONFIG, or the default path), applies defaults,

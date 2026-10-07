@@ -33,6 +33,7 @@ for script in "$@"; do
     tmp="$(mktemp)"
     trap 'rm -f "$tmp"' EXIT
     cp -p "$script" "$tmp"   # carry the mode over; the redirect below keeps it
+    chmod u+w "$tmp"         # a read-only input must still be rewritable
     # The block goes through the environment, not -v: awk -v would interpret
     # backslashes, and ENVIRON keeps the embedded newlines verbatim.
     # A BEGIN with no later END (END before BEGIN) would swallow the rest of
@@ -43,7 +44,7 @@ for script in "$@"; do
         !skipping   { print }
         END         { if (skipping) exit 1 }
     ' "$script" > "$tmp"; then
-        echo "error: $script: '$END' must follow '$BEGIN'" >&2; exit 1
+        echo "error: $script: rewrite failed (is '$END' after '$BEGIN'?)" >&2; exit 1
     fi
     if cmp -s "$tmp" "$script"; then rm -f "$tmp"; echo "$script: unchanged"; else
         mv "$tmp" "$script"; echo "$script: key embedded"

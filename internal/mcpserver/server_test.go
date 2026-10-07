@@ -1052,3 +1052,64 @@ func TestTagDescriptionsStateRulesAndPatterns(t *testing.T) {
 		t.Fatal("send must reject a pattern as a stored tag")
 	}
 }
+
+// TestSearchDescriptionDocumentsPrefixTerms (ADR 0019): the search tool
+// tells agents that a word ending in * matches by prefix.
+func TestSearchDescriptionDocumentsPrefixTerms(t *testing.T) {
+	cs := testSession(t)
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if tl.Name != "search" {
+			continue
+		}
+		if !strings.Contains(tl.Description, "matches by prefix") {
+			t.Fatalf("search description must document prefix terms: %s", tl.Description)
+		}
+		return
+	}
+	t.Fatal("search tool not registered")
+}
+
+// TestSendAndEditMemoryRejectRefs (ADR 0019): refs is gone from the tool
+// schemas, so a caller still passing it gets the validation envelope
+// naming the property, nothing is written, and payloads no longer carry
+// a refs key.
+func TestSendAndEditMemoryRejectRefs(t *testing.T) {
+	cs := testSession(t)
+	sam, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": sam["as"], "name": "mem", "kind": "memory"})
+	refs := []map[string]any{{"kind": "url", "value": "https://example.com"}}
+
+	_, res := call(t, cs, "send", map[string]any{"as": sam["as"], "channel": "mem", "content": "x", "refs": refs})
+	assertValidationEnvelope(t, res)
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "refs") {
+		t.Fatalf("send error must name refs: %s", text)
+	}
+	// history returns a JSON array, which call's map decode leaves empty,
+	// so decode the raw text here.
+	_, hres := call(t, cs, "history", map[string]any{"as": sam["as"], "channel": "mem"})
+	var hist []map[string]any
+	if err := json.Unmarshal([]byte(hres.Content[0].(*mcp.TextContent).Text), &hist); err != nil || len(hist) != 0 {
+		t.Fatalf("refused send must write nothing: %v %v", hist, err)
+	}
+
+	created, res := call(t, cs, "send", map[string]any{"as": sam["as"], "channel": "mem", "content": "x"})
+	if res.IsError {
+		t.Fatalf("send without refs: %+v", res)
+	}
+	_, res = call(t, cs, "edit_memory", map[string]any{"as": sam["as"], "id": created["memory_id"], "content": "y", "refs": refs})
+	assertValidationEnvelope(t, res)
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "refs") {
+		t.Fatalf("edit_memory error must name refs: %s", text)
+	}
+	got, _ := call(t, cs, "get_memory", map[string]any{"as": sam["as"], "id": created["memory_id"]})
+	if got["content"] != "x" {
+		t.Fatalf("refused edit must leave the memory alone: %v", got)
+	}
+	if _, ok := got["refs"]; ok {
+		t.Fatalf("payloads must not carry refs: %v", got)
+	}
+}

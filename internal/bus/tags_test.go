@@ -513,31 +513,109 @@ func TestMixedChannelAndTagBatch(t *testing.T) {
 	}
 }
 
-// Tag matching is a join from the sender's subscribed tags into
-// message_tags(tag, seq): no scan of messages or message_tags (#13).
+// Tag matching is a join from the sender's subscribed patterns into
+// message_tags(tag, seq): no scan of messages or message_tags (#13). The
+// join is an OR of two index-friendly branches that SQLite plans as a
+// MULTI-INDEX OR, so the plan shape is the same for every set: an exact
+// pattern seeks (tag=? AND seq>?) above the cursor, a prefix range-scans
+// its tag range (tag>? AND tag<?) and filters on seq (#20).
 func TestTagCondUsesTagSeqIndex(t *testing.T) {
-	b, _, kim := tagSetup(t)
-	if err := b.SubscribeTags(kim, []string{"a", "b"}); err != nil {
-		t.Fatal(err)
-	}
-	q, a := tagCond(kim, 0)
-	rows, err := b.db.Query("EXPLAIN QUERY PLAN SELECT seq FROM messages WHERE messages.seq>? AND "+q, append([]any{0}, a...)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan []string
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+	for _, set := range [][]string{{"a", "b"}, {"env:*", "failed"}} {
+		b, _, kim := tagSetup(t)
+		if err := b.SubscribeTags(kim, set); err != nil {
 			t.Fatal(err)
 		}
-		plan = append(plan, detail)
+		q, a := tagCond(kim, 0)
+		rows, err := b.db.Query("EXPLAIN QUERY PLAN SELECT seq FROM messages WHERE messages.seq>? AND "+q, append([]any{0}, a...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		_ = rows.Close()
+		joined := strings.Join(plan, "\n")
+		if !strings.Contains(joined, "message_tags_tag_seq") || strings.Contains(joined, "SCAN messages") || strings.Contains(joined, "SCAN mt") {
+			t.Fatalf("%v plan:\n%s", set, joined)
+		}
+		if !strings.Contains(joined, "(tag=? AND seq>?)") || !strings.Contains(joined, "tag>? AND tag<?") {
+			t.Fatalf("%v: want an exact seek above the cursor and a prefix range on the index:\n%s", set, joined)
+		}
 	}
-	_ = rows.Close()
-	joined := strings.Join(plan, "\n")
-	if !strings.Contains(joined, "message_tags_tag_seq") || strings.Contains(joined, "SCAN messages") || strings.Contains(joined, "SCAN mt") {
-		t.Fatalf("plan:\n%s", joined)
+}
+
+// Spec 2026-10-06 "Subscriptions": ["env:*", "failed"] delivers a message
+// tagged env:prod, env:staging, failed once with matched_tags naming the
+// message's tags; env:prod alone is not delivered; the uppercase pattern
+// is lowercased on subscribe and unsubscribe alike.
+func TestTagSubscriptionPrefixPatterns(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	wantCode(t, b.SubscribeTags(kim, []string{"env_*"}), "validation")
+	wantCode(t, b.SubscribeTags(kim, []string{"*"}), "validation")
+	if err := b.SubscribeTags(kim, []string{"ENV:*", "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 1 || !slices.Equal(sets[0], []string{"env:*", "failed"}) {
+		t.Fatalf("sets: %v", sets)
+	}
+	var lo, hi string
+	if err := b.db.QueryRow("SELECT lo, hi FROM tag_subscription_tags WHERE sender=? AND tag='env:*'", kim).Scan(&lo, &hi); err != nil || lo != "env:" || hi != "env:~" {
+		t.Fatalf("stored range: %q %q %v", lo, hi, err)
+	}
+	if err := b.db.QueryRow("SELECT lo, hi FROM tag_subscription_tags WHERE sender=? AND tag='failed'", kim).Scan(&lo, &hi); err != nil || lo != "failed" || hi != "failed" {
+		t.Fatalf("exact range: %q %q %v", lo, hi, err)
+	}
+	sendTagged(t, b, sam, "dev", "both envs", "env:prod", "env:staging", "failed", "other")
+	sendTagged(t, b, sam, "dev", "env only", "env:prod")
+	sendTagged(t, b, sam, "dev", "flat env", "env", "failed")
+	sendTagged(t, b, sam, "dev", "failed only", "failed")
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || len(r.Messages) != 1 || r.Messages[0].Content != "both envs" {
+		t.Fatalf("one delivery for two tags matching one pattern: %+v %v", r.Messages, err)
+	}
+	if !slices.Equal(r.Messages[0].MatchedTags, []string{"env:prod", "env:staging", "failed"}) {
+		t.Fatalf("matched_tags lists the message's tags, not the patterns: %v", r.Messages[0].MatchedTags)
+	}
+	if err := b.UnsubscribeTags(kim, []string{"FAILED", "env:*"}); err != nil {
+		t.Fatal(err)
+	}
+	if sets, _ := b.TagSubscriptions(kim); len(sets) != 0 {
+		t.Fatalf("unsubscribe removes the set: %v", sets)
+	}
+	sendTagged(t, b, sam, "dev", "after", "env:prod", "failed")
+	if r2, _ := b.Receive(kim, ReceiveInput{}); len(r2.Messages) != 0 {
+		t.Fatalf("removed set no longer matches: %+v", r2.Messages)
+	}
+}
+
+// A set whose patterns overlap (env:* and env:prod): one tag may satisfy
+// both, and the set still needs every pattern satisfied.
+func TestTagSetWithOverlappingPatterns(t *testing.T) {
+	b, sam, kim := tagSetup(t)
+	if err := b.SubscribeTags(kim, []string{"env:*", "env:prod"}); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "staging", "env:staging")
+	sendTagged(t, b, sam, "dev", "prod", "env:prod")
+	r, err := b.Receive(kim, ReceiveInput{})
+	if err != nil || len(r.Messages) != 1 || r.Messages[0].Content != "prod" {
+		t.Fatalf("env:prod satisfies both patterns, env:staging only one: %+v %v", r.Messages, err)
+	}
+	if !slices.Equal(r.Messages[0].MatchedTags, []string{"env:prod"}) {
+		t.Fatalf("matched_tags: %v", r.Messages[0].MatchedTags)
+	}
+	// wait takes the same path (wait.go) and must agree. The Receive above
+	// is unacked, so wait floors at its pending end: send a fresh message.
+	sendTagged(t, b, sam, "dev", "prod again", "env:prod")
+	msgs, err := b.Wait(context.Background(), kim, nil, false, nil, time.Second)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "prod again" || !slices.Equal(msgs[0].MatchedTags, []string{"env:prod"}) {
+		t.Fatalf("wait: %+v %v", msgs, err)
 	}
 }
 

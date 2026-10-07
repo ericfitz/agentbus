@@ -165,8 +165,8 @@ func tagsFilter(alias string, patterns []string) (string, []any) {
 // trailing slash, and it is neither a dm/ inbox nor a task list.
 const tagSource = "tags/"
 
-// tagSet is one AND set: a message matches when it carries every tag and
-// was written after the set was added.
+// tagSet is one AND set of patterns: a message matches when every pattern
+// matches one of its tags and it was written after the set was added.
 type tagSet struct {
 	tags       []string
 	createdSeq int64
@@ -174,14 +174,14 @@ type tagSet struct {
 
 func tagsKey(tags []string) string { return strings.Join(tags, ",") }
 
-// SubscribeTags adds an AND set of 1-10 tags. The first set also creates the
+// SubscribeTags adds an AND set of 1-10 tag patterns (NormalizeTagPatterns). The first set also creates the
 // shared tags/ row at the current head, so nothing before it is delivered
 // (like Subscribe from now); a set is idempotent.
 func (b *Bus) SubscribeTags(as string, tags []string) error {
 	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
-	tags, err := NormalizeTags(tags)
+	tags, err := NormalizeTagPatterns(tags)
 	if err != nil {
 		return err
 	}
@@ -203,8 +203,9 @@ func (b *Bus) SubscribeTags(as string, tags []string) error {
 	if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscriptions(sender,tags_key,created_seq) VALUES(?,?,?)", as, tagsKey(tags), head); err != nil {
 		return internal(err)
 	}
-	for _, t := range tags {
-		if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscription_tags(sender,tags_key,tag) VALUES(?,?,?)", as, tagsKey(tags), t); err != nil {
+	for _, p := range tags {
+		lo, hi := tagRange(p)
+		if _, err := tx.Exec("INSERT OR IGNORE INTO tag_subscription_tags(sender,tags_key,tag,lo,hi) VALUES(?,?,?,?,?)", as, tagsKey(tags), p, lo, hi); err != nil {
 			return internal(err)
 		}
 	}
@@ -224,7 +225,7 @@ func (b *Bus) UnsubscribeTags(as string, tags []string) error {
 	if err := b.auth(b.db, as); err != nil {
 		return err
 	}
-	tags, err := NormalizeTags(tags)
+	tags, err := NormalizeTagPatterns(tags)
 	if err != nil {
 		return err
 	}
@@ -287,46 +288,45 @@ func (b *Bus) tagSets(q querier, as string) ([]tagSet, error) {
 // channels only (dm/ inboxes are ordinary-kind and excluded by name;
 // memory channels and task lists are memory-kind), skipping channels the
 // sender is directly subscribed to (those arrive through the channel), and
-// carrying every tag of at least one set added before the message. Once a
-// direct channel subscription ends, that channel's messages above the tag
-// cursor become tag-deliverable again (ADR 0009 item 7 applies to current
-// direct subscriptions, not past ones). Matching is driven from the
-// sender's few subscribed tags into message_tags(tag, seq) above floor
-// (#13), so only tagged messages above the cursor are read, never a scan
-// of messages or message_tags; a message matches a set when it carries as
-// many of the set's tags as the set has. mt.seq's two comparisons (rather
-// than max(ts.created_seq, ?)) are what let SQLite range-scan
+// satisfying every pattern of at least one set added before the message.
+// Once a direct channel subscription ends, that channel's messages above
+// the tag cursor become tag-deliverable again (ADR 0009 item 7 applies to
+// current direct subscriptions, not past ones). Matching is driven from the
+// sender's few subscribed patterns into message_tags(tag, seq) (#13), never
+// a scan of messages or message_tags. The join is an OR of two branches
+// SQLite plans as a MULTI-INDEX OR: an exact pattern (lo = hi) seeks
+// (tag=? AND seq>?) above the floor as before; a prefix (lo < hi)
+// range-scans its tag range on the same index and filters on seq, reading
+// every tagged message in the range (retention bounds it). BETWEEN, never
+// LIKE, keeps the BINARY index usable (#20). A set matches when the message
+// satisfies as many distinct patterns as the set has, so two tags under one
+// pattern (env:prod and env:staging under env:*) count once. mt.seq's two
+// comparisons (rather than max(ts.created_seq, ?)) are what let SQLite seek
 // message_tags_tag_seq instead of scanning it.
 func tagCond(as string, floor int64) (string, []any) {
 	return `messages.seq IN (
 		SELECT mt.seq FROM tag_subscription_tags st
 		JOIN tag_subscriptions ts ON ts.sender=st.sender AND ts.tags_key=st.tags_key
-		JOIN message_tags mt ON mt.tag=st.tag AND mt.seq>? AND mt.seq>ts.created_seq
+		JOIN message_tags mt ON ((st.lo=st.hi AND mt.tag=st.lo AND mt.seq>?) OR (st.lo<st.hi AND mt.tag BETWEEN st.lo AND st.hi AND mt.seq>?)) AND mt.seq>ts.created_seq
 		WHERE st.sender=?
 		GROUP BY mt.seq, st.tags_key
-		HAVING count(*)=(SELECT count(*) FROM tag_subscription_tags c WHERE c.sender=st.sender AND c.tags_key=st.tags_key))
+		HAVING count(DISTINCT st.tag)=(SELECT count(*) FROM tag_subscription_tags c WHERE c.sender=st.sender AND c.tags_key=st.tags_key))
 	AND messages.channel IN (SELECT name FROM channels WHERE kind='ordinary' AND name NOT LIKE 'dm/%')
-	AND messages.channel NOT IN (SELECT channel FROM subscriptions WHERE sender=?)`, []any{floor, as, as}
+	AND messages.channel NOT IN (SELECT channel FROM subscriptions WHERE sender=?)`, []any{floor, floor, as, as}
 }
 
-// matchedTags is the union of the sets m satisfies, sorted.
+// matchedTags is the union, sorted and deduplicated, of m's own tags that
+// satisfied a set m matches (env:prod, never the pattern env:*). A set
+// matches when every pattern in it matches at least one of m's tags.
 func matchedTags(sets []tagSet, m Message) []string {
 	var out []string
 	for _, s := range sets {
-		if m.Seq <= s.createdSeq {
+		if m.Seq <= s.createdSeq || !MatchTags(s.tags, m.Tags) {
 			continue
 		}
-		all := true
-		for _, t := range s.tags {
-			if !slices.Contains(m.Tags, t) {
-				all = false
-			}
-		}
-		if all {
-			for _, t := range s.tags {
-				if !slices.Contains(out, t) {
-					out = append(out, t)
-				}
+		for _, t := range m.Tags {
+			if slices.ContainsFunc(s.tags, func(p string) bool { return MatchTag(p, t) }) && !slices.Contains(out, t) {
+				out = append(out, t)
 			}
 		}
 	}

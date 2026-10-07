@@ -1,7 +1,8 @@
 # Windows manual checks
 
-Run in the Windows 11 ARM VM (VMware Fusion) before the first Windows
-release and after any change to harness detection (`internal/procs`,
+Run the general checks in the Windows 11 ARM VM (VMware Fusion) and the
+WSL2 shared-database section in a UTM guest with nested virtualization,
+before the first Windows release and after any change to harness detection (`internal/procs`,
 `internal/cli/stophook.go`, `internal/cli/wait.go`). The automated part is
 `pwsh -File release\test-windows.ps1` from a checkout; the rest is by hand.
 
@@ -28,10 +29,9 @@ release and after any change to harness detection (`internal/procs`,
 ## Shared database guard (needs WSL2 in the VM)
 
 Nested virtualization: the Mac (M4 Pro, macOS 27) exposes it in
-Hypervisor.framework; enable it for the Windows 11 ARM guest in VMware
-Fusion and confirm `wsl --install` succeeds. If Fusion does not expose it,
-use a physical Windows machine or a cloud Windows VM with nested
-virtualization.
+Hypervisor.framework; enable it for the Windows 11 ARM guest in UTM 4.7.4
+and confirm `wsl --install` succeeds. If UTM does not expose it, use a physical Windows
+machine or a cloud Windows VM with nested virtualization.
 
 - [ ] In WSL: `findmnt -T /mnt/c -o FSTYPE` reports `9p` (or `drvfs`);
       record the value here: ______.

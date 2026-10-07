@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -368,6 +369,9 @@ func TestSaveTUIRailWidthRoundTrip(t *testing.T) {
 	}
 	if c.TUIRailWidth != 30 || c.TUIName != "eric" {
 		t.Fatalf("rail %d, tui_name %q", c.TUIRailWidth, c.TUIName)
+	}
+	if runtime.GOOS == "windows" {
+		return // Windows file modes carry only the read-only bit
 	}
 	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode not kept: %v %v", fi, err)

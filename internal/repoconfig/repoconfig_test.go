@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -213,6 +214,9 @@ func TestCreate(t *testing.T) {
 }
 
 func TestWriteUsesInitFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file modes carry only the read-only bit")
+	}
 	f, err := Create(t.TempDir(), "Sam")
 	if err != nil {
 		t.Fatal(err)

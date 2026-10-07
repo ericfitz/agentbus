@@ -43,6 +43,15 @@ func TestMountFSType(t *testing.T) {
 	}
 }
 
+func TestMountFSTypeLaterEqualMountWins(t *testing.T) {
+	mi := "1 0 0:1 / / rw - ext4 /dev/a rw\n" +
+		"2 1 0:2 / /mnt/x rw - ext4 /dev/b rw\n" +
+		"3 1 0:3 / /mnt/x rw - 9p drvfs rw\n"
+	if got, ok := mountFSType(mi, "/mnt/x/y"); !ok || got != "9p" {
+		t.Fatalf("overmount: got %q, %v; want the later 9p line", got, ok)
+	}
+}
+
 func TestWSLPathRefusal(t *testing.T) {
 	drives := func(d string) (string, bool) {
 		switch d {
@@ -66,6 +75,11 @@ func TestWSLPathRefusal(t *testing.T) {
 		{`C:\Users\pat\AppData\Local\agentbus`, false},
 		{`\\server\wsl$\x`, false},
 		{`\\wslx\Ubuntu`, false},
+		{`\\?\UNC\wsl$\Ubuntu\x`, true},
+		{`\\?\UNC\wsl.localhost\Ubuntu\x`, true},
+		{`\\?\Z:\x`, true},
+		{`\\?\Y:\x`, false},
+		{`\\?\UNC\server\wsl$\x`, false},
 	}
 	for _, c := range cases {
 		fs, refused := wslPathRefusal(c.abs, drives)

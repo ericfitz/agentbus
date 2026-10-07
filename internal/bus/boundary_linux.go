@@ -8,11 +8,13 @@ import (
 	"strings"
 )
 
-// isWSL detects WSL from /proc: the WSLInterop binfmt entry, or "microsoft"
+// isWSL detects WSL from /proc: the WSLInterop or WSLInterop-late binfmt entry, or "microsoft"
 // in the kernel release. readFile is injected for tests.
 func isWSL(readFile func(string) ([]byte, error)) bool {
-	if _, err := readFile("/proc/sys/fs/binfmt_misc/WSLInterop"); err == nil {
-		return true
+	for _, p := range []string{"/proc/sys/fs/binfmt_misc/WSLInterop", "/proc/sys/fs/binfmt_misc/WSLInterop-late"} {
+		if _, err := readFile(p); err == nil {
+			return true
+		}
 	}
 	b, err := readFile("/proc/sys/kernel/osrelease")
 	return err == nil && strings.Contains(strings.ToLower(string(b)), "microsoft")

@@ -59,7 +59,7 @@ func mountFSType(mountinfo, dir string) (fstype string, ok bool) {
 		if mp != dir && !strings.HasPrefix(dir, strings.TrimSuffix(mp, "/")+"/") {
 			continue
 		}
-		if len(mp) > best {
+		if len(mp) >= best { // equal length: the later line is the visible overmount
 			best, fstype, ok = len(mp), f[sep+1], true
 		}
 	}
@@ -78,6 +78,7 @@ func unescapeMount(s string) string {
 // mapped drive letter that driveTarget (nil: no mapping lookup) resolves
 // to such a UNC path. fs names what was found, for the error.
 func wslPathRefusal(abs string, driveTarget func(drive string) (string, bool)) (fs string, refused bool) {
+	abs = stripExtendedPrefix(abs)
 	if isWSLUNC(abs) {
 		return "a WSL distribution's filesystem (" + abs + ")", true
 	}
@@ -93,4 +94,17 @@ func wslPathRefusal(abs string, driveTarget func(drive string) (string, bool)) (
 func isWSLUNC(p string) bool {
 	p = strings.ToLower(strings.ReplaceAll(p, `\`, "/"))
 	return strings.HasPrefix(p, "//wsl$/") || strings.HasPrefix(p, "//wsl.localhost/")
+}
+
+// stripExtendedPrefix turns the extended-length forms \\?\UNC\server\share
+// into \\server\share and \\?\C:\x into C:\x.
+func stripExtendedPrefix(p string) string {
+	if strings.HasPrefix(p, `\\?\`) {
+		rest := p[4:]
+		if len(rest) >= 4 && strings.EqualFold(rest[:4], `UNC\`) {
+			return `\\` + rest[4:]
+		}
+		return rest
+	}
+	return p
 }

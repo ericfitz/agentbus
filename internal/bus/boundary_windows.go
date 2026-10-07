@@ -38,6 +38,11 @@ func platformBoundary(dir string) (fs, suggestion string, refused bool) {
 	if err != nil {
 		return "", "", false
 	}
+	// Resolve links and junctions: a directory symlink into \\wsl.localhost\
+	// must be refused too. The leaf exists once Open's MkdirAll has run.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
 	fs, refused = wslPathRefusal(abs, driveTarget)
 	return fs, `%LocalAppData%\agentbus`, refused
 }

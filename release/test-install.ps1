@@ -346,6 +346,10 @@ function Invoke-Child([string]$Mode, [string]$ScriptPath, [string[]]$ScriptArgs)
 function Invoke-Case([string]$Name, [int]$WantExit, [string]$WantOut, [hashtable]$Env, [string]$InstallDir, [scriptblock]$Before, [scriptblock]$After, [string]$Mode = 'file', [string]$ScriptName = 'install.ps1', [string[]]$ScriptArgs = @()) {
     $map = @{ 'AGENTBUS_BASE_URL' = "$script:Base/valid"; 'AGENTBUS_VERSION' = ''; 'AGENTBUS_INSTALL_DIR' = $InstallDir; 'AGENTBUS_SKIP_SIGNATURE' = ''; 'AGENTBUS_TEST_OSARCH' = '' }
     if ($Env) { foreach ($k in $Env.Keys) { $map[$k] = $Env[$k] } }
+    # 64-bit Windows resets a starting 64-bit process's ProgramFiles from
+    # ProgramW6432, so an override has to set both to reach the child
+    # (windows.yml runs 37663250838 and 37664428742).
+    if ($IsWin -and $map.ContainsKey('ProgramFiles')) { $map['ProgramW6432'] = $map['ProgramFiles'] }
     $saved = Set-EnvMap $map
     try {
         if ($Before) { & $Before }
@@ -455,8 +459,6 @@ function Invoke-SelfTest {
     $emptyDir = Join-Path $Work 'empty-path'
     New-Item -ItemType Directory -Force -Path $emptyDir | Out-Null
     $pathVar = if ($IsWin) { 'Path' } else { 'PATH' }
-    # A Windows child gets ProgramFiles back even when this process removes
-    # it (windows.yml run 37663250838), so point it at an empty directory.
     $noPrograms = Join-Path $Work 'no-programs'
     Invoke-Case 'self: Find-OpenSsl with no OpenSSL on PATH or under ProgramFiles says none was found' 0 'THREW: agentbus install: OpenSSL 3 is required to verify the release signature and none was found' @{ $pathVar = $emptyDir; 'ProgramFiles' = $noPrograms } '' $null $null 'file' 'probe-find-openssl.ps1'
 
@@ -511,8 +513,8 @@ function Invoke-Cases {
     Invoke-Case 'openssl-stderr-warning-still-found' 1 'signature check of SHA256SUMS failed' $fakeErrPath $dir $null $null
     Invoke-Case 'openssl-too-old-with-stderr' 1 'OpenSSL 1.1.1w' $fake1ErrPath $dir $null $null
     Invoke-Case 'git-clangarm64-openssl-found' 0 'installed agentbus 9.0.1' $fakeGitPath $dir $null $null
-    # No 'ProgramFiles unset' case: a Windows child gets ProgramFiles back
-    # (windows.yml run 37663250838), and no-openssl covers an empty one.
+    # No 'ProgramFiles unset' case: a 64-bit Windows child gets ProgramFiles
+    # from ProgramW6432 (see Invoke-Case), and no-openssl covers an empty one.
     Invoke-Case 'openssl-too-old' 1 'OpenSSL 1.1.1w' $fakePath $dir $null $null
     Invoke-Case 'skip-signature-valid' 0 'skipping the signature check' ($noGit + @{ 'AGENTBUS_SKIP_SIGNATURE' = '1' }) $dir $null $null
     Invoke-Case 'skip-signature-tampered' 1 'checksum mismatch' @{ 'AGENTBUS_SKIP_SIGNATURE' = '1'; 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null

@@ -117,6 +117,19 @@ check real-unembedded 1 "no embedded release key" -- bash -c "source '$HERE/rele
 check real-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.sh' install.sh"
 cp "$WORK/real-install.sh" "$WORK/repo/install.sh" && git -C "$WORK/repo" add install.sh && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m embedded && git -C "$WORK/repo" tag v0.0.4
 check preflight-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.4; check_installers_embedded"
+# install.ps1 in the tag: unembedded refused, embedded accepted.
+awk '
+    /^# BEGIN agentbus release public key$/ { print; print "$PubKeyPem = @'"'"'"; print "-----BEGIN PUBLIC KEY-----"; print "REPLACED-BY-release/embed-key.sh"; print "-----END PUBLIC KEY-----"; print "'"'"'@"; skip = 1; next }
+    /^# END agentbus release public key$/ { skip = 0 }
+    !skip { print }
+' "$HERE/../install.ps1" > "$WORK/real-install.ps1"
+check ps1-unembedded 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.ps1' install.ps1"
+cp "$WORK/real-install.ps1" "$WORK/repo/install.ps1" && git -C "$WORK/repo" add install.ps1 && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m ps1 && git -C "$WORK/repo" tag v0.0.90
+check preflight-ps1-placeholder 1 "install.ps1 has no embedded release key" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.90; check_installers_embedded"
+"$HERE/embed-key.sh" "$WORK/throwaway.pub" "$WORK/real-install.ps1" >/dev/null
+check ps1-embedded 0 "" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/real-install.ps1' install.ps1"
+cp "$WORK/real-install.ps1" "$WORK/repo/install.ps1" && git -C "$WORK/repo" add install.ps1 && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q -m ps1e && git -C "$WORK/repo" tag v0.0.91
+check preflight-ps1-embedded 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.91; check_installers_embedded"
 check preflight-no-installer 1 "v0.0.1 has no install.sh; the installer ships with every release, so tag a commit that includes it" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_installers_embedded"
 
 # check_tag_pushed against a local bare "origin" (no network). v0.0.4 is in the

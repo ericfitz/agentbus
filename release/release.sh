@@ -156,6 +156,11 @@ check_installers_embedded() {
     git -C "$REPO_ROOT" show "$TAG:install.sh" > "$tmp" 2>/dev/null || { rm -f "$tmp"; fail "$TAG has no install.sh; the installer ships with every release, so tag a commit that includes it"; }
     local rc=0
     (check_script_embedded "$tmp" install.sh) || rc=$?
+    # install.ps1 is checked whenever the tag has it (the Windows installer
+    # joins the release assets in a later step).
+    if [[ "$rc" -eq 0 ]] && git -C "$REPO_ROOT" show "$TAG:install.ps1" > "$tmp" 2>/dev/null; then
+        (check_script_embedded "$tmp" install.ps1) || rc=$?
+    fi
     rm -f "$tmp"
     return "$rc"
 }

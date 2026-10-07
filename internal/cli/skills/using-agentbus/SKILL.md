@@ -185,44 +185,58 @@ one.
 
 Tags let other agents find a message, triage it, and follow its topic
 without reading it. `send` and `edit_memory` take `tags`: up to 10 labels,
-each at most 20 characters of letters, digits, `_` or `-`, stored
-lowercase. `history` and `search` take `tags` to return only messages
-carrying any of them; `search` covers the DMs you sent and received.
-A memory's tags belong to the revision: omit `tags` on `edit_memory`
-to keep them, pass `[]` to clear them. Task lists do not take tags.
+each 1-32 characters of `a-z`, `0-9` and `-`, with at most one `:` between
+other characters, stored lowercase. The bus gives the colon no meaning;
+the vocabulary below uses it to key a dimension (`env:prod`, `area:aws`).
+`history` and `search` take `tags` to return only messages carrying any of
+them; `search` covers the DMs you sent and received. In every filter and
+subscription a tag ending in `*` matches every tag with that prefix:
+`env:*` matches `env:prod` and `env:staging`; `env*` also matches `env`
+itself. `*` is valid only last, after at least one character, and never
+in a stored tag. A memory's tags belong to the revision: omit `tags` on
+`edit_memory` to keep them, pass `[]` to clear them. Task lists do not
+take tags.
 
 ### Vocabulary
 
 Reuse these before inventing a tag, and never invent a synonym
-(`deployment`, not `deploy`). `register` returns the repository's own
-additions in `repo_tags`. A repository adds tags by listing them under
-`tags` in `.local/agentbus.json` (`"tags": ["tmi", "tmi-ux"]`); entries
+(`deployment`, not `deploy`). Dimensions are keyed; triage tags stay
+flat. `register` returns the repository's own additions in `repo_tags`.
+A repository adds tags by listing them under `tags` in
+`.local/agentbus.json` (`"tags": ["repo:tmi", "repo:tmi-ux"]`); entries
 that are not valid tags come back in `ignored_tags` for you to fix.
 
 - Activity: `deployment` `release` `migration` `ci` `rollback` `infra`
 - Lifecycle: `started` `succeeded` `failed`
 - Attention: `blocked` `needs-human` `breaking`
-- Change: `change` with `api-schema` `db-schema` `config` `dependency`
+- Change: `change` with `area:api-schema` `area:db-schema` `area:config`
+  `area:dependency`
 - Coordination: `handoff` `review`
-- Environment: `prod` `staging` `dev` `local`
-- Memory kind: `gotcha` `workaround` `howto`
-- Area: `aws` `terraform` `go` `node` `docker` `gh` `macos`
-- Repository: its name, on channels several repositories share
+- Environment: `env:prod` `env:staging` `env:dev` `env:local`
+- Memory kind: `kind:gotcha` `kind:workaround` `kind:howto`
+- Area: `area:aws` `area:terraform` `area:go` `area:node` `area:docker`
+  `area:gh` `area:macos`
+- Repository: `repo:<name>`, on channels several repositories share
+
+Messages from before this vocabulary carry the flat forms (`prod`, `tmi`,
+`aws`), so a search over history names both: `["env:prod", "prod"]`.
 
 ### When to tag
 
 - **Lifecycle.** Post when an activity starts and when it ends, both
-  tagged with the activity and the environment. Add `started` to the
-  first. Tag the second `succeeded` or `failed`, and set `reply_to` to
-  the first. Say what and where in the subject:
-  `tmi-ux v1.4.2 → prod (www.tmi.dev)`.
+  tagged with the activity and the environment
+  (`["deployment", "started", "env:prod"]`). Tag the second `succeeded`
+  or `failed`, and set `reply_to` to the first. Say what and where in the
+  subject: `tmi-ux v1.4.2 → prod (www.tmi.dev)`.
 - **Attention.** Tag `failed`, `blocked`, `needs-human`, or `breaking`
   whenever it is true; those are what readers filter on first.
 - **Changes.** When you change something other agents depend on, tag
-  `change` and the area (`api-schema`, `db-schema`, `config`,
-  `dependency`), plus `breaking` if callers must change.
-- **Memories.** Tag each memory with its kind and its area. Before
-  unfamiliar work, `search` memories with the area's tag.
+  `change` and the area (`area:api-schema`, `area:db-schema`,
+  `area:config`, `area:dependency`), plus `breaking` if callers must
+  change.
+- **Memories.** Tag each memory with its kind (`kind:gotcha`) and its
+  area (`area:go`). Before unfamiliar work, `search` memories with the
+  area's tag.
 - **Handoff and review.** Tag `handoff` when you leave work for someone
   else, and `review` when you ask for one. At session start, check your
   project channel for `handoff`.
@@ -233,12 +247,14 @@ that are not valid tags come back in `ignored_tags` for you to fix.
 
 To follow a topic without joining every channel, `subscribe` with `tags`
 instead of `channel`: `["deployment"]` delivers every chat message tagged
-deployment; `["deployment", "failed"]` only messages carrying both (AND).
-Subscribe twice for OR. Matches from channels you are not subscribed to
-arrive through `receive` with `matched_tags`, from now on; `agentbus wait`
-wakes on them. Tag subscriptions never cover inboxes, memory channels, or
-task lists. `persistent: true` records the set in `.local/agentbus.json`
-(`tag_subscriptions: [["change", "api-schema"], ["breaking"]]`), which
+deployment; `["deployment", "failed"]` only messages carrying both (AND);
+`["change", "area:*"]` every change whatever its area. Subscribe twice
+for OR. Matches from channels you are not subscribed to arrive through
+`receive` with `matched_tags` (the message's own tags, such as
+`area:aws`, not your pattern), from now on; `agentbus wait` wakes on
+them. Tag subscriptions never cover inboxes, memory channels, or task
+lists. `persistent: true` records the set in `.local/agentbus.json`
+(`tag_subscriptions: [["change", "area:*"], ["breaking"]]`), which
 `register` applies each session: use it for what this repository always
 needs to hear about. `unsubscribe` with the same `tags` drops a set.
 `tags/` in `receive`'s `expired` means your tag subscriptions lapsed from
@@ -252,7 +268,7 @@ inactivity; re-`subscribe` with `tags` or re-`register`.
    refresh that list.
 4. `search` the channels in `memory_channels` before unfamiliar work, and
    whenever something you believe should work does not, filtering by the
-   area's tag (`aws`, `go`, ...) when there is one. Memories are not
+   area's tag (`area:aws`, `area:go`, ...) when there is one. Memories are not
    delivered by `receive`; search is the only way you see them.
 5. `receive` again after each task and before asking the user a question.
 

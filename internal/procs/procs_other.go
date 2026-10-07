@@ -1,11 +1,8 @@
-//go:build !darwin && !linux
+//go:build !darwin && !linux && !windows
 
 package procs
 
-import (
-	"errors"
-	"syscall"
-)
+import "errors"
 
 type systemTable struct{}
 
@@ -21,10 +18,4 @@ func (systemTable) StartTime(pid int) (int64, error) {
 		return 0, ErrGone
 	}
 	return 0, nil
-}
-
-// exists reports whether pid is a live process.
-func exists(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

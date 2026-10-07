@@ -2,7 +2,7 @@ package procs
 
 import (
 	"os"
-	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +31,7 @@ func TestSystemSelf(t *testing.T) {
 }
 
 func TestSystemGone(t *testing.T) {
-	cmd := exec.Command("sleep", "60")
+	cmd := sleeperCommand()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +40,11 @@ func TestSystemGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := System.Comm(pid); c != "sleep" {
-		t.Fatalf("Comm = %q, want sleep", c)
+	if c, _ := System.Comm(pid); strings.TrimSuffix(c, ".exe") != helperComm() {
+		t.Fatalf("Comm = %q, want %s", c, helperComm())
+	}
+	if ppid, err := System.Parent(pid); err != nil || ppid != os.Getpid() {
+		t.Fatalf("Parent(child) = %d, %v; want %d", ppid, err, os.Getpid())
 	}
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
@@ -50,5 +53,8 @@ func TestSystemGone(t *testing.T) {
 	}
 	if _, err := System.Parent(pid); err != ErrGone {
 		t.Fatalf("Parent of gone pid = %v, want ErrGone", err)
+	}
+	if _, err := System.StartTime(pid); err != ErrGone {
+		t.Fatalf("StartTime of gone pid = %v, want ErrGone", err)
 	}
 }

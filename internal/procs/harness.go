@@ -6,9 +6,22 @@ import (
 )
 
 // shells are the command names FindHarness walks past: the background shell a
-// harness spawns to run a command (`zsh -c ...`), and the login shell a
-// harness itself may have been started from are not the harness.
-var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true}
+// harness spawns to run a command (`zsh -c ...`, `cmd /c ...`), and the login
+// shell a harness itself may have been started from are not the harness.
+// Claude Code on Windows runs hooks through Git Bash, so a stop hook's
+// ancestry there is claude.exe -> bash.exe -> agentbus.exe.
+var shells = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true,
+	"cmd": true, "powershell": true, "pwsh": true,
+}
+
+// isShell reports whether a process table command name is a shell: compared
+// by basename, with a login shell's leading '-' stripped, case-insensitively
+// and without one trailing ".exe" (Windows reports "Bash.EXE", "cmd.exe").
+func isShell(comm string) bool {
+	name := strings.ToLower(strings.TrimPrefix(filepath.Base(comm), "-"))
+	return shells[strings.TrimSuffix(name, ".exe")]
+}
 
 // FindHarness returns the process that started the command running as self:
 // the first ancestor that is not a shell. A shell between the two (a
@@ -27,7 +40,7 @@ func FindHarness(t Table, self int) (Ref, error) {
 		if err != nil {
 			return Ref{}, err
 		}
-		if !shells[strings.TrimPrefix(filepath.Base(comm), "-")] {
+		if !isShell(comm) {
 			start, err := t.StartTime(pid)
 			if err != nil {
 				return Ref{}, err

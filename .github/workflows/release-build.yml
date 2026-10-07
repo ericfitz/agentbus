@@ -1,0 +1,120 @@
+# Builds the Linux and Windows release archives on runners of their own OS
+# and architecture, runs each binary, attests build provenance, and uploads
+# the archives to the draft release for the tag. Dispatched by
+# release/release.sh on the tag itself (gh workflow run --ref <tag>), so the
+# checked-out source and this file are the tag's. macOS is built locally.
+name: release-build
+run-name: release-build ${{ inputs.tag }}
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (vX.Y.Z); dispatch on that tag with --ref
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+      - id: check
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::tag '$TAG' must look like v1.2.3 or v1.2.3-rc.1"; exit 1; }
+          git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || { echo "::error::tag $TAG not found in the repository"; exit 1; }
+          [[ "$GITHUB_REF_NAME" == "$TAG" ]] || { echo "::error::dispatched on '$GITHUB_REF_NAME', not on tag $TAG; use: gh workflow run release-build.yml --ref $TAG -f tag=$TAG"; exit 1; }
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+  build:
+    needs: validate
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+          - { runner: windows-11-arm, goos: windows, goarch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: build
+        name: Build and run
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=""; [[ "$GOOS" == windows ]] && ext=".exe"
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/ericfitz/agentbus/internal/mcpserver.Version=$VERSION" -o "out/agentbus$ext" .
+          got="$("./out/agentbus$ext" version)"
+          [[ "$got" == "$VERSION" ]] || { echo "::error::agentbus version printed '$got', want $VERSION"; exit 1; }
+      - id: package-linux
+        if: matrix.goos == 'linux'
+        name: Package tar.gz
+        shell: bash
+        run: tar -C out -czf "agentbus-$TAG-linux-$GOARCH.tar.gz" agentbus
+      - id: package-windows-zip
+        if: matrix.goos == 'windows'
+        name: Package zip
+        shell: pwsh
+        run: Compress-Archive -LiteralPath out\agentbus.exe -DestinationPath "agentbus-$env:TAG-windows-$env:GOARCH.zip"
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: agentbus-${{ inputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          if-no-files-found: error
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: archives
+      - name: Require all four archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l archives
+          for a in linux-amd64.tar.gz linux-arm64.tar.gz windows-amd64.zip windows-arm64.zip; do
+            [[ -f "archives/agentbus-$TAG-$a" ]] || { echo "::error::missing archives/agentbus-$TAG-$a"; exit 1; }
+          done
+      - id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: archives/*
+      - id: upload-release
+        name: Upload to the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" archives/* --clobber --repo "$GITHUB_REPOSITORY"

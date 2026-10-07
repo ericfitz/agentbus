@@ -40,6 +40,7 @@ verify: ## Done gate: build, vet, vet-cross, gofmt, lint, tests, in that order
 
 release-check: ## Release tooling checks: actionlint, shellcheck, release.sh unit tests, template rendering, install.sh in containers. Needs actionlint, shellcheck, Docker, python3, ruby, openssl@3; not part of verify
 	actionlint .github/workflows/*.yml
+	@if rg -n 'uses: .*@v[0-9]' .github/workflows/; then echo "error: unpinned action (use a commit SHA with the version in a comment)"; exit 1; fi
 	shellcheck -x release/*.sh
 	shellcheck -s sh install.sh
 	@echo "note: release/test-install.ps1 runs on Windows only (windows.yml, release/test-windows.ps1)"

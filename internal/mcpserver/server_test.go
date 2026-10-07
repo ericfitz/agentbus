@@ -928,13 +928,13 @@ func TestSearchToolOverTaskRowDoesNotCreateAccessRow(t *testing.T) {
 func TestRegisterReturnsRepoTags(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
-	writeRepoFile(t, dir, `{"identity":"Sam","tags":["tmi","TMI","repo:tmi"]}`)
+	writeRepoFile(t, dir, `{"identity":"Sam","tags":["tmi","TMI","repo:tmi","a_b"]}`)
 	cs := testSessionIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["repo_tags"]); len(got) != 1 || got[0] != "tmi" {
+	if got := stringsOf(reg["repo_tags"]); len(got) != 2 || got[0] != "tmi" || got[1] != "repo:tmi" {
 		t.Fatal(reg)
 	}
-	if got := stringsOf(reg["ignored_tags"]); len(got) != 1 || got[0] != "repo:tmi" {
+	if got := stringsOf(reg["ignored_tags"]); len(got) != 1 || got[0] != "a_b" {
 		t.Fatal(reg)
 	}
 	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
@@ -1001,5 +1001,54 @@ func TestRegisterRecordsClientInfoFromInitialize(t *testing.T) {
 	t.Cleanup(func() { _ = cs2.Close() })
 	if reg2, _ := call(t, cs2, "register", map[string]any{"name": "Kim"}); reg2["as"] != "Kim" {
 		t.Fatalf("register without clientInfo: %v", reg2)
+	}
+}
+
+// TestTagDescriptionsStateRulesAndPatterns (#20): send and edit_memory
+// state the tag rule; the four filters say a trailing * is a prefix; the
+// subscribe and unsubscribe results echo normalized patterns.
+func TestTagDescriptionsStateRulesAndPatterns(t *testing.T) {
+	cs := testSession(t)
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"send": "1-32 characters", "edit_memory": "1-32 characters", "history": "ending in *", "search": "ending in *", "subscribe": "ending in *", "unsubscribe": "pattern"}
+	for _, tl := range tools.Tools {
+		s, ok := want[tl.Name]
+		if !ok {
+			continue
+		}
+		if !strings.Contains(tl.Description, s) {
+			t.Fatalf("%s description must contain %q: %s", tl.Name, s, tl.Description)
+		}
+		if tl.Name == "subscribe" || tl.Name == "history" {
+			j, err := json.Marshal(tl.InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(j), "env:*") {
+				t.Fatalf("%s tags schema must show a pattern: %s", tl.Name, j)
+			}
+		}
+		delete(want, tl.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("tools not seen: %v", want)
+	}
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	out, _ := call(t, cs, "subscribe", map[string]any{"as": "Sam", "tags": []string{"ENV:*", "failed"}})
+	if fmt.Sprint(out["subscribed_tags"]) != "[env:* failed]" {
+		t.Fatalf("subscribed_tags: %v", out["subscribed_tags"])
+	}
+	out, _ = call(t, cs, "unsubscribe", map[string]any{"as": "Sam", "tags": []string{"env:*", "failed"}})
+	if fmt.Sprint(out["unsubscribed_tags"]) != "[env:* failed]" {
+		t.Fatalf("unsubscribed_tags: %v", out["unsubscribed_tags"])
+	}
+	if _, res := call(t, cs, "history", map[string]any{"as": "Sam", "channel": "general", "tags": []string{"env_*"}}); !res.IsError {
+		t.Fatal("history must reject an invalid pattern")
+	}
+	if _, res := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": "x", "tags": []string{"env:*"}}); !res.IsError {
+		t.Fatal("send must reject a pattern as a stored tag")
 	}
 }

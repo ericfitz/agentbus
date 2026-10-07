@@ -51,13 +51,13 @@ type subscribeIn struct {
 	Channel    string   `json:"channel,omitempty"`
 	From       string   `json:"from,omitempty" jsonschema:"now (default) or oldest"`
 	Persistent bool     `json:"persistent,omitempty" jsonschema:"also add the channel to this repository's .local/agentbus.json so register subscribes it in later sessions"`
-	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags that must all be on a message for it to be delivered (an AND set); subscribe again with another set for OR"`
+	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags or prefix patterns (a tag ending in * matches every tag with that prefix: env:*) that must all match a message for it to be delivered (an AND set); subscribe again with another set for OR"`
 }
 type unsubscribeIn struct {
 	As         string   `json:"as,omitempty"`
 	Channel    string   `json:"channel,omitempty"`
 	Persistent bool     `json:"persistent,omitempty" jsonschema:"also remove the channel from this repository's .local/agentbus.json"`
-	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags that must all be on a message for it to be delivered (an AND set); subscribe again with another set for OR"`
+	Tags       []string `json:"tags,omitempty" jsonschema:"instead of channel: 1-10 tags or prefix patterns (a tag ending in * matches every tag with that prefix: env:*) that must all match a message for it to be delivered (an AND set); subscribe again with another set for OR"`
 }
 type sendIn struct {
 	As string `json:"as,omitempty"`
@@ -73,7 +73,7 @@ type historyIn struct {
 	Before  *int64   `json:"before,omitempty"`
 	After   *int64   `json:"after,omitempty"`
 	Count   int      `json:"count,omitempty"`
-	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying at least one of these tags"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying at least one of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
 }
 type searchIn struct {
 	As string `json:"as,omitempty"`
@@ -364,7 +364,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.ListChannels(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted. Or pass tags instead of channel: an AND set of 1-10 tags; matching messages from any chat channel you are not already subscribed to arrive through receive with matched_tags, starting from now."},
+	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted. Or pass tags instead of channel: an AND set of 1-10 tags or prefix patterns (a tag ending in * matches every tag with that prefix: env:*, or area:* with change); matching messages from any chat channel you are not already subscribed to arrive through receive with matched_tags (the message's own tags, not your patterns), starting from now."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in subscribeIn) (*mcp.CallToolResult, any, error) {
 			if (in.Channel == "") == (len(in.Tags) == 0) {
 				return nil, nil, &bus.Error{Code: "validation", Message: "pass channel or tags, not both"}
@@ -373,7 +373,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				if err := b.SubscribeTags(in.As, in.Tags); err != nil {
 					return nil, nil, err
 				}
-				norm, _ := bus.NormalizeTags(in.Tags)
+				norm, _ := bus.NormalizeTagPatterns(in.Tags)
 				out := map[string]any{"subscribed_tags": norm}
 				if in.Persistent {
 					f, err := persistFile(cwd)
@@ -403,7 +403,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json. Direct-message channels (dm/...) are not accepted. Or pass tags to drop that tag set."},
+	mcp.AddTool(s, &mcp.Tool{Name: "unsubscribe", Description: "Agentbus: unsubscribe from a channel and drop its cursor. persistent=true also removes the channel from this repository's .local/agentbus.json. Direct-message channels (dm/...) are not accepted. Or pass tags to drop that tag set, naming the same tags or patterns it was subscribed with."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in unsubscribeIn) (*mcp.CallToolResult, any, error) {
 			if (in.Channel == "") == (len(in.Tags) == 0) {
 				return nil, nil, &bus.Error{Code: "validation", Message: "pass channel or tags, not both"}
@@ -412,7 +412,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				if err := b.UnsubscribeTags(in.As, in.Tags); err != nil {
 					return nil, nil, err
 				}
-				norm, _ := bus.NormalizeTags(in.Tags)
+				norm, _ := bus.NormalizeTagPatterns(in.Tags)
 				out := map[string]any{"unsubscribed_tags": norm}
 				if in.Persistent {
 					f, err := persistFile(cwd)
@@ -442,7 +442,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(out, nil)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools. tags (up to 10, each 1-20 characters of letters, digits, _ and -; stored lowercase) label the message so other agents can follow, filter, and triage it without reading it: tag the activity (deployment, release), its outcome (started, succeeded, failed), what needs attention (blocked, needs-human, breaking), and the environment (prod, staging); a changed interface is change plus its area (api-schema, db-schema, config). Reuse the using-agentbus vocabulary and register's repo_tags before inventing a tag. subject is an optional one-line summary (at most 200 characters) shown as the message's title and matched by search; without one, readers see the first line of content."},
+	mcp.AddTool(s, &mcp.Tool{Name: "send", Description: "Agentbus: send a message to a channel. On a memory channel this creates a memory and returns its memory_id. Use idempotency_key to make retries safe. To message one agent directly, set channel to dm/<name>, with a name from register's others or discover; answer a direct message by sending to dm/<its sender>, optionally with reply_to. Task lists (tasks/...) do not accept send; use the task tools. tags (up to 10, each 1-32 characters of a-z, 0-9 and -, with at most one : between other characters; stored lowercase; never *) label the message so other agents can follow, filter, and triage it without reading it: tag the activity (deployment, release), its outcome (started, succeeded, failed), what needs attention (blocked, needs-human, breaking), and the environment (env:prod, env:staging); a changed interface is change plus its area (area:api-schema, area:db-schema, area:config). Reuse the using-agentbus vocabulary and register's repo_tags before inventing a tag. subject is an optional one-line summary (at most 200 characters) shown as the message's title and matched by search; without one, readers see the first line of content."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in sendIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Send(in.As, in.SendInput))
 		})
@@ -450,11 +450,11 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in receiveIn) (*mcp.CallToolResult, any, error) {
 			return result(b.Receive(in.As, in.ReceiveInput))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor. tags filters to messages carrying any of the given tags."},
+	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Agentbus: read a channel's retained messages by sequence range without touching your cursor. tags filters to messages carrying any of the given tags; a tag ending in * matches every tag with that prefix (env:*)."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
 			return result(b.History(in.As, in.Channel, in.Before, in.After, in.Count, in.Tags...))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq), tags (any of). Unscoped searches include the direct messages you sent and received; tags finds, for example, every failed deployment. If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
+	mcp.AddTool(s, &mcp.Tool{Name: "search", Description: "Agentbus: search messages and memories. mode=text matches words; mode=semantic ranks memories by meaning; mode=both (default when embeddings are configured) fuses them. Filters: channel, sender, since, until (unix ms), thread (a seq), tags (any of; a tag ending in * matches every tag with that prefix, env:*). Unscoped searches include the direct messages you sent and received; tags finds, for example, every failed deployment. If no embedding endpoint is configured or it fails, semantic and both silently fall back to text results and the result carries semantic_unavailable=true."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			res, err := b.Search(in.As, in.SearchInput)
 			// A search hit's accessed_at is touched here, once per call, not
@@ -483,7 +483,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			}
 			return result(msg, err)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced. tags replaces the memory's tags; omit it to keep them. subject replaces the memory's subject; omit it to keep it, pass an empty string to clear it."},
+	mcp.AddTool(s, &mcp.Tool{Name: "edit_memory", Description: "Agentbus: replace a memory's content as a new revision. Last committed write wins; the result names the revision you replaced. tags replaces the memory's tags (same rule as send: up to 10, each 1-32 characters of a-z, 0-9 and -, with at most one : between other characters; stored lowercase); omit it to keep them. subject replaces the memory's subject; omit it to keep it, pass an empty string to clear it."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in editIn) (*mcp.CallToolResult, any, error) {
 			return result(b.EditMemory(in.As, in.EditInput))
 		})

@@ -222,7 +222,7 @@ func run(cmd string, args []string) int {
 		return 0
 	case "subscribe", "unsubscribe":
 		fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
-		tags := fs.String("tags", "", "comma-separated tag set to follow instead of a channel")
+		tags := fs.String("tags", "", "comma-separated tag set to follow instead of a channel; a tag ending in * matches every tag with that prefix (env:*)")
 		if err := fs.Parse(args); err != nil {
 			return 2
 		}

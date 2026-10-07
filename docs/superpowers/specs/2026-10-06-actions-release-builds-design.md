@@ -70,6 +70,12 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
   not matching `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`, not present
   in the repository, or not equal to `github.ref_name` (the run must be
   dispatched on the tag).
+
+> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> Tags are stable `vX.Y.Z` only, both in `release.sh` (`parse_args`) and in
+> `release-build.yml`; the pre-release suffix allowed by the regex above and the
+> `-rc.1` dry run below were not implemented. A dry run uses the next stable tag
+> with `release.sh --no-publish`, then deletes the draft and the tag.
 - **build** job, `permissions: contents: read`, matrix:
 
   | runner | GOOS/GOARCH | archive |
@@ -114,3 +120,8 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
   the draft's assets, `gh attestation verify` on each archive, and the
   `SHA256SUMS` signature; then delete the draft and the tag (an outward
   action the user approves at the time).
+
+> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> The dry run uses the next stable `vX.Y.Z` tag with `release.sh
+> --no-publish`, not a `vX.Y.Z-rc.1` tag: `release.sh` and `release-build.yml`
+> accept stable tags only. The draft and the tag are deleted afterward.

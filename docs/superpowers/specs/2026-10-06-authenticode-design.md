@@ -120,3 +120,8 @@ update the variables. The workflow is unchanged either way.
 - #36's pre-release dry run is done twice when signing is first enabled:
   with `off` (no Azure step runs; notes line present) and with `on`
   (signatures verified in the job and again in the VM).
+
+> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> #36's dry run is done on the next stable `vX.Y.Z` tag with `release.sh
+> --no-publish`; `release.sh` and `release-build.yml` accept stable tags only, so
+> read "pre-release dry run" here as that.

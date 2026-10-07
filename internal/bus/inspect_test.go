@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,9 @@ import (
 
 func hookScript(t *testing.T, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("inspection command fixtures are /bin/sh scripts")
+	}
 	p := filepath.Join(t.TempDir(), "hook.sh")
 	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
 		t.Fatal(err)

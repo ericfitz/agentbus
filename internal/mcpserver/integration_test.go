@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	binary = filepath.Join(dir, "agentbus")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	args := []string{"build", "-o", binary}
 	cgoEnabled := "CGO_ENABLED=0"
 	if raceEnabled {
@@ -363,6 +367,9 @@ func TestDeadProcessHoldsNameUntilExpiry(t *testing.T) {
 // sending process (a), proving the bus execs the hook directly from within
 // that process rather than some other process producing the same rejection.
 func TestHookRunsInSendingProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook fixture is a /bin/sh script; the inspection path is exercised on Unix")
+	}
 	dir := t.TempDir()
 	hook := filepath.Join(dir, "hook.sh")
 	ppidFile := filepath.Join(dir, "hook.ppid")
@@ -553,6 +560,9 @@ func TestStdoutCarriesOnlyProtocol(t *testing.T) {
 func TestCleanShutdownFreesNameImmediately(t *testing.T) {
 	for _, how := range []string{"disconnect", "sigterm"} {
 		t.Run(how, func(t *testing.T) {
+			if how == "sigterm" && runtime.GOOS == "windows" {
+				t.Skip("no SIGTERM on Windows; a harness ends the server by closing stdin (the disconnect case)")
+			}
 			dir := t.TempDir()
 			writeConfig(t, dir, `{}`)
 			a := spawn(t, dir)

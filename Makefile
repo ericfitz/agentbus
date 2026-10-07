@@ -1,5 +1,5 @@
 # agentbus build and verification targets. `make verify` is the done gate.
-.PHONY: build build-all fmt-check vet lint test test-race verify release-check
+.PHONY: build build-all fmt-check vet vet-cross lint test test-race verify release-check
 
 build: ## Build the agentbus binary the way release/release.sh does (no cgo)
 	CGO_ENABLED=0 go build -trimpath -o agentbus .
@@ -19,6 +19,12 @@ lint: ## golangci-lint v2 with its default linters (no .golangci.yml in this rep
 test: ## Unit tests (none need live services)
 	go test ./...
 
+vet-cross: ## Compile every package and test for the other release targets; lint the Windows build (no cross-OS test run)
+	GOOS=linux GOARCH=amd64 go vet ./...
+	GOOS=windows GOARCH=amd64 go vet ./...
+	GOOS=windows GOARCH=arm64 go vet ./...
+	GOOS=windows golangci-lint run ./...
+
 test-race: ## Unit tests under the race detector (slower; the mcpserver tests rebuild the child binary with -race)
 	go test -race ./...
 
@@ -26,6 +32,7 @@ verify: ## Done gate: build, vet, gofmt, lint, tests, in that order
 	$(MAKE) build
 	$(MAKE) build-all
 	$(MAKE) vet
+	$(MAKE) vet-cross
 	$(MAKE) fmt-check
 	$(MAKE) lint
 	$(MAKE) test

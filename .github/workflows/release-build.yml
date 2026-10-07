@@ -109,6 +109,11 @@ jobs:
       VERSION: ${{ needs.validate.outputs.version }}
       WINDOWS_SIGNING: ${{ inputs.windows_signing }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: release/windows-zip-README.txt
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - id: download-exe
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -181,8 +186,9 @@ jobs:
       - id: package
         shell: pwsh
         run: |
-          Compress-Archive -LiteralPath exe\exe-windows-amd64\agentbus.exe -DestinationPath "agentbus-$env:TAG-windows-amd64.zip"
-          Compress-Archive -LiteralPath exe\exe-windows-arm64\agentbus.exe -DestinationPath "agentbus-$env:TAG-windows-arm64.zip"
+          Copy-Item -LiteralPath release\windows-zip-README.txt -Destination README.txt
+          Compress-Archive -LiteralPath exe\exe-windows-amd64\agentbus.exe, README.txt -DestinationPath "agentbus-$env:TAG-windows-amd64.zip"
+          Compress-Archive -LiteralPath exe\exe-windows-arm64\agentbus.exe, README.txt -DestinationPath "agentbus-$env:TAG-windows-arm64.zip"
       - id: upload-amd64
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

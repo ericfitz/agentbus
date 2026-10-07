@@ -73,6 +73,12 @@ script refuses. Rerunning upgrades: a running `agentbus.exe` is renamed, not
 overwritten, so restart harness sessions and the TUI afterwards. The script
 never runs `agentbus init`; it prints the next steps.
 
+The release zips also carry a `README.txt`, but unzipping one does not
+install agentbus: the harnesses start `agentbus.exe` by name. On Windows,
+`agentbus init` (any form, including `--dry-run`) refuses to run unless the
+`agentbus` that `PATH` resolves is the binary you ran, and its message
+gives the install script command.
+
 | Variable | Meaning |
 |---|---|
 | `AGENTBUS_VERSION` | Install this tag (`vX.Y.Z`) instead of the latest release. |

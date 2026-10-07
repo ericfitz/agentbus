@@ -39,6 +39,14 @@ Rejected:
   `commit:1234567` also matches the plain text "commit 1234567"; prefix
   search gives the useful part without a scheme.
 
+## Human decisions (user, 2026-10-07)
+
+Approved by Eric on 2026-10-07.
+
+5. **The `foldRefs` step also clears the embed failure.** The v11
+   `foldRefs` step deletes the folded row's `embed_failures` marker, when
+   that table exists, so the row is re-embedded with its new text.
+
 ## API removal
 
 - `bus.Ref`, `refKinds`, `validateRefs` and the `Refs` fields of

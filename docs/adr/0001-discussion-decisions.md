@@ -99,6 +99,5 @@ No implementation has begun. Frameworks/libraries and role taxonomy remain unsel
 
 ## Amendment (2026-10-07)
 
-Superseded in part: native Windows runtime support is now in scope (#35). See
-[docs/superpowers/specs/2026-10-06-windows-support-design.md](../superpowers/specs/2026-10-06-windows-support-design.md).
+Superseded in part by [ADR 0020](0020-native-windows-support.md): native Windows runtime support (#35).
 The text above is the original decision and is left unchanged.

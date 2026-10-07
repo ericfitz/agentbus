@@ -46,6 +46,19 @@ Proposed in the implementation plan; approved by Eric on 2026-10-07.
    the detected architecture, documented in the script header and set only
    by `release/test-install.ps1` to exercise the unknown-architecture
    refusal.
+10. **`install.ps1` edits the user Path in the registry.** It reads
+    `HKCU:\Environment` `Path` unexpanded and writes it back as
+    `ExpandString`, which preserves `%VAR%` entries, instead of
+    `[Environment]::GetEnvironmentVariable` and `SetEnvironmentVariable`
+    with `'Path','User'`. It then broadcasts the setting change.
+11. **`install.ps1` refusals** beyond the original plan: it refuses a copy
+    without an embedded release key, requires `AGENTBUS_VERSION` to be
+    exactly `vX.Y.Z` (no suffix, no newline), rejects command-line arguments,
+    refuses when `<install dir>\agentbus.exe` is a directory, and strips
+    trailing slashes from `AGENTBUS_BASE_URL` and `AGENTBUS_INSTALL_DIR`.
+12. **Test machines:** the Windows 11 ARM VM for harness checks is VMware
+    Fusion; the WSL2 shared-database checks use a UTM 4.7.4 guest with
+    nested virtualization.
 
 Rejected: WSL only (no native port); one shared bus over a new IPC
 mechanism; allowing a cross-boundary database with a warning or silently;
@@ -206,6 +219,8 @@ Steps:
 7. **PATH:** if the directory is not on the user `PATH`, append it at user
    scope (`[Environment]::SetEnvironmentVariable(..., 'User')`) and say that
    new terminals pick it up.
+   (Decision 10 supersedes this: the Path is edited in the registry; see
+   Human decisions, 2026-10-07.)
 8. **Report** `agentbus version`, and print `agentbus init --global` and the
    restart-after-upgrade reminder. It does not run `init`.
 

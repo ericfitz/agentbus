@@ -22,6 +22,18 @@ because signing and notarization need the user's Developer ID.
 
 Rejected: Linux only (Windows would keep a second, unattested build path).
 
+## Human decisions (user, 2026-10-07)
+
+Approved by Eric on 2026-10-07.
+
+1. **Stable tags only.** `release.sh` and `release-build.yml` accept only
+   `vX.Y.Z` tags; there are no release candidates. A dry run uses the next
+   stable tag with `release.sh --no-publish` (draft only), and a tag is final
+   once pushed.
+2. **Workflow on the default branch.** `release.sh` preflight, before any
+   build, requires `release-build.yml` to exist on the default branch of the
+   repository (`gh workflow view`).
+
 ## Release flow (release.sh)
 
 1. **Preflight** as in #34, plus `gh auth status` and that
@@ -93,7 +105,7 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
 - The repository is public, so runners and the public Sigstore instance are
   free.
 
-> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> **Implementation note (2026-10-07, controller ruling approved by Eric on 2026-10-07):**
 > Tags are stable `vX.Y.Z` only, both in `release.sh` (`parse_args`) and in
 > `release-build.yml`; the pre-release suffix allowed by the regex above and the
 > `-rc.1` dry run below were not implemented. A dry run uses the next stable tag
@@ -121,7 +133,7 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
   `SHA256SUMS` signature; then delete the draft and the tag (an outward
   action the user approves at the time).
 
-> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> **Implementation note (2026-10-07, controller ruling approved by Eric on 2026-10-07):**
 > The dry run uses the next stable `vX.Y.Z` tag with `release.sh
 > --no-publish`, not a `vX.Y.Z-rc.1` tag: `release.sh` and `release-build.yml`
 > accept stable tags only. The draft and the tag are deleted afterward.

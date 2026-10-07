@@ -71,6 +71,5 @@ Rejected:
 
 ## Amendment (2026-10-07)
 
-Superseded in part: the process table is also read on Windows now (native Windows support, #35). See
-[docs/superpowers/specs/2026-10-06-windows-support-design.md](../superpowers/specs/2026-10-06-windows-support-design.md).
+Superseded in part by [ADR 0020](0020-native-windows-support.md): the process table is also read on Windows (#35).
 The text above is the original decision and is left unchanged.

@@ -33,6 +33,15 @@ unconditionally; checking Authenticode in `install.ps1` (the signed
 `SHA256SUMS` already covers integrity, and unsigned releases would need
 special cases).
 
+## Human decisions (user, 2026-10-07)
+
+Approved by Eric on 2026-10-07.
+
+4. **Stable tags only.** `release.sh` and `release-build.yml` accept only
+   `vX.Y.Z` tags; there are no release candidates. Dry runs use the next
+   stable tag with `release.sh --no-publish` (draft only), and a tag is final
+   once pushed.
+
 ## One-time setup (user; documented in docs/release-signing.md)
 
 1. In the personal Azure subscription: create an Artifact Signing account
@@ -121,12 +130,12 @@ update the variables. The workflow is unchanged either way.
   with `off` (no Azure step runs; notes line present) and with `on`
   (signatures verified in the job and again in the VM).
 
-> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> **Implementation note (2026-10-07, controller ruling approved by Eric on 2026-10-07):**
 > #36's dry run is done on the next stable `vX.Y.Z` tag with `release.sh
 > --no-publish`; `release.sh` and `release-build.yml` accept stable tags only, so
 > read "pre-release dry run" here as that.
 
-## Implementation note (2026-10-07, controller ruling pending Eric's review)
+## Implementation note (2026-10-07, controller ruling approved by Eric on 2026-10-07)
 
 `docs/install.md` states that releases which are not Authenticode-signed say
 so in their notes, and that `Get-AuthenticodeSignature` is the way to tell

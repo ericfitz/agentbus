@@ -40,6 +40,26 @@ replace a release asset can replace its checksum); attestations now (they
 need a CI release build, and verifying them needs `gh` or `cosign`, which
 servers rarely have).
 
+## Human decisions (user, 2026-10-07)
+
+Approved by Eric on 2026-10-07.
+
+6. **Stable tags only.** `release.sh` accepts only `vX.Y.Z` tags: a
+   release candidate would become GitHub's latest release and `install.sh`
+   would reject it.
+7. **`install.sh` refusals** beyond the original plan: it refuses a copy
+   without an embedded release key, requires `AGENTBUS_VERSION` to be exactly
+   `vX.Y.Z` (no suffix, no newline), rejects command-line arguments, refuses
+   when `<install dir>/agentbus` is a directory, and strips trailing slashes
+   from `AGENTBUS_BASE_URL` and `AGENTBUS_INSTALL_DIR`.
+8. **`release.sh` preflight**, before any build: the tag must be on origin,
+   the draft is created with `gh release create --verify-tag`, and
+   `install.sh` and `install.ps1` at the tag must have the release key
+   embedded.
+9. **`AGENTBUS_SIGNING_KEY`** overrides the default signing key path
+   `~/.keys/agentbus-release-ed25519.pem`. The path is passed only to
+   `openssl`.
+
 ## Release assets
 
 Each release carries:

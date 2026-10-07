@@ -14,18 +14,25 @@ import (
 )
 
 func TestNormalizeTags(t *testing.T) {
-	got, err := NormalizeTags([]string{"Release", "bug", "release", "a_b-1"})
-	if err != nil || !slices.Equal(got, []string{"a_b-1", "bug", "release"}) {
+	got, err := NormalizeTags([]string{"Release", "bug", "release", "env:prod", "a-1"})
+	if err != nil || !slices.Equal(got, []string{"a-1", "bug", "env:prod", "release"}) {
 		t.Fatalf("%v %v", got, err)
 	}
 	if got, err := NormalizeTags(nil); err != nil || got != nil {
 		t.Fatalf("no tags: %v %v", got, err)
 	}
-	for _, bad := range [][]string{{""}, {"has space"}, {"x/y"}, {"ünïcode"}, {"123456789012345678901"}, {" bug "}} {
+	// 32 characters in total is the limit (decision 6); the parts have no
+	// limit of their own.
+	long32 := strings.Repeat("a", 20) + ":" + strings.Repeat("b", 11)
+	if got, err := NormalizeTags([]string{long32}); err != nil || len(got) != 1 || got[0] != long32 {
+		t.Fatalf("32 characters: %v %v", got, err)
+	}
+	for _, bad := range [][]string{{""}, {"has space"}, {"x/y"}, {"ünïcode"}, {long32 + "c"}, {" bug "}, {"a_b"}, {":prod"}, {"env:"}, {"env::prod"}, {"a:b:c"}, {"env:*"}, {"*"}} {
 		if _, err := NormalizeTags(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
+	wantCode(t, func() error { _, err := NormalizeTags([]string{"a_b"}); return err }(), "validation")
 	eleven := make([]string, 11)
 	for i := range eleven {
 		eleven[i] = "t" + string(rune('a'+i))

@@ -10,20 +10,37 @@ import (
 // maxTags is the per-message (and per-subscription) tag ceiling (ADR 0009).
 const maxTags = 10
 
-var tagRe = regexp.MustCompile(`^[a-z0-9_-]{1,20}$`)
+// maxTagLen caps a stored tag, and a pattern's prefix, at 32 characters in
+// total (spec 2026-10-06 decision 6; was 20). The parts around the colon
+// have no limit of their own.
+const maxTagLen = 32
 
-// NormalizeTags lowercases tags, rejects any that fail the tag rule (one bad
-// tag fails the whole call), drops duplicates, sorts, and caps the result at
-// maxTags. nil in, nil out. Exported for repoconfig's persistent tag sets.
-func NormalizeTags(tags []string) ([]string, error) {
+// tagRe is the stored-tag rule (ADR 0009 amendment 2026-10-06): a-z, 0-9
+// and -, with at most one colon between other characters. The colon is an
+// ordinary character to the bus; the using-agentbus skill gives it its
+// key:value reading. Length is checked apart from the regexp so one message
+// can name both limits.
+var tagRe = regexp.MustCompile(`^[a-z0-9-]+(:[a-z0-9-]+)?$`)
+
+// tagRuleText is the rule as NormalizeTags states it to the caller.
+const tagRuleText = "must be 1-32 characters of a-z, 0-9 and -, with at most one : between other characters"
+
+// validTag reports whether t (already lowercased) is a storable tag.
+func validTag(t string) bool { return len(t) <= maxTagLen && tagRe.MatchString(t) }
+
+// normalizeTagList is the shared body of NormalizeTags and the pattern
+// normalizer: lowercase, reject any entry valid rejects (one bad entry fails
+// the whole call, naming it with rule), drop duplicates, cap at maxTags, sort.
+// nil in, nil out.
+func normalizeTagList(tags []string, valid func(string) bool, rule string) ([]string, error) {
 	if len(tags) == 0 {
 		return nil, nil
 	}
 	out := make([]string, 0, len(tags))
 	for _, t := range tags {
 		t = strings.ToLower(t)
-		if !tagRe.MatchString(t) {
-			return nil, errf("validation", false, "tag %q must be 1-20 characters of a-z, 0-9, _ or -", t)
+		if !valid(t) {
+			return nil, errf("validation", false, "tag %q %s", t, rule)
 		}
 		if !slices.Contains(out, t) {
 			out = append(out, t)
@@ -34,6 +51,14 @@ func NormalizeTags(tags []string) ([]string, error) {
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+// NormalizeTags lowercases tags, rejects any that fail the tag rule (one bad
+// tag fails the whole call), drops duplicates, sorts, and caps the result at
+// maxTags. nil in, nil out. Exported for repoconfig's persistent tag sets.
+// Filters take patterns instead: see NormalizeTagPatterns.
+func NormalizeTags(tags []string) ([]string, error) {
+	return normalizeTagList(tags, validTag, tagRuleText)
 }
 
 // insertTags stores a message's (already normalized) tags.

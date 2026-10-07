@@ -188,15 +188,16 @@ func (m Model) viewHealth() string {
 // is itself an existing file is run as-is, so a bare path with spaces
 // ("/Applications/Visual Studio Code.app/Contents/MacOS/Code") works;
 // splitting it on whitespace used to break it at "/Applications/Visual".
-// Anything else goes through the shell the way git runs GIT_EDITOR, so
-// arguments and quoting work ("code --wait"). A blank or whitespace-only
+// Anything else goes through the shell the way git runs GIT_EDITOR (cmd.exe
+// on Windows, see editor_windows.go), so arguments and quoting work
+// ("code --wait"). A blank or whitespace-only
 // value falls back the same as unset.
 func editorCommand(path string) *exec.Cmd {
 	ed, _ := editorSetting()
 	if st, err := os.Stat(ed); err == nil && !st.IsDir() {
 		return exec.Command(ed, path)
 	}
-	return exec.Command("/bin/sh", "-c", ed+` "$1"`, "sh", path)
+	return shellEditorCommand(ed, path)
 }
 
 // terminalEditors need the terminal, so a $VISUAL naming one still blocks.
@@ -244,20 +245,20 @@ func editorSetting() (ed, source string) {
 	if ed = strings.TrimSpace(os.Getenv("EDITOR")); ed != "" {
 		return ed, "$EDITOR"
 	}
-	return "vi", "default"
+	return defaultEditor, "default"
 }
 
-// editorErrText explains an editor failure for a toast. The shell exits 127
-// when the editor command does not exist and 126 when it cannot be run;
-// both usually mean a stale $VISUAL or $EDITOR, so name the setting.
+// editorErrText explains an editor failure for a toast. The shell's "not
+// found" and "not executable" exits (editor_unix.go, editor_windows.go)
+// usually mean a stale $VISUAL or $EDITOR, so name the setting.
 func editorErrText(err error) string {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		ed, source := editorSetting()
 		switch ee.ExitCode() {
-		case 127:
+		case exitCommandNotFound:
 			return fmt.Sprintf("editor: command not found: %s (from %s)", ed, source)
-		case 126:
+		case exitNotExecutable:
 			return fmt.Sprintf("editor: not executable: %s (from %s)", ed, source)
 		}
 	}

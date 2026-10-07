@@ -88,6 +88,17 @@ func ftsQuery(q string) string {
 	return strings.Join(terms, " ")
 }
 
+// semanticQuery is the text the semantic modes embed: the query's terms
+// with their trailing stars removed, joined by single spaces (ADR 0019).
+// The embedding should see the words, not the prefix syntax.
+func semanticQuery(q string) string {
+	var words []string
+	for _, st := range searchTerms(q) {
+		words = append(words, st.Text)
+	}
+	return strings.Join(words, " ")
+}
+
 // searchFilters builds the shared WHERE clauses for the text and semantic
 // search queries. Scoped to a channel, that channel's own equality clause is
 // enough (Search has already checked as may read it); unscoped, a DM is
@@ -285,7 +296,7 @@ func (b *Bus) rankedSearch(as string, in SearchInput) ([]SearchHit, bool, error)
 // semanticSearch ranks live memory revisions by dot product against the query
 // embedding, brute-force in Go over candidates selected by the SQL filters.
 func (b *Bus) semanticSearch(ctx context.Context, as string, in SearchInput) ([]SearchHit, error) {
-	qv, err := b.embedder.embed(ctx, []string{in.Query})
+	qv, err := b.embedder.embed(ctx, []string{semanticQuery(in.Query)})
 	if err != nil {
 		return nil, err
 	}

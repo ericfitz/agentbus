@@ -1,7 +1,12 @@
 package bus
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -147,5 +152,113 @@ func TestSearchRejectsStarOnlyQuery(t *testing.T) {
 	// A star that is not at the end of a word is plain text, not syntax.
 	if _, err := b.Search(sam, SearchInput{Query: "a*b *abc", Mode: "text"}); err != nil {
 		t.Fatalf("stars inside words must be searchable text: %v", err)
+	}
+}
+
+// recordingEmbeddings answers every input with the same unit vector and
+// records the inputs it was asked to embed, so a test can see the exact
+// text a query embedded. Unlike fakeEmbeddings it does not check the key.
+func recordingEmbeddings() (*httptest.Server, func() []string) {
+	var mu sync.Mutex
+	var inputs []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		type item struct {
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		}
+		var data []item
+		mu.Lock()
+		for i, s := range req.Input {
+			inputs = append(inputs, s)
+			data = append(data, item{Index: i, Embedding: []float64{1, 0, 0}})
+		}
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), inputs...)
+	}
+}
+
+// TestSearchPrefixMatchesFullHashInEveryMode (ADR 0019): a memory holding
+// a full 40-character commit hash is found by its short hash plus * in
+// text, semantic and both modes; the semantic modes embed the bare short
+// hash, never the star; and with the endpoint gone, both falls back to
+// text and still prefix-matches.
+func TestSearchPrefixMatchesFullHashInEveryMode(t *testing.T) {
+	srv, inputs := recordingEmbeddings()
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	const hash = "e159e8c3b7d2a1f4e5c6d7b8a9f0e1d2c3b4a5f6"
+	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "fixed in ericfitz/agentbus@" + hash}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "unrelated note"}); err != nil {
+		t.Fatal(err)
+	}
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"text", "semantic", "both"} {
+		r, err := b.Search(sam, SearchInput{Query: "e159e8c*", Mode: mode})
+		if err != nil || r.SemanticUnavailable || len(r.Hits) == 0 || !strings.Contains(r.Hits[0].Content, hash) {
+			t.Fatalf("mode %s: %+v %v", mode, r, err)
+		}
+	}
+	var sawBare bool
+	for _, in := range inputs() {
+		if strings.Contains(in, "*") {
+			t.Fatalf("embedded text must not carry the prefix star: %q", in)
+		}
+		if in == "e159e8c" {
+			sawBare = true
+		}
+	}
+	if !sawBare {
+		t.Fatalf("semantic modes must embed the bare term, embedded: %q", inputs())
+	}
+	// Endpoint gone: both falls back to text and the prefix still matches.
+	srv.Close()
+	r, err := b.Search(sam, SearchInput{Query: "e159e8c*", Mode: "both"})
+	if err != nil || !r.SemanticUnavailable || len(r.Hits) != 1 || !strings.Contains(r.Hits[0].Content, hash) {
+		t.Fatalf("fallback after the endpoint is gone: %+v %v", r, err)
+	}
+}
+
+// A query of only stars is refused before anything is embedded (ADR 0019):
+// the endpoint must see no request from semantic or both mode.
+func TestSearchStarOnlyQueryNeverEmbeds(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		t.Errorf("embedder called for a star-only query: %s", r.URL.Path)
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	for _, mode := range []string{"semantic", "both"} {
+		for _, q := range []string{"*", "** *"} {
+			if _, err := b.Search(sam, SearchInput{Query: q, Mode: mode}); err == nil {
+				t.Fatalf("mode %s query %q: want a validation error", mode, q)
+			}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("embedder was called %d times", calls)
 	}
 }

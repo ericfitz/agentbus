@@ -206,19 +206,25 @@ release_notes_args() {
 # (rerun that replaces public assets). releases/latest never resolves to a
 # draft, so the install scripts cannot see a partial release.
 ensure_draft() {
-    local draft
-    if draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>&1)"; then
-        if [[ "$draft" == true ]]; then
-            echo "==> Reusing draft release $TAG"
-        else
-            echo "warning: release $TAG is already published; continuing replaces its public assets" >&2
-            PUBLISHED=1
-        fi
+    # stdout (the isDraft value) and stderr are kept apart: stderr noise on a
+    # successful call (GH_DEBUG, a gh warning) must not read as "published".
+    local draft errfile err rc=0
+    errfile="$(mktemp)"
+    draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>"$errfile")" || rc=$?
+    err="$(cat "$errfile")"; rm -f "$errfile"
+    if [[ "$rc" == 0 ]]; then
+        case "$draft" in
+            true) echo "==> Reusing draft release $TAG" ;;
+            false)
+                echo "warning: release $TAG is already published; continuing replaces its public assets" >&2
+                PUBLISHED=1 ;;
+            *) fail "could not query release $TAG: unexpected output from gh: $draft" ;;
+        esac
         return
     fi
     # Only "not found" means there is no release; any other error (network,
     # rate limit, token) must not create a second draft for the same tag.
-    [[ "$draft" == *"release not found"* ]] || fail "could not query release $TAG: $draft"
+    [[ "$err" == *"release not found"* ]] || fail "could not query release $TAG: ${err:-$draft}"
     echo "==> Creating draft release $TAG"
     local notes=() line
     while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)

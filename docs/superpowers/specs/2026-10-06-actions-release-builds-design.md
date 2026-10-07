@@ -70,12 +70,6 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
   not matching `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`, not present
   in the repository, or not equal to `github.ref_name` (the run must be
   dispatched on the tag).
-
-> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
-> Tags are stable `vX.Y.Z` only, both in `release.sh` (`parse_args`) and in
-> `release-build.yml`; the pre-release suffix allowed by the regex above and the
-> `-rc.1` dry run below were not implemented. A dry run uses the next stable tag
-> with `release.sh --no-publish`, then deletes the draft and the tag.
 - **build** job, `permissions: contents: read`, matrix:
 
   | runner | GOOS/GOARCH | archive |
@@ -98,6 +92,12 @@ The local Linux and Windows builds, #34's Docker smoke test and #35's
   in a comment); no secrets beyond `GITHUB_TOKEN`; only `publish` can write.
 - The repository is public, so runners and the public Sigstore instance are
   free.
+
+> **Implementation note (2026-10-07, controller ruling pending Eric's review):**
+> Tags are stable `vX.Y.Z` only, both in `release.sh` (`parse_args`) and in
+> `release-build.yml`; the pre-release suffix allowed by the regex above and the
+> `-rc.1` dry run below were not implemented. A dry run uses the next stable tag
+> with `release.sh --no-publish`, then deletes the draft and the tag.
 
 ## Documentation
 

@@ -266,7 +266,7 @@ gh() {
     printf '%s\n' "gh $*" >> "$GH_LOG"
     case "$1 $2" in
         "run list") local expr=""; while (($#)); do [[ "$1" == --jq ]] && expr="$2"; shift; done; jq -r "$expr" "$GH_RUNS" ;;
-        "release view") [[ -n "${GH_VIEW:-}" ]] && { printf '%s\n' "$GH_VIEW"; return 0; }; echo "${GH_VIEW_ERR:-release not found}" >&2; return 1 ;;
+        "release view") [[ -n "${GH_VIEW:-}" ]] && { [[ -n "${GH_VIEW_STDERR:-}" ]] && echo "$GH_VIEW_STDERR" >&2; printf '%s\n' "$GH_VIEW"; return 0; }; echo "${GH_VIEW_ERR:-release not found}" >&2; return 1 ;;
         "workflow view") return "${GH_RC_WORKFLOW:-${GH_RC:-0}}" ;;
         "workflow run") [[ -n "${GH_RUNS_AFTER:-}" ]] && cp "$GH_RUNS_AFTER" "$GH_RUNS"; return "${GH_RC:-0}" ;;
         "release create"|"release edit"|"release download"|"run watch"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
@@ -314,6 +314,9 @@ check dispatch-failure-stops 1 "could not dispatch release-build.yml on v1.2.3" 
 check draft-created 0 "Creating draft release" -- with_stub ": > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--verify-tag.*--draft' '$WORK/gh.log'"
 check draft-other-error-fails 1 "could not query release v1.2.3: HTTP 502" -- with_stub ": > '$WORK/gh.log'; GH_VIEW_ERR='HTTP 502: bad gateway' ensure_draft; rc=\$?; ! grep -q 'release create' '$WORK/gh.log' && exit \$rc"
 check draft-reused 0 "Reusing draft release" -- with_stub "GH_VIEW=true ensure_draft && [[ \$PUBLISHED == 0 ]]"
+check draft-reused-despite-stderr-noise 0 "Reusing draft release" -- with_stub "GH_VIEW=true GH_VIEW_STDERR='warning: x' ensure_draft && [[ \$PUBLISHED == 0 ]]"
+check draft-published-despite-stderr-noise 0 "already published" -- with_stub "GH_VIEW=false GH_VIEW_STDERR='warning: x' ensure_draft && [[ \$PUBLISHED == 1 ]]"
+check draft-garbage-stdout-fails 1 "unexpected output" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=\$'true\nwarning: x' ensure_draft; rc=\$?; ! grep -q 'release create' '$WORK/gh.log' && exit \$rc"
 check draft-reuse-no-create 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft; ! grep -q 'release create' '$WORK/gh.log'"
 check draft-already-published 0 "already published" -- with_stub "GH_VIEW=false ensure_draft && [[ \$PUBLISHED == 1 ]]"
 check watch-fails-with-url 1 "actions/runs/102" -- with_stub "RUN_ID=102 GH_RC=1 watch_run"

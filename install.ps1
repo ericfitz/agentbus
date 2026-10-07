@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # BEGIN agentbus release public key
 $PubKeyPem = @'
 -----BEGIN PUBLIC KEY-----
-REPLACED-BY-release/embed-key.sh
+MCowBQYDK2VwAyEAx7/YtImf3eM+x0+mN3CEmMiGsSZ404MWe0G7UModNsQ=
 -----END PUBLIC KEY-----
 '@
 # END agentbus release public key

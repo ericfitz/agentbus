@@ -4,7 +4,7 @@
 #   AGENTBUS_VERSION        vX.Y.Z to install (default: the latest release)
 #   AGENTBUS_INSTALL_DIR    absolute directory (default: %LocalAppData%\Programs\agentbus)
 #   AGENTBUS_BASE_URL       mirror or test server (default: https://github.com/ericfitz/agentbus)
-#   AGENTBUS_SKIP_SIGNATURE 1 skips the OpenSSL signature check (the hash is still checked)
+#   AGENTBUS_SKIP_SIGNATURE 1 skips the OpenSSL signature check (the checksum is still verified)
 #   AGENTBUS_TEST_OSARCH    test hook: pretend the OS architecture is this value
 # Downloads the zip, SHA256SUMS and SHA256SUMS.sig, verifies the Ed25519
 # signature with OpenSSL 3 (Git for Windows ships one) and the public key
@@ -89,30 +89,34 @@ function Resolve-Tag([string]$Base) {
         if ($loc) { $tag = ($loc.TrimEnd('/') -split '/')[-1] }
         if (-not $tag) { throw "agentbus install: could not determine the latest release from $Base/releases/latest; set AGENTBUS_VERSION=vX.Y.Z" }
     }
+    if ($tag.Contains("`n")) { throw 'agentbus install: version must look like vX.Y.Z, got a value containing a newline' }
     if ($tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+\z') { throw "agentbus install: version must look like vX.Y.Z, got '$tag'" }
     return $tag
 }
 
 function Get-Asset([string]$Url, [string]$Out) {
-    try { Invoke-WebRequest -Uri $Url -OutFile $Out -UseBasicParsing } catch { throw "agentbus install: download failed: $Url" }
+    $pp = $ProgressPreference; $ProgressPreference = 'SilentlyContinue' # Windows PowerShell 5.1 crawls with the progress bar
+    try { Invoke-WebRequest -Uri $Url -OutFile $Out -UseBasicParsing } catch { throw "agentbus install: download failed: $Url" } finally { $ProgressPreference = $pp }
 }
 
-function Test-Signature([string]$OpenSsl, [string]$Dir) {
+function Test-Signature([string]$OpenSsl, [string]$Dir, [string]$Base) {
     $key = Join-Path $Dir 'release.pub'
     # The placeholder is assembled here so no other line of this file equals
     # the one release.sh and embed-key.sh look for.
     $placeholder = @('-----BEGIN PUBLIC KEY-----', ('REPLACED-BY-' + 'release/embed-key.sh'), '-----END PUBLIC KEY-----') -join "`n"
     if ((($PubKeyPem -replace "`r", '').Trim()) -ceq $placeholder) {
-        throw 'agentbus install: this copy of install.ps1 has no embedded release key; fetch it from the release page (releases/latest/download/install.ps1)'
+        throw "agentbus install: this copy of install.ps1 has no embedded release key; fetch it from $Base/releases/latest/download/install.ps1"
     }
     [IO.File]::WriteAllText($key, ($PubKeyPem -replace "`r", '') + "`n")
     # Windows PowerShell 5.1 turns captured stderr into a terminating error
     # under 'Stop'; openssl writes to stderr on a bad signature, so relax it
     # for this one call and report through the exit code.
     $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $OpenSsl pkeyutl -verify -rawin -pubin -inkey $key -in (Join-Path $Dir 'SHA256SUMS') -sigfile (Join-Path $Dir 'SHA256SUMS.sig') 2>&1 | Out-Null
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = $eap
+    $global:LASTEXITCODE = 1 # a launch failure must not read a stale 0
+    try {
+        & $OpenSsl pkeyutl -verify -rawin -pubin -inkey $key -in (Join-Path $Dir 'SHA256SUMS') -sigfile (Join-Path $Dir 'SHA256SUMS.sig') 2>&1 | Out-Null
+        $code = $LASTEXITCODE
+    } catch { $code = 1 } finally { $ErrorActionPreference = $eap }
     if ($code -ne 0) { throw "agentbus install: signature check of SHA256SUMS failed: the download is damaged, tampered with, or signed with a key this script does not know" }
 }
 
@@ -136,7 +140,11 @@ function Install-Binary([string]$Dir, [string]$Asset, [string]$InstallDir) {
     Expand-Archive -LiteralPath (Join-Path $Dir $Asset) -DestinationPath $extract -Force
     $new = Join-Path $extract 'agentbus.exe'
     if (-not (Test-Path -LiteralPath $new)) { throw "agentbus install: $Asset does not contain agentbus.exe" }
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    try {
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        $probe = Join-Path $InstallDir ('.agentbus-write-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        [IO.File]::WriteAllText($probe, 'x'); Remove-Item -LiteralPath $probe -Force
+    } catch { throw "agentbus install: cannot write to $InstallDir. Set AGENTBUS_INSTALL_DIR to a writable directory" }
     $target = Join-Path $InstallDir 'agentbus.exe'
     if (Test-Path -LiteralPath $target -PathType Container) { throw "agentbus install: $target is a directory; remove it or choose another AGENTBUS_INSTALL_DIR" }
     $script:Upgrade = Test-Path -LiteralPath $target
@@ -165,9 +173,10 @@ function Main {
     $skip = $false
     switch ("$env:AGENTBUS_SKIP_SIGNATURE") {
         ''      { $skip = $false }
-        '1'     { $skip = $true; Write-Warning 'AGENTBUS_SKIP_SIGNATURE=1: skipping the signature check; the hash is still verified' }
+        '1'     { $skip = $true; Write-Warning 'AGENTBUS_SKIP_SIGNATURE=1: skipping the signature check; the checksum is still verified' }
         default { throw "agentbus install: AGENTBUS_SKIP_SIGNATURE must be 1 or unset, got '$env:AGENTBUS_SKIP_SIGNATURE'" }
     }
+    if (-not $env:AGENTBUS_INSTALL_DIR -and -not $env:LocalAppData) { throw 'agentbus install: LocalAppData is not set; set AGENTBUS_INSTALL_DIR to an absolute directory' }
     $installDir = if ($env:AGENTBUS_INSTALL_DIR) { $env:AGENTBUS_INSTALL_DIR } else { Join-Path $env:LocalAppData 'Programs\agentbus' }
     $installDir = $installDir.TrimEnd('\', '/')
     if ($installDir -match '^[A-Za-z]:$') { $installDir += '\' }
@@ -184,12 +193,15 @@ function Main {
         Get-Asset "$dl/SHA256SUMS" (Join-Path $tmp 'SHA256SUMS')
         if (-not $skip) {
             Get-Asset "$dl/SHA256SUMS.sig" (Join-Path $tmp 'SHA256SUMS.sig')
-            Test-Signature $openssl $tmp
+            Test-Signature $openssl $tmp $base
         }
         Test-Hash $tmp $asset
         Install-Binary $tmp $asset $installDir
         Add-UserPath $installDir
-        $v = (& (Join-Path $installDir 'agentbus.exe') version | Select-Object -First 1)
+        $global:LASTEXITCODE = 1
+        $v = $null
+        try { $v = (& (Join-Path $installDir 'agentbus.exe') version | Select-Object -First 1) } catch { $v = $null }
+        if ($LASTEXITCODE -ne 0 -or -not $v) { throw "agentbus install: $(Join-Path $installDir 'agentbus.exe') does not run" }
         Write-Host "installed agentbus $v to $installDir\agentbus.exe"
         Write-Host 'next: agentbus init --global (once per machine), then agentbus init inside each repository'
         if ($script:Upgrade) { Write-Host 'upgraded: restart every harness session and the TUI to pick up the new binary' }
@@ -199,4 +211,4 @@ function Main {
 }
 
 # Dot-sourcing (. .\install.ps1) loads the functions without installing.
-if ($MyInvocation.InvocationName -ne '.') { Main @args }
+if ($MyInvocation.InvocationName -ne '.' -or -not $PSCommandPath) { Main @args }

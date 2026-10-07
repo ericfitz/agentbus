@@ -1,25 +1,65 @@
 # Installing Agentbus
 
-## Install with Homebrew (macOS)
+## macOS: Homebrew
 
 ```sh
 brew install ericfitz/tap/agentbus
 ```
 
 The formula installs a signed, notarized universal binary from the matching
-[GitHub release](https://github.com/ericfitz/agentbus/releases). Maintainers
-cut a release with `release/release.sh <tag>` from a tagged, clean checkout.
+[GitHub release](https://github.com/ericfitz/agentbus/releases).
 
-## Or, Build from source
+## Linux: install script
 
 ```sh
-git clone https://github.com/ericfitz/agentbus.git
-cd agentbus
-CGO_ENABLED=0 go build -o agentbus .
+curl -fsSL https://github.com/ericfitz/agentbus/releases/latest/download/install.sh | sh
 ```
 
-Run this from the repository root. Put the resulting binary somewhere on your
-`PATH` (for example `~/.local/bin/agentbus`) so harnesses can find it by name.
+Installs `agentbus` into `~/.local/bin` without root, for x86_64 and
+aarch64. The script downloads the release tarball with `SHA256SUMS` and
+`SHA256SUMS.sig`, checks the Ed25519 signature with the public key built into
+the script (OpenSSL 3 is required: `openssl` or `openssl3` on `PATH`), checks
+the tarball's checksum, then replaces the binary atomically. Rerun it to
+upgrade; restart harness sessions and the TUI afterwards.
+
+| Variable | Meaning |
+|---|---|
+| `AGENTBUS_VERSION` | Install this tag (`vX.Y.Z`) instead of the latest release. |
+| `AGENTBUS_INSTALL_DIR` | Absolute target directory (default `$HOME/.local/bin`). For a system-wide install: `curl -fsSL <url> \| sudo env AGENTBUS_INSTALL_DIR=/usr/local/bin sh`. The script never runs `sudo` itself. |
+| `AGENTBUS_BASE_URL` | A mirror of `https://github.com/ericfitz/agentbus`. |
+| `AGENTBUS_SKIP_SIGNATURE` | `1` skips only the signature check (for hosts with OpenSSL 1.1); the checksum is still verified. Any other value is rejected. |
+
+The script stops with a message instead of guessing when it is given
+positional arguments, an `AGENTBUS_VERSION` that is not exactly `vX.Y.Z`, a
+relative `AGENTBUS_INSTALL_DIR`, no `HOME` and no `AGENTBUS_INSTALL_DIR`, a
+copy without an embedded release key, or when `<dir>/agentbus` is a directory.
+
+Verifying a download by hand, with the public key from
+[`release/agentbus-release-ed25519.pub`](../release/agentbus-release-ed25519.pub):
+
+```sh
+openssl pkeyutl -verify -rawin -pubin -inkey agentbus-release-ed25519.pub -in SHA256SUMS -sigfile SHA256SUMS.sig
+grep agentbus-vX.Y.Z-linux-amd64.tar.gz SHA256SUMS | sha256sum -c
+```
+
+Homebrew on Linux works too: `brew install ericfitz/tap/agentbus` installs
+the static amd64 or arm64 binary.
+
+## Or, build from source
+
+```sh
+CGO_ENABLED=0 go install -trimpath github.com/ericfitz/agentbus@latest
+```
+
+This installs the latest tagged source into `$(go env GOBIN)` (default
+`~/go/bin`); `agentbus version` prints the version compiled into the source,
+which may lag the tag. From a clone, `CGO_ENABLED=0 go build -o agentbus .`
+at the repository root does the same. Put the binary on your `PATH` so
+harnesses can find it by name.
+
+Maintainers cut a release with `release/release.sh <tag>`; every release
+carries `SHA256SUMS` over all archives and `install.sh`, signed with the
+Ed25519 release key.
 
 ## Before first run: bootstrap with `agentbus init`
 
@@ -392,7 +432,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   their registration and must register again. Message sequence numbers keep
   counting up across a reset rather than restarting at 1.
 - Logs never go to stdout or stderr. The default data directory is
-  `~/.local/share/agentbus`.
+  `~/.local/share/agentbus` on macOS and Linux.
 
 ## TUI theme
 

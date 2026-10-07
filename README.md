@@ -83,8 +83,14 @@ macOS, with Homebrew:
 brew install ericfitz/tap/agentbus
 ```
 
-Or build from source with `CGO_ENABLED=0 go build -o agentbus .` and put the
-binary on your `PATH`.
+Linux (x86_64 or aarch64), without root:
+
+```sh
+curl -fsSL https://github.com/ericfitz/agentbus/releases/latest/download/install.sh | sh
+```
+
+Both verify what they download; see the [install guide](docs/install.md) for
+Homebrew on Linux, the installer's variables, and building from source.
 
 Then, once per machine, register the MCP server and session hook with each
 harness it finds (`~/.claude`, `~/.codex`, `~/.grok`):

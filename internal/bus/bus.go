@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -104,10 +105,22 @@ func SQLiteDSN(dataDir string) (string, error) {
 	}
 	u := url.URL{
 		Scheme:   "file",
-		Path:     abs,
+		Path:     sqliteURIPath(filepath.ToSlash(abs)),
 		RawQuery: "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
 	}
 	return u.String(), nil
+}
+
+// sqliteURIPath turns a slash-separated absolute path into a URI path. A
+// Windows path (C:/...) gains a leading slash so the DSN reads
+// file:///C:/...; without it url.URL writes file://C:..., and SQLite parses
+// C: as the URI authority and refuses it. A UNC path (//server/share/...)
+// becomes file:////server/share/..., which is untested.
+func sqliteURIPath(slashed string) string {
+	if strings.HasPrefix(slashed, "/") {
+		return slashed
+	}
+	return "/" + slashed
 }
 
 func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {

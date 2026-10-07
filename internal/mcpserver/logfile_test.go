@@ -168,8 +168,8 @@ func TestRotatingWriterCoordinatesAcrossProcessesEnforcesRetentionCap(t *testing
 }
 
 // TestRotatingWriterRecoversAfterFailedRotate covers fix round 1 finding 3:
-// after w.f.Close() succeeds but a rename during rotation fails, the next
-// Write must reopen path rather than write through the closed handle.
+// after the log is closed for rotation but a rename fails, the next Write
+// must reopen path and append.
 func TestRotatingWriterRecoversAfterFailedRotate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agentbus.log")

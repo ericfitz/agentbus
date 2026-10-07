@@ -14,18 +14,19 @@ import (
 // rotatingWriter appends to path and rotates to path.1 .. path.(keep-1) when
 // the file exceeds maxBytes. Multiple agentbus processes append to the same
 // log file, so every Write holds an exclusive cross-process flock
-// (path+".lock") for its whole critical section: reopen path if another
-// process rotated it since our last write, rotate if the fresh size calls
-// for it, then append. The lock is flock on Unix and LockFileEx on Windows
-// (internal/filelock). One lock per log line is fine for a local log file.
+// (path+".lock") for its whole critical section: open path, rotate if its
+// size calls for it, append, close. The lock is flock on Unix and LockFileEx
+// on Windows (internal/filelock). No handle stays open outside the lock:
+// Windows refuses to rename a file another process holds open (Go opens
+// files without FILE_SHARE_DELETE), so a long-lived handle would block every
+// other process's rotation. One open and one lock per log line is fine for
+// a local log file.
 type rotatingWriter struct {
 	path     string
 	maxBytes int64
 	keep     int
 
 	mu sync.Mutex // process-local: makes the critical section visible to the race detector, which can't see flock's cross-process ordering
-	f  *os.File
-	fi os.FileInfo // stat result from when f was opened, compared via os.SameFile to detect a rotation by another process
 }
 
 func (w *rotatingWriter) Write(p []byte) (int, error) {
@@ -38,25 +39,34 @@ func (w *rotatingWriter) Write(p []byte) (int, error) {
 	}
 	defer unlock()
 
-	if err := w.ensureCurrent(); err != nil {
-		return 0, err
-	}
-	st, err := w.f.Stat()
+	f, err := w.open()
 	if err != nil {
 		return 0, err
 	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return 0, err
+	}
 	if st.Size()+int64(len(p)) > w.maxBytes {
+		if err := f.Close(); err != nil {
+			return 0, err
+		}
 		if err := w.rotate(); err != nil {
 			return 0, err
 		}
-		if err := w.ensureCurrent(); err != nil {
+		if f, err = w.open(); err != nil {
 			return 0, err
 		}
 	}
-	return w.f.Write(p)
+	n, err := f.Write(p)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return n, err
 }
 
-// lockAcrossProcesses takes an exclusive flock on path+".lock" and returns a
+// lockAcrossProcesses takes the exclusive cross-process lock and returns a
 // func that releases it. Closing the lock file also releases the flock (it
 // is scoped to the open file description), so the returned func just closes it.
 func (w *rotatingWriter) lockAcrossProcesses() (func(), error) {
@@ -71,43 +81,18 @@ func (w *rotatingWriter) lockAcrossProcesses() (func(), error) {
 	return func() { _ = lf.Close() }, nil
 }
 
-// ensureCurrent opens w.path if this is the first write, or reopens it if
-// another process rotated the file since our last write (its (dev, ino) no
-// longer match what we have open). Must be called while holding the
-// cross-process lock.
-func (w *rotatingWriter) ensureCurrent() error {
-	if w.f != nil {
-		if fi, err := os.Stat(w.path); err == nil && os.SameFile(fi, w.fi) {
-			return nil // still the file we have open
-		}
-		_ = w.f.Close()
-		w.f = nil
-	}
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	fi, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return err
-	}
-	w.f = f
-	w.fi = fi
-	return nil
+// open opens path for appending, creating it if a rotation (ours or another
+// process's) moved it away. Must be called while holding the cross-process
+// lock.
+func (w *rotatingWriter) open() (*os.File, error) {
+	return os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }
 
 // rotate shifts path.1..path.(keep-1) up by one, archives the current file
 // as path.1, and drops the file beyond keep. Must be called while holding
-// the cross-process lock; leaves w.f closed and nil (ensureCurrent reopens
-// it, including after a rotate that partially failed).
+// the cross-process lock, with path closed; the next Write reopens path,
+// including after a rotate that partially failed.
 func (w *rotatingWriter) rotate() error {
-	if w.f != nil {
-		if err := w.f.Close(); err != nil {
-			return err
-		}
-		w.f = nil
-	}
 	for i := w.keep - 1; i >= 1; i-- {
 		if err := os.Rename(fmt.Sprintf("%s.%d", w.path, i), fmt.Sprintf("%s.%d", w.path, i+1)); err != nil && !os.IsNotExist(err) {
 			return err

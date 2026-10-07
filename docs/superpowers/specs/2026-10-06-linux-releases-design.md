@@ -21,8 +21,8 @@ and notarizes darwin binaries alone, and the formula declares
 1. **Targets:** cloud servers (amd64, arm64) and Linux desktops.
 2. **Distribution:** release tarballs plus an `install.sh` that installs to
    `~/.local/bin` without root (the pattern Claude Code's and Codex's
-   Linux installers use), with a Homebrew formula (host OS/CPU conditionals) as a secondary
-   path. No .deb or .rpm, and no apt or dnf repository.
+   Linux installers use), with Homebrew `on_linux` blocks as a secondary
+   path. No .deb or .rpm, and no apt or dnf repository (superseded by decision 10).
 3. **Verification:** one `SHA256SUMS` over every tarball, signed with an
    Ed25519 key through OpenSSL 3, verified by `install.sh` with the public
    key built in. Linux binaries are built locally by `release.sh`.
@@ -59,7 +59,7 @@ Approved by Eric on 2026-10-07.
 9. **`AGENTBUS_SIGNING_KEY`** overrides the default signing key path
    `~/.keys/agentbus-release-ed25519.pem`. The path is passed only to
    `openssl`.
-10. **Formula layout A (user, 2026-10-07).** The formula uses top-level
+10. **Formula layout A.** The formula uses top-level
     `OS`/`Hardware::CPU` conditionals (not `on_macos`/`on_linux` blocks) so it
     passes `brew style` and `brew audit --strict`. Trade-off: `brew fetch --os
     linux` on a Mac fetches the macOS tarball, because the conditionals read
@@ -130,7 +130,7 @@ State:
 ```
 umask 077
 "$(brew --prefix openssl@3)/bin/openssl" genpkey -algorithm ed25519 -out ~/.keys/agentbus-release-ed25519.pem
-"$(brew --prefix openssl@3)/bin/openssl" pkey -in ~/.keys/agentbus-release-ed25519.pem -pubout -out /Users/efitz/Projects/agentbus/release/agentbus-release-ed25519.pub
+"$(brew --prefix openssl@3)/bin/openssl" pkey -in ~/.keys/agentbus-release-ed25519.pem -pubout -out release/agentbus-release-ed25519.pub
 ```
 
 The public key is committed and embedded in `install.sh`. Agents never read

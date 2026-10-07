@@ -26,11 +26,11 @@ Rejected: Linux only (Windows would keep a second, unattested build path).
 
 Approved by Eric on 2026-10-07.
 
-1. **Stable tags only.** `release.sh` and `release-build.yml` accept only
+3. **Stable tags only.** `release.sh` and `release-build.yml` accept only
    `vX.Y.Z` tags; there are no release candidates. A dry run uses the next
    stable tag with `release.sh --no-publish` (draft only), and a tag is final
    once pushed.
-2. **Workflow on the default branch.** `release.sh` preflight, before any
+4. **Workflow on the default branch.** `release.sh` preflight, before any
    build, requires `release-build.yml` to exist on the default branch of the
    repository (`gh workflow view`).
 

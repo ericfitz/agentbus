@@ -101,7 +101,7 @@ func TestNormalizeTags(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run TestNormalizeTags -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run TestNormalizeTags -count=1`
 Expected: FAIL, first line `tag "env:prod" must be 1-20 characters of a-z, 0-9, _ or -` (the old rule rejects the colon).
 
 - [ ] **Step 3: Implement the rule**
@@ -157,16 +157,16 @@ func NormalizeTags(tags []string) ([]string, error) {
 
 - [ ] **Step 4: Run the package tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestNormalizeTags|TestSendStoresTags|TestEditMemoryTags' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestNormalizeTags|TestSendStoresTags|TestEditMemoryTags' -count=1`
 Expected: PASS.
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./... -count=1 2>&1 | rg -n 'FAIL|ok' `
+Run: `cd <repo root> && go test ./... -count=1 2>&1 | rg -n 'FAIL|ok' `
 Expected: `internal/repoconfig` FAILS (`TestTagsNormalizesDedupesAndReportsBad` expects `repo:tmi` and a 21-character tag to be rejected; Task 6 updates it). Every other package: `ok`. Record the repoconfig failure; do not fix it here.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tags take one colon, 32 characters, and drop _ (#20)"
+cd <repo root> && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tags take one colon, 32 characters, and drop _ (#20)"
 ```
 
 ---
@@ -261,7 +261,7 @@ func TestMatchTagAgreesWithSQL(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestNormalizeTagPatterns|TestMatchTagAgreesWithSQL' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestNormalizeTagPatterns|TestMatchTagAgreesWithSQL' -count=1`
 Expected: build FAIL, `undefined: NormalizeTagPatterns`, `undefined: MatchTag`, `undefined: tagRange`.
 
 - [ ] **Step 3: Implement**
@@ -330,13 +330,13 @@ func MatchTag(pattern, tag string) bool {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestNormalizeTagPatterns|TestMatchTagAgreesWithSQL' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestNormalizeTagPatterns|TestMatchTagAgreesWithSQL' -count=1`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tag patterns, their byte range, and MatchTag (#20)"
+cd <repo root> && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tag patterns, their byte range, and MatchTag (#20)"
 ```
 
 ---
@@ -429,7 +429,7 @@ func TestLegacyUnderscoreTagStaysReadableButNotFilterable(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestHistoryAndSearchMatchTagPatterns|TestLegacyUnderscoreTag' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestHistoryAndSearchMatchTagPatterns|TestLegacyUnderscoreTag' -count=1`
 Expected: FAIL in `TestHistoryAndSearchMatchTagPatterns` with a validation error naming `"env:*"` (History still calls `NormalizeTags`). `TestLegacyUnderscoreTag...` passes already (the stored row is read back as-is); keep it.
 
 - [ ] **Step 3: Implement**
@@ -464,13 +464,13 @@ Do not touch `Send` (`messages.go:341`) or `EditMemory` (`memories.go:133`): sto
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestHistoryAndSearchMatchTagPatterns|TestLegacyUnderscoreTag|TestSendStoresTagsAndHistorySearchFilter' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestHistoryAndSearchMatchTagPatterns|TestLegacyUnderscoreTag|TestSendStoresTagsAndHistorySearchFilter' -count=1`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/bus/tags.go internal/bus/tags_test.go internal/bus/messages.go internal/bus/search.go && git commit -m "feat(bus): history and search filter by tag patterns (#20)"
+cd <repo root> && git add internal/bus/tags.go internal/bus/tags_test.go internal/bus/messages.go internal/bus/search.go && git commit -m "feat(bus): history and search filter by tag patterns (#20)"
 ```
 
 ---
@@ -638,7 +638,7 @@ func TestMigrateV9FailureLeavesV9AndRetries(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestMigrateV9' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestMigrateV9' -count=1`
 Expected: FAIL. `schemaVersion` is still 9, so `Open` runs no migration: `TestMigrateV9AddsTagRanges` passes the version check and then `tagRanges` fails with `no such column: lo`; `TestMigrateV9FailureLeavesV9AndRetries` fails at `Open must fail when the migration step fails`.
 
 - [ ] **Step 3: Implement**
@@ -714,16 +714,16 @@ func addTagRanges(tx *sql.Tx) error {
 
 - [ ] **Step 4: Run the migration tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestMigrate' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestMigrate' -count=1`
 Expected: PASS, including `TestMigrateV2ToLatest` and `TestMigrateV4SplitsTagSets` (the chained cases that exercise the column check).
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -count=1`
 Expected: PASS. `SubscribeTags` still inserts without `lo`/`hi` (they default to `''`) and `tagCond` still joins on `mt.tag=st.tag`, so existing behavior is unchanged until Task 5.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/bus/schema.go internal/bus/migrate.go internal/bus/migrate_test.go && git commit -m "feat(bus): schema v10 adds tag_subscription_tags.lo and .hi (#20)"
+cd <repo root> && git add internal/bus/schema.go internal/bus/migrate.go internal/bus/migrate_test.go && git commit -m "feat(bus): schema v10 adds tag_subscription_tags.lo and .hi (#20)"
 ```
 
 ---
@@ -854,7 +854,7 @@ func TestTagSetWithOverlappingPatterns(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestTagCondUsesTagSeqIndex|TestTagSubscriptionPrefixPatterns|TestTagSetWithOverlappingPatterns' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestTagCondUsesTagSeqIndex|TestTagSubscriptionPrefixPatterns|TestTagSetWithOverlappingPatterns' -count=1`
 Expected: FAIL. `TestTagSubscriptionPrefixPatterns` fails at `SubscribeTags(kim, {"ENV:*", "failed"})` with a validation error (`SubscribeTags` still calls `NormalizeTags`); `TestTagCondUsesTagSeqIndex` fails for the prefix set the same way; `TestTagSetWithOverlappingPatterns` likewise.
 
 - [ ] **Step 3: Implement**
@@ -947,23 +947,23 @@ func matchedTags(sets []tagSet, m Message) []string {
 
 - [ ] **Step 4: Run the tag and migration tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestTag|TestMigrateV9|TestMixedChannelAndTagBatch|TestWaitWakesOnTagMatch|TestSubscribeTagsRefreshesStaleRow|TestUnsubscribeRejectsTagSource' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestTag|TestMigrateV9|TestMixedChannelAndTagBatch|TestWaitWakesOnTagMatch|TestSubscribeTagsRefreshesStaleRow|TestUnsubscribeRejectsTagSource' -count=1`
 Expected: PASS (including `TestMigrateV9AddsTagRanges` from Task 4, now that `env:*` stores its range).
 
 If `TestTagCondUsesTagSeqIndex` fails on the `(tag=? AND seq>?)` / `tag>? AND tag<?` substrings, print the plan and check it is a `MULTI-INDEX OR` with two `SEARCH mt USING COVERING INDEX message_tags_tag_seq` lines; the plan was verified against SQLite 3.54 with exactly this SQL. Do not fall back to a single `BETWEEN st.lo AND st.hi` join: that loses the exact seek the spec keeps.
 
-Run the benchmark once as a sanity check: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run '^$' -bench BenchmarkTagMatchFewMatches -benchtime 3x -count=1`
+Run the benchmark once as a sanity check: `cd <repo root> && go test ./internal/bus/ -run '^$' -bench BenchmarkTagMatchFewMatches -benchtime 3x -count=1`
 Expected: completes in the ~1 ms/op range reported in ADR 0009 (not tens of ms).
 
 - [ ] **Step 5: Run the whole bus package**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -count=1`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tag subscriptions match prefix patterns on the tag index (#20)"
+cd <repo root> && git add internal/bus/tags.go internal/bus/tags_test.go && git commit -m "feat(bus): tag subscriptions match prefix patterns on the tag index (#20)"
 ```
 
 ---
@@ -1039,7 +1039,7 @@ func TestTagSubscriptionsAcceptPatterns(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/repoconfig/ -run 'TestTagsNormalizesDedupesAndReportsBad|TestTagSubscriptionsAcceptPatterns' -count=1`
+Run: `cd <repo root> && go test ./internal/repoconfig/ -run 'TestTagsNormalizesDedupesAndReportsBad|TestTagSubscriptionsAcceptPatterns' -count=1`
 Expected: FAIL. `TestTagSubscriptionsAcceptPatterns` reports sets missing the pattern entries (`NormalizeTags` rejects `env:*`); `TestTagsNormalizesDedupesAndReportsBad` passes once Task 1 landed (it is updated here because Task 1 broke the old version; keep it).
 
 - [ ] **Step 3: Implement**
@@ -1098,13 +1098,13 @@ func (f *File) AddTagSet(tags []string) ([][]string, error) {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/repoconfig/ ./internal/cli/ -count=1`
+Run: `cd <repo root> && go test ./internal/repoconfig/ ./internal/cli/ -count=1`
 Expected: PASS (the CLI's `TestSubscribeTagsWritesTagSets` exercises `AddTagSet`/`RemoveTagSet`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/repoconfig/repoconfig.go internal/repoconfig/repoconfig_test.go && git commit -m "feat(repoconfig): tag_subscriptions take prefix patterns; tags follow the new rule (#20)"
+cd <repo root> && git add internal/repoconfig/repoconfig.go internal/repoconfig/repoconfig_test.go && git commit -m "feat(repoconfig): tag_subscriptions take prefix patterns; tags follow the new rule (#20)"
 ```
 
 ---
@@ -1177,7 +1177,7 @@ func TestTagDescriptionsStateRulesAndPatterns(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/mcpserver/ -run TestTagDescriptionsStateRulesAndPatterns -count=1`
+Run: `cd <repo root> && go test ./internal/mcpserver/ -run TestTagDescriptionsStateRulesAndPatterns -count=1`
 Expected: FAIL at `send description must contain "1-32 characters"`.
 
 - [ ] **Step 3: Implement**
@@ -1211,13 +1211,13 @@ In `main.go:225`: `tags := fs.String("tags", "", "comma-separated tag set to fol
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/mcpserver/ -count=1 && go build ./...`
+Run: `cd <repo root> && go test ./internal/mcpserver/ -count=1 && go build ./...`
 Expected: PASS; build ok.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/mcpserver/server.go internal/mcpserver/server_test.go main.go && git commit -m "feat(mcp): tag patterns in filter and subscription tools; new tag rule in descriptions (#20)"
+cd <repo root> && git add internal/mcpserver/server.go internal/mcpserver/server_test.go main.go && git commit -m "feat(mcp): tag patterns in filter and subscription tools; new tag rule in descriptions (#20)"
 ```
 
 ---
@@ -1289,7 +1289,7 @@ func TestTagPromptAcceptsPatternsAndPaneMatchesPrefix(t *testing.T) {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/tui/ -run TestTagPromptAcceptsPatternsAndPaneMatchesPrefix -count=1`
+Run: `cd <repo root> && go test ./internal/tui/ -run TestTagPromptAcceptsPatternsAndPaneMatchesPrefix -count=1`
 Expected: FAIL at `pane lacks "prod failure"` (the pane still compares tags exactly; subscription itself succeeds after Task 5).
 
 - [ ] **Step 3: Implement**
@@ -1339,13 +1339,13 @@ func (m *Model) tagPaneMsgs(ch string) []bus.Message {
 
 - [ ] **Step 4: Run the TUI tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/tui/ -count=1`
+Run: `cd <repo root> && go test ./internal/tui/ -count=1`
 Expected: PASS (`TestTagKeyOpensThePromptOnlyFromTheRail` checks only that the label starts with `tags`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/tui/tags.go internal/tui/tags_test.go && git commit -m "feat(tui): tag panes and the follow prompt take prefix patterns (#20)"
+cd <repo root> && git add internal/tui/tags.go internal/tui/tags_test.go && git commit -m "feat(tui): tag panes and the follow prompt take prefix patterns (#20)"
 ```
 
 ---
@@ -1444,7 +1444,7 @@ inactivity; re-`subscribe` with `tags` or re-`register`.
 
 Then in the session protocol, step 4, change `` filtering by the area's tag (`aws`, `go`, ...) when there is one `` to `` filtering by the area's tag (`area:aws`, `area:go`, ...) when there is one ``.
 
-Check nothing of the old rule is left: `cd /Users/efitz/Projects/agentbus && rg -n -F '20 characters' internal/cli/skills/using-agentbus/SKILL.md; rg -n -F '`_`' internal/cli/skills/using-agentbus/SKILL.md`
+Check nothing of the old rule is left: `cd <repo root> && rg -n -F '20 characters' internal/cli/skills/using-agentbus/SKILL.md; rg -n -F '`_`' internal/cli/skills/using-agentbus/SKILL.md`
 Expected: no output from either command.
 
 - [ ] **Step 2: Record the release-note wording (no file)**
@@ -1485,16 +1485,16 @@ to install the updated skill, then restart every harness session and
 
 - [ ] **Step 3: Check the docs against the code**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n '1-20|_ or -|_ and -' internal/ main.go README.md`
+Run: `cd <repo root> && rg -n '1-20|_ or -|_ and -' internal/ main.go README.md`
 Expected: no output (every statement of the old rule is gone; `internal/bus/embed.go:33` matches `[A-Za-z0-9_]` for shell exports, not tags, and does not match this pattern).
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/cli/ -count=1`
+Run: `cd <repo root> && go test ./internal/cli/ -count=1`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/efitz/Projects/agentbus && git add internal/cli/skills/using-agentbus/SKILL.md && git commit -m "docs(skill): keyed tag vocabulary and prefix patterns (#20)"
+cd <repo root> && git add internal/cli/skills/using-agentbus/SKILL.md && git commit -m "docs(skill): keyed tag vocabulary and prefix patterns (#20)"
 ```
 
 ---
@@ -1505,17 +1505,17 @@ cd /Users/efitz/Projects/agentbus && git add internal/cli/skills/using-agentbus/
 
 - [ ] **Step 1: Run the done gate**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify 2>&1 | tail -n 40`
+Run: `cd <repo root> && make verify 2>&1 | tail -n 40`
 Expected: build, build-all, vet, fmt-check, lint and test all succeed; the last lines are `ok` for every package and no `FAIL`. Fix anything it reports (gofmt alignment of the `migrations` map comment is the likely nit), re-run until clean, and keep the final output for the completion report.
 
 - [ ] **Step 2: Race detector over the bus package**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test -race ./internal/bus/ -count=1`
+Run: `cd <repo root> && go test -race ./internal/bus/ -count=1`
 Expected: PASS.
 
 - [ ] **Step 3: Confirm the tree is clean and the log is complete**
 
-Run: `cd /Users/efitz/Projects/agentbus && git status --short && git --no-pager log --oneline -9`
+Run: `cd <repo root> && git status --short && git --no-pager log --oneline -9`
 Expected: no uncommitted changes; nine commits from Tasks 1-9 on `main`. Do not push, tag or release; report the `make verify` result and stop.
 
 ---

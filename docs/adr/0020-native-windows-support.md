@@ -1,6 +1,6 @@
 # ADR 0020: Native Windows support
 
-Status: Accepted 2026-10-07. Human decision by Eric. Tracked in #35. Design:
+Status: Accepted 2026-10-07. Decided by the user. Tracked in #35. Design:
 [docs/superpowers/specs/2026-10-06-windows-support-design.md](../superpowers/specs/2026-10-06-windows-support-design.md).
 
 Supersedes in part [ADR 0001](0001-discussion-decisions.md) (native Windows

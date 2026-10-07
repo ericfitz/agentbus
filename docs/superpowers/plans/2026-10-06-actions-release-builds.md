@@ -175,7 +175,7 @@ jobs:
 
 - [ ] **Step 3: Lint**
 
-Run: `cd /Users/efitz/Projects/agentbus && actionlint .github/workflows/release-build.yml && make release-check 2>&1 | tail -5`
+Run: `cd <repo root> && actionlint .github/workflows/release-build.yml && make release-check 2>&1 | tail -5`
 Expected: actionlint silent (it validates the runner labels, the `needs` graph, the `${{ }}` expressions and the `shell: pwsh` steps); `release-check` passes.
 
 - [ ] **Step 4: Commit**
@@ -259,7 +259,7 @@ check no-publish-stops 0 "stopping before publish" -- with_stub ": > '$WORK/gh.l
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `release/test-release.sh`
 Expected: `removed-*` FAIL (functions still exist), `args-no-publish-*` FAIL, `workflow-at-tag-*`, `tag-pushed-*`, `find-run-*`, `draft-*`, `watch-*`, `download-*`, `attest-*`, `no-publish-*` FAIL (undefined).
 
 - [ ] **Step 3: Rewrite the affected parts of `release/release.sh`.** Header comment becomes:
@@ -465,7 +465,7 @@ main() {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && release/test-release.sh && shellcheck release/*.sh`
+Run: `cd <repo root> && release/test-release.sh && shellcheck release/*.sh`
 Expected: every new case PASS; `test-release: 61 passed, 0 failed` (37 from #35 minus the two `pe-*` cases plus 26 here); shellcheck silent.
 
 - [ ] **Step 5: Commit**
@@ -512,7 +512,7 @@ ericfitz/agentbus`). The signed `SHA256SUMS` is unchanged (#36).
 
 - [ ] **Step 4: Check the claims**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n 'attest-build-provenance|ubuntu-24.04-arm|windows-11-arm' .github/workflows/release-build.yml && rg -n 'gh attestation verify' docs/install.md release/release.sh`
+Run: `cd <repo root> && rg -n 'attest-build-provenance|ubuntu-24.04-arm|windows-11-arm' .github/workflows/release-build.yml && rg -n 'gh attestation verify' docs/install.md release/release.sh`
 Expected: lines in both.
 
 - [ ] **Step 5: Commit**
@@ -528,7 +528,7 @@ git commit -m "docs: attestation verification and the Actions release flow"
 
 - [ ] **Step 1: Gates**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify && make release-check`
+Run: `cd <repo root> && make verify && make release-check`
 Expected: `verify: OK`; `test-release: 61 passed, 0 failed`; `test-render: OK`; `test-install: ... 0 failed`; actionlint silent; the pin check silent.
 
 - [ ] **Step 2: Self-test commands for the report**

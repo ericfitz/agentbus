@@ -182,7 +182,7 @@ Change `publish`'s `needs: [validate, build]` to `needs: [validate, build, packa
 
 - [ ] **Step 2: Lint and pin check**
 
-Run: `cd /Users/efitz/Projects/agentbus && actionlint .github/workflows/release-build.yml && if rg -n 'uses: .*@v[0-9]' .github/workflows/; then echo UNPINNED; fi && rg -n 'id: (package-windows-zip)' .github/workflows/release-build.yml; echo "removed-check exit=$?"`
+Run: `cd <repo root> && actionlint .github/workflows/release-build.yml && if rg -n 'uses: .*@v[0-9]' .github/workflows/; then echo UNPINNED; fi && rg -n 'id: (package-windows-zip)' .github/workflows/release-build.yml; echo "removed-check exit=$?"`
 Expected: actionlint silent; no `UNPINNED`; the last `rg` finds nothing (`removed-check exit=1`).
 
 - [ ] **Step 3: Commit**
@@ -245,7 +245,7 @@ check render-notes-file-on 0 "" -- with_vars "" on "render_notes && grep -q 'fro
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `release/test-release.sh`
 Expected: `ws-*` FAIL (flag unknown), `notes-*` and `vars-*` and `render-notes-*` FAIL (undefined), `removed-release-notes-args` FAIL.
 
 - [ ] **Step 3: Implement in `release/release.sh`.** Globals, after `WORKFLOW=`:
@@ -343,7 +343,7 @@ Because `publish_release` (#36) runs `update_tap`, `update_scoop` and `submit_wi
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && release/test-release.sh && shellcheck release/*.sh`
+Run: `cd <repo root> && release/test-release.sh && shellcheck release/*.sh`
 Expected: every `ws-*`, `notes-*`, `vars-*`, `render-notes-*` case PASS; `test-release: 78 passed, 0 failed` (61 from #36 minus the two `notes-*` cases plus 19 here); shellcheck silent. The #36 `draft-*` stub cases still pass because the stub answers `release edit` with `GH_RC` and `render_notes` is not called by `ensure_draft` (the test for `draft-created` must now create `$WORK/dist/notes.md` first: prepend `mkdir -p '$WORK/dist'; : > '$WORK/dist/notes.md';` to its `with_stub` command, and fix the test's `grep` to `'gh release create v1.2.3 .*--draft --notes-file'`).
 
 - [ ] **Step 5: Commit**
@@ -475,7 +475,7 @@ still covered by the signed `SHA256SUMS` and the build attestations. See
 
 - [ ] **Step 4: Check the claims**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n 'environment: release|timestamp.acs.microsoft.com|GetNameInfo' .github/workflows/release-build.yml && rg -n 'SIGNING_VARS=|UNSIGNED_NOTE=' release/release.sh`
+Run: `cd <repo root> && rg -n 'environment: release|timestamp.acs.microsoft.com|GetNameInfo' .github/workflows/release-build.yml && rg -n 'SIGNING_VARS=|UNSIGNED_NOTE=' release/release.sh`
 Expected: each documented behavior has a source line.
 
 - [ ] **Step 5: Commit**
@@ -491,7 +491,7 @@ git commit -m "docs: Authenticode signing setup, pausing, and verification"
 
 - [ ] **Step 1: Gates**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify && make release-check`
+Run: `cd <repo root> && make verify && make release-check`
 Expected: `verify: OK`; `test-release: 78 passed, 0 failed`; `test-render: OK`; `test-install: ... 0 failed`; actionlint and the pin check silent.
 
 - [ ] **Step 2: Self-test commands for the report**

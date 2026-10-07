@@ -51,7 +51,7 @@
 - [ ] **Step 1: Create the branch**
 
 ```bash
-cd /Users/efitz/Projects/agentbus
+cd <repo root>
 git checkout -b persistent-subscriptions main
 go build ./... && go test ./... 2>&1 | tail -5
 ```
@@ -902,7 +902,7 @@ Run: `go test ./internal/cli/ && go vet ./... && go build ./...`
 Expected: PASS. Then a manual smoke test in a scratch repo:
 
 ```bash
-d=$(mktemp -d) && cd $d && git init -q && go run /Users/efitz/Projects/agentbus subscribe reviews && cat .local/agentbus.json && go run /Users/efitz/Projects/agentbus unsubscribe memory && cd /Users/efitz/Projects/agentbus
+R=$PWD; d=$(mktemp -d) && cd $d && git init -q && go run "$R" subscribe reviews && cat .local/agentbus.json && go run "$R" unsubscribe memory && cd "$R"
 ```
 
 Expected: the two result lines, and the file showing `"channels": ["general", "memory", "reviews"]` then `["general", "reviews"]`.
@@ -1546,7 +1546,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - [ ] **Step 1: Lint, build, test**
 
 ```bash
-cd /Users/efitz/Projects/agentbus
+cd <repo root>
 go vet ./... && go build ./... && go test ./... 2>&1 | tail -15
 ```
 

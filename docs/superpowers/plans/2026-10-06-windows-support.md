@@ -138,7 +138,7 @@ func TestLockClosedFileErrors(t *testing.T) {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/filelock/`
+Run: `cd <repo root> && go test ./internal/filelock/`
 Expected: build failure, `undefined: Lock`.
 
 - [ ] **Step 3: Write the package**
@@ -202,7 +202,7 @@ In `internal/cli/waitlock.go`, replace the `syscall.Flock` call in `flockFile` w
 
 - [ ] **Step 5: Run the tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/filelock/ ./internal/cli/ ./internal/mcpserver/ && GOOS=windows GOARCH=amd64 go vet ./internal/filelock/ ./internal/mcpserver/`
+Run: `cd <repo root> && go test ./internal/filelock/ ./internal/cli/ ./internal/mcpserver/ && GOOS=windows GOARCH=amd64 go vet ./internal/filelock/ ./internal/mcpserver/`
 Expected: PASS for the three packages; the Windows vet of `filelock` and `mcpserver` compiles (the `cli` package still fails to compile on Windows until Task 3).
 
 - [ ] **Step 6: Commit**
@@ -321,7 +321,7 @@ func TestIsShell(t *testing.T) {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/procs/ -run 'TestIsShell|TestFindHarness|TestSystemGone'`
+Run: `cd <repo root> && go test ./internal/procs/ -run 'TestIsShell|TestFindHarness|TestSystemGone'`
 Expected: `undefined: isShell`.
 
 - [ ] **Step 3: Implement.** `internal/procs/harness.go`: replace the `shells` declaration and the comparison with:
@@ -467,7 +467,7 @@ func (systemTable) StartTime(pid int) (int64, error) {
 
 - [ ] **Step 4: Run the tests and the cross-OS compile**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/procs/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/procs/ && GOOS=windows GOARCH=arm64 go vet ./internal/procs/ && GOOS=freebsd go build ./internal/procs/ && GOOS=js GOARCH=wasm go build ./internal/procs/`
+Run: `cd <repo root> && go test ./internal/procs/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/procs/ && GOOS=windows GOARCH=arm64 go vet ./internal/procs/ && GOOS=freebsd go build ./internal/procs/ && GOOS=js GOARCH=wasm go build ./internal/procs/`
 Expected: PASS (`TestHelperSleep` shows as SKIP under `-v`); every cross build silent.
 
 - [ ] **Step 5: Commit**
@@ -519,7 +519,7 @@ Do not add a test that calls `terminateWait` on a reaped pid: Windows reuses pid
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/cli/ -run 'TestAcquireWaitLock' -count=1`
+Run: `cd <repo root> && go test ./internal/cli/ -run 'TestAcquireWaitLock' -count=1`
 Expected: `undefined: terminateWait`.
 
 - [ ] **Step 3: Implement.** `internal/cli/waitlock_unix.go`:
@@ -567,7 +567,7 @@ In `internal/cli/waitlock.go`: replace `_ = syscall.Kill(old.Pid, syscall.SIGTER
 
 - [ ] **Step 4: Run the tests and the cross-OS compile**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/cli/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/cli/ ./internal/procs/ ./internal/filelock/`
+Run: `cd <repo root> && go test ./internal/cli/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/cli/ ./internal/procs/ ./internal/filelock/`
 Expected: PASS; vet silent.
 
 - [ ] **Step 5: Commit**
@@ -671,7 +671,7 @@ In `internal/config/config_test.go`, replace the `/tmp/override` lines (190-196)
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/config/ -run TestDefaultPaths -count=1 && GOOS=windows go vet ./internal/config/`
+Run: `cd <repo root> && go test ./internal/config/ -run TestDefaultPaths -count=1 && GOOS=windows go vet ./internal/config/`
 Expected: the Unix test passes already (behavior unchanged) but the Windows vet reports nothing yet, so the signal is the next step: after Step 3 both must still pass. (TDD here pins the Unix behavior before the refactor.)
 
 - [ ] **Step 3: Implement.** `internal/config/paths_unix.go`:
@@ -739,7 +739,7 @@ In `config.go`: `DataDirectory: "~/.local/share/agentbus",` becomes `DataDirecto
 
 - [ ] **Step 4: Run the tests and the cross-OS compile**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/config/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/config/`
+Run: `cd <repo root> && go test ./internal/config/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/config/`
 Expected: PASS; vet silent.
 
 - [ ] **Step 5: Commit**
@@ -793,7 +793,7 @@ func TestEditorErrTextExplainsMissingCommandWindows(t *testing.T) {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && GOOS=windows GOARCH=amd64 go vet ./internal/tui/`
+Run: `cd <repo root> && GOOS=windows GOARCH=amd64 go vet ./internal/tui/`
 Expected: `undefined: shellEditorCommand`, `defaultEditor`.
 
 - [ ] **Step 3: Implement.** `internal/tui/editor_unix.go`:
@@ -857,7 +857,7 @@ In `health.go`: `editorCommand`'s last line becomes `return shellEditorCommand(e
 
 - [ ] **Step 4: Run the tests and the cross-OS compile**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/tui/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/tui/`
+Run: `cd <repo root> && go test ./internal/tui/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/tui/`
 Expected: PASS; vet silent.
 
 - [ ] **Step 5: Commit**
@@ -1020,7 +1020,7 @@ In `internal/bus/bus_test.go`, at the top of `TestDataDirWithURIMetacharactersOp
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -run 'TestMountFSType|TestWSLPathRefusal|TestBoundaryErrorText' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -run 'TestMountFSType|TestWSLPathRefusal|TestBoundaryErrorText' -count=1`
 Expected: `undefined: mountFSType` and friends.
 
 - [ ] **Step 3: Implement.** `internal/bus/boundary.go`:
@@ -1241,7 +1241,7 @@ In `bus.go`'s `Open`, right after the `MkdirAll` block:
 
 - [ ] **Step 4: Run the tests on macOS, under Linux in Docker, and the cross-OS compile**
 
-Run: `cd /Users/efitz/Projects/agentbus && go test ./internal/bus/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/bus/ && GOOS=linux GOARCH=arm64 go vet ./internal/bus/ && docker run --rm -v "$PWD:/src:ro" -w /src -e GOFLAGS=-buildvcs=false -e GOCACHE=/tmp/gocache golang:1.27 go test ./internal/bus/ -run 'TestIsWSL|TestMountFSType|TestOpen' -count=1`
+Run: `cd <repo root> && go test ./internal/bus/ -count=1 && GOOS=windows GOARCH=amd64 go vet ./internal/bus/ && GOOS=linux GOARCH=arm64 go vet ./internal/bus/ && docker run --rm -v "$PWD:/src:ro" -w /src -e GOFLAGS=-buildvcs=false -e GOCACHE=/tmp/gocache golang:1.27 go test ./internal/bus/ -run 'TestIsWSL|TestMountFSType|TestOpen' -count=1`
 Expected: PASS locally; vet silent; the container run passes `TestIsWSL` (Linux-only) and shows that `Open` on a non-WSL Linux host is unaffected.
 
 - [ ] **Step 5: Commit**
@@ -1307,7 +1307,7 @@ and in `verify`, insert `$(MAKE) vet-cross` after `$(MAKE) vet`.
 
 - [ ] **Step 3: Run the done gate**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify`
+Run: `cd <repo root> && make verify`
 Expected: `verify: OK`, including the four `vet-cross` lines. Fix any Windows-only lint finding (unused parameters, missing error checks) in the files from Tasks 1-6.
 
 - [ ] **Step 4: Commit**
@@ -1525,7 +1525,7 @@ Main
 
 - [ ] **Step 2: Static checks available on macOS**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n 'BEGIN agentbus release public key|^\$PubKeyPem = @' install.ps1 && rg -c 'throw "agentbus install:' install.ps1 && if [[ -r release/agentbus-release-ed25519.pub ]]; then release/embed-key.sh release/agentbus-release-ed25519.pub install.ps1; fi`
+Run: `cd <repo root> && rg -n 'BEGIN agentbus release public key|^\$PubKeyPem = @' install.ps1 && rg -c 'throw "agentbus install:' install.ps1 && if [[ -r release/agentbus-release-ed25519.pub ]]; then release/embed-key.sh release/agentbus-release-ed25519.pub install.ps1; fi`
 Expected: both marker lines found; 12 throw sites; `install.ps1: key embedded` when the `.pub` exists (the ps1 branch of `embed-key.sh` from #34 Task 1 handles the here-string).
 
 - [ ] **Step 3: Commit**
@@ -1844,7 +1844,7 @@ Notes: `Invoke-Case` sets process environment that the child inherits; `Path`/`P
 
 - [ ] **Step 4: What can be checked on macOS**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n "Invoke-Case '" release/test-install.ps1 | wc -l && rg -n '^function ' release/test-install.ps1 release/testdata/fixture-server.ps1 && cd release/testdata/stub && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=9.0.0" -o /dev/null . && go vet ./...`
+Run: `cd <repo root> && rg -n "Invoke-Case '" release/test-install.ps1 | wc -l && rg -n '^function ' release/test-install.ps1 release/testdata/fixture-server.ps1 && cd release/testdata/stub && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=9.0.0" -o /dev/null . && go vet ./...`
 Expected: 19 `Invoke-Case` lines; the function list; the stub cross-builds and vets. No `pwsh` is installed on this Mac, so the harness itself first runs in the Windows workflow after the user pushes (Task 11) and in the VM (Task 12); the report must say so.
 
 - [ ] **Step 5: Commit**
@@ -1889,7 +1889,7 @@ render_check "$HERE/agentbus.scoop.json.tmpl" agentbus.json python3 -I -m json.t
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh; /Users/efitz/Projects/agentbus/release/test-render.sh`
+Run: `release/test-release.sh; release/test-render.sh`
 Expected: `scoop-*` and `pe-*` FAIL (missing template, undefined `check_windows_pe`); test-render FAILs the scoop line.
 
 - [ ] **Step 3: Scoop template** `release/agentbus.scoop.json.tmpl`:
@@ -2006,7 +2006,7 @@ In `main`, insert `build_windows` and `check_windows_pe` after `smoke_linux`, an
 
 - [ ] **Step 5: Run the tests**
 
-Run: `cd /Users/efitz/Projects/agentbus && release/test-release.sh && release/test-render.sh && shellcheck release/*.sh && shellcheck -s sh install.sh`
+Run: `cd <repo root> && release/test-release.sh && release/test-render.sh && shellcheck release/*.sh && shellcheck -s sh install.sh`
 Expected: `scoop-render`, `scoop-fields`, `pe-ok`, `pe-wrong` PASS (`test-release: 37 passed, 0 failed`); `PASS agentbus.scoop.json.tmpl`, `test-render: OK`; shellcheck silent.
 
 - [ ] **Step 6: Commit**
@@ -2065,7 +2065,7 @@ jobs:
 
 - [ ] **Step 3: Lint and run the release checks**
 
-Run: `cd /Users/efitz/Projects/agentbus && actionlint .github/workflows/windows.yml && rg -n 'uses: .*@v[0-9]' .github/workflows/ ; make release-check`
+Run: `cd <repo root> && actionlint .github/workflows/windows.yml && rg -n 'uses: .*@v[0-9]' .github/workflows/ ; make release-check`
 Expected: actionlint silent; the `rg` finds nothing (every action is SHA-pinned; `rg` exit 1 is expected there); `make release-check` passes.
 
 - [ ] **Step 4: Commit, and the user step**
@@ -2171,7 +2171,7 @@ physical Windows machine or a cloud Windows VM with nested virtualization.
 
 - [ ] **Step 3: Check the file names the checklist references exist**
 
-Run: `cd /Users/efitz/Projects/agentbus && ls release/test-windows.ps1 release/test-install.ps1 install.ps1 && rg -n 'exit 3|exit 4|return 3|return 4' main.go`
+Run: `cd <repo root> && ls release/test-windows.ps1 release/test-install.ps1 install.ps1 && rg -n 'exit 3|exit 4|return 3|return 4' main.go`
 Expected: files listed; `return 3` and `return 4` in `main.go`'s wait case.
 
 - [ ] **Step 4: Commit**
@@ -2279,7 +2279,7 @@ a data directory across the boundary is refused (#35).
 
 - [ ] **Step 4: Verify every claim against the code**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n 'notepad' internal/tui/editor_windows.go && rg -n 'Programs' install.ps1 && rg -n 'AppData' internal/config/paths_windows.go && rg -n 'scoop-bucket|ericfitz.agentbus' release/release.sh release/agentbus.scoop.json.tmpl`
+Run: `cd <repo root> && rg -n 'notepad' internal/tui/editor_windows.go && rg -n 'Programs' install.ps1 && rg -n 'AppData' internal/config/paths_windows.go && rg -n 'scoop-bucket|ericfitz.agentbus' release/release.sh release/agentbus.scoop.json.tmpl`
 Expected: each claim has a source line.
 
 - [ ] **Step 5: Commit**
@@ -2295,7 +2295,7 @@ git commit -m "docs: Windows and WSL install, paths, and the boundary guard"
 
 - [ ] **Step 1: Run both gates**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify && make release-check`
+Run: `cd <repo root> && make verify && make release-check`
 Expected: `verify: OK` (with `vet-cross`), `test-release: 37 passed, 0 failed`, `test-render: OK`, `test-install: 145 passed, 0 failed` (or only `key-matches-pub` pending), actionlint silent.
 
 - [ ] **Step 2: Self-test commands for the report**

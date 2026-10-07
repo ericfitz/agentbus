@@ -53,11 +53,11 @@
 ```
 umask 077
 "$(brew --prefix openssl@3)/bin/openssl" genpkey -algorithm ed25519 -out ~/.keys/agentbus-release-ed25519.pem
-"$(brew --prefix openssl@3)/bin/openssl" pkey -in ~/.keys/agentbus-release-ed25519.pem -pubout -out /Users/efitz/Projects/agentbus/release/agentbus-release-ed25519.pub
-chmod 644 /Users/efitz/Projects/agentbus/release/agentbus-release-ed25519.pub
+"$(brew --prefix openssl@3)/bin/openssl" pkey -in ~/.keys/agentbus-release-ed25519.pem -pubout -out release/agentbus-release-ed25519.pub
+chmod 644 release/agentbus-release-ed25519.pub
 ```
 
-Then: `git -C /Users/efitz/Projects/agentbus add release/agentbus-release-ed25519.pub && git -C /Users/efitz/Projects/agentbus commit -m "release: add Ed25519 release public key"`.
+Then: `git add release/agentbus-release-ed25519.pub && git commit -m "release: add Ed25519 release public key"`.
 
 - [ ] **Step 2: Write the failing test runner with the embed cases.** Create `release/test-release.sh`:
 
@@ -128,7 +128,7 @@ echo "test-release: $PASS passed, $FAIL failed"
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/release/test-release.sh && /Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `chmod +x release/test-release.sh && release/test-release.sh`
 Expected: `FAIL embed-sh` (embed-key.sh does not exist), summary with failures, exit 1.
 
 - [ ] **Step 4: Write `release/embed-key.sh`**
@@ -181,7 +181,7 @@ done
 
 - [ ] **Step 5: Run the tests**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/release/embed-key.sh && /Users/efitz/Projects/agentbus/release/test-release.sh && shellcheck /Users/efitz/Projects/agentbus/release/embed-key.sh /Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `chmod +x release/embed-key.sh && release/test-release.sh && shellcheck release/embed-key.sh release/test-release.sh`
 Expected: every `embed-*` case PASS, `test-release: 12 passed, 0 failed`, shellcheck silent.
 
 - [ ] **Step 6: Commit**
@@ -238,7 +238,7 @@ check notes-file 0 "--notes-file" -- bash -c "source '$HERE/release.sh'; REPO_RO
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `release/test-release.sh`
 Expected: sourcing the current `release.sh` runs it (no guard) and fails on `usage: release.sh <tag>`; exit non-zero.
 
 - [ ] **Step 3: Rewrite `release/release.sh`**
@@ -491,7 +491,7 @@ State (spec): rerun for the same tag reuses the release and clobbers every asset
 
 - [ ] **Step 4: Run the tests and shellcheck**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh && shellcheck /Users/efitz/Projects/agentbus/release/release.sh /Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `release/test-release.sh && shellcheck release/release.sh release/test-release.sh`
 Expected: all `args-*`, `tag-*`, `render-*`, `sum-of-*`, `notes-*` cases PASS; `test-release: 26 passed, 0 failed`; shellcheck silent.
 
 - [ ] **Step 5: Commit**
@@ -693,12 +693,12 @@ main "$@"
 
 - [ ] **Step 2: Static checks**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/install.sh && shellcheck -s sh /Users/efitz/Projects/agentbus/install.sh && sh -n /Users/efitz/Projects/agentbus/install.sh && rg -n 'BEGIN agentbus release public key' /Users/efitz/Projects/agentbus/install.sh`
+Run: `chmod +x install.sh && shellcheck -s sh install.sh && sh -n install.sh && rg -n 'BEGIN agentbus release public key' install.sh`
 Expected: shellcheck silent, `sh -n` silent, the marker line printed.
 
 - [ ] **Step 3: Quick local refusal checks (macOS)**
 
-Run: `cd /Users/efitz/Projects/agentbus && sh install.sh; echo "exit=$?"; AGENTBUS_SKIP_SIGNATURE=yes sh install.sh; echo "exit=$?"`
+Run: `cd <repo root> && sh install.sh; echo "exit=$?"; AGENTBUS_SKIP_SIGNATURE=yes sh install.sh; echo "exit=$?"`
 Expected: `agentbus install: this script is for Linux; on macOS run: brew install ericfitz/tap/agentbus`, `exit=1`, twice (the Darwin check comes first).
 
 - [ ] **Step 4: Commit**
@@ -722,6 +722,8 @@ git commit -m "install.sh: signed, root-less Linux installer"
 - Produces: `release/test-render.sh` with `render_check <tmpl> <syntax-check-command> KEY=VALUE...`; #35 adds the Scoop template to it.
 
 - [ ] **Step 1: Write the failing `release/test-render.sh`**
+
+Superseded on 2026-10-07: see release/test-render.sh and release/agentbus.rb.tmpl (layout A).
 
 ```bash
 #!/usr/bin/env bash
@@ -764,10 +766,12 @@ exit "$FAIL"
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/release/test-render.sh && /Users/efitz/Projects/agentbus/release/test-render.sh`
+Run: `chmod +x release/test-render.sh && release/test-render.sh`
 Expected: `FAIL agentbus.rb.tmpl` (the template still has `__URL__`/`__SHA256__`), exit 1.
 
 - [ ] **Step 3: Rewrite `release/agentbus.rb.tmpl`**
+
+Superseded on 2026-10-07: see release/test-render.sh and release/agentbus.rb.tmpl (layout A).
 
 ```ruby
 # Formula for agentbus — installs a prebuilt binary: a signed, notarized
@@ -810,12 +814,12 @@ end
 
 - [ ] **Step 4: Embed the committed public key (skip if Task 1 Step 1 has not happened yet)**
 
-Run: `cd /Users/efitz/Projects/agentbus && if [[ -r release/agentbus-release-ed25519.pub ]]; then release/embed-key.sh release/agentbus-release-ed25519.pub install.sh; else echo "SKIP: release/agentbus-release-ed25519.pub missing (Task 1 Step 1); rerun this step after the user generates it"; fi`
+Run: `cd <repo root> && if [[ -r release/agentbus-release-ed25519.pub ]]; then release/embed-key.sh release/agentbus-release-ed25519.pub install.sh; else echo "SKIP: release/agentbus-release-ed25519.pub missing (Task 1 Step 1); rerun this step after the user generates it"; fi`
 Expected: `install.sh: key embedded`, or the SKIP line.
 
 - [ ] **Step 5: Run the tests**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-render.sh && shellcheck /Users/efitz/Projects/agentbus/release/test-render.sh && shellcheck -s sh /Users/efitz/Projects/agentbus/install.sh`
+Run: `release/test-render.sh && shellcheck release/test-render.sh && shellcheck -s sh install.sh`
 Expected: `PASS agentbus.rb.tmpl`, `PASS unfilled placeholder rejected`, `test-render: OK`; shellcheck silent.
 
 - [ ] **Step 6: Commit**
@@ -861,7 +865,7 @@ check server-stopped 1 "" -- kill -0 "$server_pid"
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh`
+Run: `release/test-release.sh`
 Expected: python3 cannot open `fixture-server.py`; the `server-*` cases FAIL.
 
 - [ ] **Step 3: Write `release/testdata/fixture-server.py`**
@@ -953,7 +957,7 @@ RUN apk add --no-cache curl openssl
 
 - [ ] **Step 5: Run the tests and build one image by hand to confirm the Dockerfiles**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-release.sh && docker build --platform linux/arm64 -t agentbus-itest-alpine-arm64 -f /Users/efitz/Projects/agentbus/release/testdata/Dockerfile.alpine /Users/efitz/Projects/agentbus/release/testdata && docker run --rm --platform linux/arm64 agentbus-itest-alpine-arm64 sh -c 'openssl version && curl --version | head -1 && sha256sum --version | head -1'`
+Run: `release/test-release.sh && docker build --platform linux/arm64 -t agentbus-itest-alpine-arm64 -f release/testdata/Dockerfile.alpine release/testdata && docker run --rm --platform linux/arm64 agentbus-itest-alpine-arm64 sh -c 'openssl version && curl --version | head -1 && sha256sum --version | head -1'`
 Expected: all `server-*` cases PASS (`test-release: 33 passed, 0 failed`); the container prints `OpenSSL 3.x`, a curl line and a BusyBox line.
 
 - [ ] **Step 6: Commit**
@@ -1187,17 +1191,17 @@ Notes: `key_matches_pub` extracts the PEM with `sed` rather than sourcing `insta
 
 - [ ] **Step 2: Self-test, then shellcheck**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/release/test-install.sh && /Users/efitz/Projects/agentbus/release/test-install.sh --self-test && shellcheck /Users/efitz/Projects/agentbus/release/test-install.sh`
+Run: `chmod +x release/test-install.sh && release/test-install.sh --self-test && shellcheck release/test-install.sh`
 Expected: every `PASS self: ...` line, `test-install self-test: OK`, shellcheck silent.
 
 - [ ] **Step 3: Quick matrix, then fix `install.sh` for any FAIL**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-install.sh --quick`
+Run: `release/test-install.sh --quick`
 Expected: 24 `PASS ubuntu/amd64 ...` lines, then `key-matches-pub` (PASS, or FAIL naming the missing `.pub` if Task 1 Step 1 has not happened), then `test-install: N passed, M failed`. Any other FAIL is a bug in `install.sh` or the harness: fix it, rerun. The `killed-mid-install` case relies on `trap 'exit 1' INT TERM` making the EXIT trap run after the slow `tar` returns; if it fails on a distro, print the container output and adjust the sleep, not the assertion.
 
 - [ ] **Step 4: Full matrix**
 
-Run: `/Users/efitz/Projects/agentbus/release/test-install.sh`
+Run: `release/test-install.sh`
 Expected: 6 × 24 container cases PASS (arm64 containers run under emulation on an Intel host, natively on Apple silicon) plus `key-matches-pub`.
 
 - [ ] **Step 5: Commit**
@@ -1263,7 +1267,7 @@ release-check: ## Release tooling checks: shellcheck, template rendering, instal
 
 - [ ] **Step 3: Run it**
 
-Run: `chmod +x /Users/efitz/Projects/agentbus/release/check-linux-brew.sh && cd /Users/efitz/Projects/agentbus && make release-check && release/check-linux-brew.sh bogus; echo "exit=$?"`
+Run: `chmod +x release/check-linux-brew.sh && cd <repo root> && make release-check && release/check-linux-brew.sh bogus; echo "exit=$?"`
 Expected: shellcheck silent, `test-release: 33 passed, 0 failed`, `test-render: OK`, `test-install: ... 0 failed` (or only `key-matches-pub` failing before Task 1 Step 1), then `error: unknown architecture 'bogus'` and `exit=2`. Do not run `check-linux-brew.sh` for real yet: the published formula is still macOS-only until the first Linux release.
 
 - [ ] **Step 4: Commit**
@@ -1390,7 +1394,7 @@ embedded in `install.sh` (#34).
 
 - [ ] **Step 5: Check every path and command named in the docs exists**
 
-Run: `cd /Users/efitz/Projects/agentbus && rg -n 'install\.sh|SHA256SUMS|release-ed25519' docs/install.md README.md release/notes-v1.14.0.md && ls install.sh release/embed-key.sh && rg -n 'Linux' README.md | head -3`
+Run: `cd <repo root> && rg -n 'install\.sh|SHA256SUMS|release-ed25519' docs/install.md README.md release/notes-v1.14.0.md && ls install.sh release/embed-key.sh && rg -n 'Linux' README.md | head -3`
 Expected: the new lines listed; `ls` succeeds.
 
 - [ ] **Step 6: Commit**
@@ -1408,7 +1412,7 @@ git commit -m "docs: Linux install, SHA256SUMS verification, release notes"
 
 - [ ] **Step 1: Run the done gate and the release checks**
 
-Run: `cd /Users/efitz/Projects/agentbus && make verify && make release-check`
+Run: `cd <repo root> && make verify && make release-check`
 Expected: `verify: OK`; `test-release: 33 passed, 0 failed`; `test-render: OK`; `test-install: 145 passed, 0 failed` (6 × 24 + 1). If `key-matches-pub` is the only failure, Task 1 Step 1 is still pending; report that to the user with the exact commands.
 
 - [ ] **Step 2: Self-test commands to include in the completion report**

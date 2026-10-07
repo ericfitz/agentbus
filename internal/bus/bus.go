@@ -114,6 +114,9 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o700); err != nil {
 		return nil, err
 	}
+	if err := checkBoundary(cfg.DataDirectory); err != nil {
+		return nil, err
+	}
 	dsn, err := SQLiteDSN(cfg.DataDirectory)
 	if err != nil {
 		return nil, err

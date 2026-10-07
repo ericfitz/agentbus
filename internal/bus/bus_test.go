@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -87,6 +88,9 @@ func TestReopenKeepsData(t *testing.T) {
 // query parameters and '#' start a fragment), and two such directories
 // must remain distinct databases.
 func TestDataDirWithURIMetacharactersOpensAndStaysIsolated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("'?' is not a legal file name character on Windows; the DSN escaping is covered on Unix")
+	}
 	base := t.TempDir()
 	dirA := filepath.Join(base, "proj?a#b%c")
 	dirB := filepath.Join(base, "proj?x#y%z")

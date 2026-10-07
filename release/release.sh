@@ -4,8 +4,8 @@
 # Windows archives are built, run and attested by .github/workflows/
 # release-build.yml on native runners, dispatched on the tag. Every archive
 # is listed in SHA256SUMS, signed with the Ed25519 release key.
-#   ./release/release.sh v0.1.1              # full release
-#   ./release/release.sh v0.1.1 --no-publish # stop with a draft release (dry run)
+#   ./release/release.sh v0.1.1 --windows-signing=on                # full release
+#   ./release/release.sh v0.1.1 --windows-signing=off --no-publish  # stop with a draft release (dry run)
 # Builds the macOS binary from the tag, so HEAD may be anywhere. Reruns for the
 # same tag reuse the draft release and replace every asset.
 # One-time setup: a notarytool keychain profile named $NOTARY_PROFILE
@@ -34,10 +34,13 @@ NO_PUBLISH=0       # --no-publish: stop after signing, leave the draft
 PUBLISHED=0        # set when the release for $TAG is already public (rerun)
 RUN_ID=""          # the release-build.yml run this release used
 WORKFLOW="release-build.yml"
+WINDOWS_SIGNING="" # on|off, required (--windows-signing=on|off)
+UNSIGNED_NOTE="The Windows binaries in this release are not Authenticode-signed; they are covered by the signed SHA256SUMS and by build attestations."
+SIGNING_VARS=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_PROFILE AUTHENTICODE_SIGNER)
 FIND_RUN_TRIES="${FIND_RUN_TRIES:-30}"
 FIND_RUN_SLEEP="${FIND_RUN_SLEEP:-2}"
 
-usage() { echo "usage: release.sh <tag> [--no-publish]" >&2; exit 2; }
+usage() { echo "usage: release.sh <tag> --windows-signing=on|off [--no-publish]" >&2; exit 2; }
 fail() { echo "error: $*" >&2; exit 1; }
 
 parse_args() {
@@ -45,6 +48,12 @@ parse_args() {
     for a in "$@"; do
         case "$a" in
             --no-publish) [[ "$NO_PUBLISH" == 0 ]] || usage; NO_PUBLISH=1 ;;
+            --windows-signing=*)
+                [[ -z "$WINDOWS_SIGNING" ]] || usage
+                case "${a#*=}" in
+                    on | off) WINDOWS_SIGNING="${a#*=}" ;;
+                    *) echo "error: --windows-signing must be on or off, got '${a#*=}'" >&2; usage ;;
+                esac ;;
             --*) echo "error: unknown option $a" >&2; usage ;;
             *) [[ -z "$TAG" ]] || usage; TAG="$a" ;;
         esac
@@ -52,6 +61,7 @@ parse_args() {
     [[ -n "$TAG" ]] || usage
     [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
         || { echo "error: tag must look like vX.Y.Z, got '$TAG'" >&2; exit 2; }
+    [[ -n "$WINDOWS_SIGNING" ]] || { echo "error: --windows-signing=on|off is required (billing for Artifact Signing is monthly; choose per release)" >&2; usage; }
     VERSION="${TAG#v}"
 }
 
@@ -102,6 +112,21 @@ check_gh() {
 check_workflow_at_tag() {
     git -C "$REPO_ROOT" cat-file -e "$TAG:.github/workflows/$WORKFLOW" 2>/dev/null \
         || fail ".github/workflows/$WORKFLOW is not in tag $TAG; tag a commit that has it"
+}
+
+# check_signing_vars: with --windows-signing=on every Artifact Signing
+# variable must exist as a repository variable (gh variable list), else the
+# workflow would fail after the macOS build and the dispatch.
+check_signing_vars() {
+    [[ "$WINDOWS_SIGNING" == on ]] || return 0
+    local have missing=() v
+    have="$(gh variable list --repo "$GH_REPO" --json name --jq '.[].name')"
+    for v in "${SIGNING_VARS[@]}"; do
+        grep -qx "$v" <<<"$have" || missing+=("$v")
+    done
+    (( ${#missing[@]} == 0 )) && return 0
+    local joined; joined="$(printf '%s, ' "${missing[@]}")"; joined="${joined%, }"
+    fail "missing repository variables for Authenticode signing: $joined (docs/release-signing.md, step 4; or release with --windows-signing=off)"
 }
 
 # checkout_tag builds from the tagged source in a throwaway worktree, whatever HEAD is.
@@ -191,14 +216,32 @@ verify_sums() {
         || fail "SHA256SUMS.sig does not verify with $PUBKEY"
 }
 
-# release_notes_args prints the gh flags for the notes: release/notes-<tag>.md
-# when present, else generated notes.
-release_notes_args() {
-    if [[ -f "$REPO_ROOT/release/notes-${TAG}.md" ]]; then
-        printf '%s\n' --notes-file "$REPO_ROOT/release/notes-${TAG}.md"
+# render_notes_text <notes> <on|off> prints the notes with the unsigned-
+# Windows line present exactly once (off) or absent (on), so a rerun can
+# flip the choice. The line is always the last paragraph.
+render_notes_text() {
+    local text="$1" mode="$2"
+    [[ "$mode" == on || "$mode" == off ]] || fail "render_notes_text: mode must be on or off, got '$mode'"
+    # Command substitution strips every trailing newline, so a previous
+    # run's blank line before the note disappears with the note itself.
+    text="$(grep -vF "$UNSIGNED_NOTE" <<<"$text" || true)"
+    if [[ "$mode" == off ]]; then
+        printf '%s\n\n%s\n' "$text" "$UNSIGNED_NOTE"
     else
-        printf '%s\n' --generate-notes
+        printf '%s\n' "$text"
     fi
+}
+
+# render_notes writes $DIST/notes.md: release/notes-<tag>.md when present,
+# else GitHub's generated notes for the tag, then render_notes_text.
+render_notes() {
+    local base
+    if [[ -f "$REPO_ROOT/release/notes-${TAG}.md" ]]; then
+        base="$(cat "$REPO_ROOT/release/notes-${TAG}.md")"
+    else
+        base="$(gh api "repos/${GH_REPO}/releases/generate-notes" -f "tag_name=$TAG" --jq .body)"
+    fi
+    render_notes_text "$base" "$WINDOWS_SIGNING" > "$DIST/notes.md"
 }
 
 # ensure_draft creates the draft release for $TAG, reuses an existing draft
@@ -220,15 +263,16 @@ ensure_draft() {
                 PUBLISHED=1 ;;
             *) fail "could not query release $TAG: unexpected output from gh: $draft" ;;
         esac
+        # a rerun may have changed --windows-signing: the notes line follows it
+        gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$DIST/notes.md" \
+            || fail "could not update the notes of release $TAG"
         return
     fi
     # Only "not found" means there is no release; any other error (network,
     # rate limit, token) must not create a second draft for the same tag.
     [[ "$err" == *"release not found"* ]] || fail "could not query release $TAG: ${err:-$draft}"
     echo "==> Creating draft release $TAG"
-    local notes=() line
-    while IFS= read -r line; do notes+=("$line"); done < <(release_notes_args)
-    gh release create "$TAG" --repo "$GH_REPO" --verify-tag --title "$TAG" --draft "${notes[@]}"
+    gh release create "$TAG" --repo "$GH_REPO" --verify-tag --title "$TAG" --draft --notes-file "$DIST/notes.md"
 }
 
 # list_run_ids prints the ids of the existing $WORKFLOW runs titled for $TAG.
@@ -247,7 +291,7 @@ dispatch_build() {
     existing="$(list_run_ids)" || fail "could not list the existing $WORKFLOW runs"
     echo "==> Dispatching $WORKFLOW on $TAG"
     since="$(date -u -v-60S +%Y-%m-%dT%H:%M:%SZ)" # one minute of clock slack
-    gh workflow run "$WORKFLOW" --repo "$GH_REPO" --ref "$TAG" -f "tag=$TAG" \
+    gh workflow run "$WORKFLOW" --repo "$GH_REPO" --ref "$TAG" -f "tag=$TAG" -f "windows_signing=$WINDOWS_SIGNING" \
         || fail "could not dispatch $WORKFLOW on $TAG"
     local ids=() id
     while IFS= read -r id; do
@@ -435,8 +479,10 @@ main() {
     check_tag_pushed
     check_gh
     check_workflow_at_tag
+    check_signing_vars
     check_installers_embedded
     checkout_tag
+    render_notes
     build_macos
     ensure_draft
     dispatch_build

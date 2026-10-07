@@ -76,7 +76,7 @@ source "$HERE/release.sh"   # the main guard keeps it from running
 check args-none 2 "usage" -- parse_args
 check args-bad-tag 2 "tag must look like vX.Y.Z" -- parse_args 1.2.3
 check args-two 2 "usage" -- parse_args v1.2.3 extra
-check args-ok 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 && [[ \$VERSION == 1.2.3 ]]"
+check args-ok 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off && [[ \$VERSION == 1.2.3 ]]"
 check args-prerelease 2 "tag must look like vX.Y.Z, got 'v1.2.3-rc.1'" -- parse_args v1.2.3-rc.1
 
 git init -q "$WORK/repo" && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init && git -C "$WORK/repo" tag v0.0.1
@@ -94,9 +94,7 @@ check sum-of-ok 0 "aaaa" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist
 check sum-of-exact 0 "bbbb" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist'; [[ \$(sum_of install.sh) == bbbb ]] && echo bbbb"
 check sum-of-missing 1 "no SHA256SUMS entry for nope.tar.gz" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist'; sum_of nope.tar.gz"
 
-check notes-generated 0 "--generate-notes" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; release_notes_args"
-mkdir -p "$WORK/repo/release" && printf 'notes\n' > "$WORK/repo/release/notes-v0.0.1.md"
-check notes-file 0 "--notes-file" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; release_notes_args"
+mkdir -p "$WORK/repo/release"
 
 printf "PUBKEY_PEM='-----BEGIN PUBLIC KEY-----\nREPLACED-BY-release/embed-key.sh\n-----END PUBLIC KEY-----'\n" > "$WORK/unembedded.sh"
 check embedded-placeholder 1 "install.sh has no embedded release key" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/unembedded.sh' install.sh"
@@ -244,9 +242,9 @@ check removed-build-windows 1 "" -- bash -c "source '$HERE/release.sh'; declare 
 check removed-check-pe 1 "" -- bash -c "source '$HERE/release.sh'; declare -F check_windows_pe"
 check removed-ensure-release 1 "" -- bash -c "source '$HERE/release.sh'; declare -F ensure_release"
 check no-docker-in-release-sh 1 "" -- grep -qi docker "$HERE/release.sh"
-check args-no-publish-before 0 "" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish v1.2.3 && [[ \$NO_PUBLISH == 1 && \$TAG == v1.2.3 ]]"
-check args-no-publish-after 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --no-publish && [[ \$NO_PUBLISH == 1 ]]"
-check args-default-publish 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 && [[ \$NO_PUBLISH == 0 ]]"
+check args-no-publish-before 0 "" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish v1.2.3 --windows-signing=off && [[ \$NO_PUBLISH == 1 && \$TAG == v1.2.3 ]]"
+check args-no-publish-after 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --no-publish --windows-signing=off && [[ \$NO_PUBLISH == 1 ]]"
+check args-default-publish 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off && [[ \$NO_PUBLISH == 0 ]]"
 check args-no-publish-twice 2 "usage" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish --no-publish v1.2.3"
 check args-unknown-flag 2 "unknown option --foo" -- bash -c "source '$HERE/release.sh'; parse_args --foo v1.2.3"
 check args-flag-only 2 "usage" -- bash -c "source '$HERE/release.sh'; parse_args --no-publish"
@@ -311,7 +309,7 @@ check list-runs-other-tag 0 "" -- with_stub "TAG=v8.8.8; [[ -z \$(list_run_ids) 
 check dispatch-ignores-stale-run 1 "could not find the dispatched run" -- with_stub "export GH_RUNS='$WORK/runs-stale.json'; dispatch_build"
 check dispatch-adopts-new-run 0 "actions/runs/203" -- with_stub "cp '$WORK/runs-stale.json' '$WORK/runs-live.json'; export GH_RUNS='$WORK/runs-live.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build && [[ \$RUN_ID == 203 ]] && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3' '$WORK/gh.log'"
 check dispatch-failure-stops 1 "could not dispatch release-build.yml on v1.2.3" -- with_stub "GH_RC=1 dispatch_build"
-check draft-created 0 "Creating draft release" -- with_stub ": > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--verify-tag.*--draft' '$WORK/gh.log'"
+check draft-created 0 "Creating draft release" -- with_stub "mkdir -p '$WORK/dist'; : > '$WORK/dist/notes.md'; : > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--draft --notes-file' '$WORK/gh.log'"
 check draft-other-error-fails 1 "could not query release v1.2.3: HTTP 502" -- with_stub ": > '$WORK/gh.log'; GH_VIEW_ERR='HTTP 502: bad gateway' ensure_draft; rc=\$?; ! grep -q 'release create' '$WORK/gh.log' && exit \$rc"
 check draft-reused 0 "Reusing draft release" -- with_stub "GH_VIEW=true ensure_draft && [[ \$PUBLISHED == 0 ]]"
 check draft-reused-despite-stderr-noise 0 "Reusing draft release" -- with_stub "GH_VIEW=true GH_VIEW_STDERR='warning: x' ensure_draft && [[ \$PUBLISHED == 0 ]]"
@@ -345,8 +343,52 @@ check gh-ok 0 "" -- with_stub "check_gh"
 # main runs the steps in the order the spec pins; every step is replaced by a
 # recorder so nothing builds, dispatches or publishes.
 check main-order 0 "" -- bash -c "source '$HERE/release.sh'; : > '$WORK/steps'
-for f in require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_installers_embedded checkout_tag build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release; do eval \"\$f() { echo \$f >> '$WORK/steps'; }\"; done
-main v1.2.3 --no-publish && diff '$WORK/steps' <(printf '%s\n' require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_installers_embedded checkout_tag build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release)"
+for f in require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_signing_vars check_installers_embedded checkout_tag render_notes build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release; do eval \"\$f() { echo \$f >> '$WORK/steps'; }\"; done
+main v1.2.3 --windows-signing=off --no-publish && diff '$WORK/steps' <(printf '%s\n' require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_signing_vars check_installers_embedded checkout_tag render_notes build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release)"
+
+
+# --- Authenticode choice (#37) ---------------------------------------------
+check removed-release-notes-args 1 "" -- bash -c "source '$HERE/release.sh'; declare -F release_notes_args"
+check ws-missing 2 "--windows-signing=on|off is required" -- parse_args v1.2.3
+check ws-on 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=on && [[ \$WINDOWS_SIGNING == on ]]"
+check ws-off-first 0 "" -- bash -c "source '$HERE/release.sh'; parse_args --windows-signing=off v1.2.3 --no-publish && [[ \$WINDOWS_SIGNING == off && \$NO_PUBLISH == 1 ]]"
+check ws-bad-value 2 "--windows-signing must be on or off, got 'maybe'" -- parse_args v1.2.3 --windows-signing=maybe
+check ws-uppercase 2 "got 'ON'" -- parse_args v1.2.3 --windows-signing=ON
+check ws-space-form 2 "unknown option --windows-signing" -- parse_args v1.2.3 --windows-signing on
+check ws-twice 2 "usage" -- parse_args v1.2.3 --windows-signing=on --windows-signing=off
+check ws-empty 2 "got ''" -- parse_args v1.2.3 --windows-signing=
+
+base=$'## Changes\n\n- something\n'
+line='The Windows binaries in this release are not Authenticode-signed; they are covered by the signed SHA256SUMS and by build attestations.'
+check notes-off-appends 0 "" -- bash -c "source '$HERE/release.sh'; [[ \$(render_notes_text \"\$1\" off) == \$'## Changes\n\n- something\n\n$line' ]]" _ "$base"
+check notes-off-idempotent 0 "1" -- bash -c "source '$HERE/release.sh'; render_notes_text \"\$(render_notes_text \"\$1\" off)\" off | grep -c 'not Authenticode-signed'" _ "$base"
+check notes-on-plain 0 "" -- bash -c "source '$HERE/release.sh'; [[ \$(render_notes_text \"\$1\" on) == \$'## Changes\n\n- something' ]]" _ "$base"
+check notes-on-removes 0 "0" -- bash -c "source '$HERE/release.sh'; render_notes_text \"\$(render_notes_text \"\$1\" off)\" on | grep -c 'not Authenticode-signed' || true" _ "$base"
+check notes-bad-mode 1 "render_notes_text: mode must be on or off" -- bash -c "source '$HERE/release.sh'; render_notes_text x sideways"
+
+cat > "$WORK/gh-vars.sh" <<'EOS'
+gh() {
+    case "$1 $2" in
+        "variable list") printf '%s\n' $GH_VARS ;;
+        "api repos/ericfitz/agentbus/releases/generate-notes") printf 'generated notes\n' ;;
+        *) return 0 ;;
+    esac
+}
+EOS
+all_vars="AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_PROFILE AUTHENTICODE_SIGNER"
+with_vars() { bash -c "source '$HERE/release.sh'; source '$WORK/gh-vars.sh'; export GH_VARS='$1'; WINDOWS_SIGNING=$2; TAG=v1.2.3; DIST='$WORK/dist'; REPO_ROOT='$WORK/repo'; mkdir -p '$WORK/dist'; $3"; }
+check vars-all-present 0 "" -- with_vars "$all_vars" on check_signing_vars
+check vars-missing-named 1 "ARTIFACT_SIGNING_PROFILE, AUTHENTICODE_SIGNER" -- with_vars "AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT" on check_signing_vars
+check vars-skipped-when-off 0 "" -- with_vars "" off check_signing_vars
+check render-notes-generated-off 0 "" -- with_vars "" off "render_notes && grep -q 'generated notes' '$WORK/dist/notes.md' && grep -q 'not Authenticode-signed' '$WORK/dist/notes.md'"
+mkdir -p "$WORK/repo/release" && printf 'from file\n' > "$WORK/repo/release/notes-v1.2.3.md"
+check render-notes-file-on 0 "" -- with_vars "" on "render_notes && grep -q 'from file' '$WORK/dist/notes.md' && ! grep -q 'not Authenticode-signed' '$WORK/dist/notes.md'"
+
+# ensure_draft and dispatch_build carry the choice (stub gh from #36).
+check dispatch-passes-signing 0 "" -- with_stub "WINDOWS_SIGNING=on; cp '$WORK/runs-stale.json' '$WORK/runs-live2.json'; export GH_RUNS='$WORK/runs-live2.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build >/dev/null && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3 -f windows_signing=on\$' '$WORK/gh.log'"
+check draft-reuse-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft >/dev/null && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
+check draft-published-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=false ensure_draft >/dev/null 2>&1 && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
+check draft-reuse-edit-failure-stops 1 "" -- with_stub "GH_VIEW=true GH_RC=1 ensure_draft"
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

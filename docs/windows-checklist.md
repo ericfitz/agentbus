@@ -20,7 +20,7 @@ release and after any change to harness detection (`internal/procs`,
       identity ends the older one with exit code 3.
 - [ ] The TUI renders and accepts input in Windows Terminal (`agentbus tui`,
       keys `?`, `h`, `o`, `esc`); `o` opens the config in Notepad when
-      `EDITOR` is unset.
+      neither `VISUAL` nor `EDITOR` is set.
 - [ ] `install.ps1` from the published URL installs, and upgrades while an
       MCP server is running (the old `agentbus.exe` is renamed `.old-*`
       and removed by the next run).
@@ -28,9 +28,10 @@ release and after any change to harness detection (`internal/procs`,
 ## Shared database guard (needs WSL2 in the VM)
 
 Nested virtualization: the Mac (M4 Pro, macOS 27) exposes it in
-Hypervisor.framework; enable it for the Windows 11 ARM guest in UTM 4.7.4
-and confirm `wsl --install` succeeds. If UTM does not expose it, use a
-physical Windows machine or a cloud Windows VM with nested virtualization.
+Hypervisor.framework; enable it for the Windows 11 ARM guest in VMware
+Fusion and confirm `wsl --install` succeeds. If Fusion does not expose it,
+use a physical Windows machine or a cloud Windows VM with nested
+virtualization.
 
 - [ ] In WSL: `findmnt -T /mnt/c -o FSTYPE` reports `9p` (or `drvfs`);
       record the value here: ______.
@@ -39,7 +40,7 @@ physical Windows machine or a cloud Windows VM with nested virtualization.
 - [ ] Native Windows: `$env:AGENTBUS_DATA_DIR='\\wsl.localhost\<distro>\home\<you>\agentbus-test'; agentbus status`
       refuses with the boundary error.
 - [ ] Native Windows, a drive mapped to `\\wsl.localhost\<distro>` (`net use
-      W: \\wsl.localhost\<distro>`): `AGENTBUS_DATA_DIR=W:\agentbus-test`
+      W: \\wsl.localhost\<distro>`): `$env:AGENTBUS_DATA_DIR='W:\agentbus-test'; agentbus status`
       refuses.
 
 ## Packaging

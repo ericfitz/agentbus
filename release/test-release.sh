@@ -124,7 +124,7 @@ printf 'v9.0.1\n' > "$WORK/fx/valid/latest"
 printf 'hello\n' > "$WORK/fx/valid/v9.0.1/asset.txt"
 port=$(( 20000 + RANDOM % 20000 ))
 python3 -I "$HERE/testdata/fixture-server.py" "$WORK/fx" "$port" & server_pid=$!
-trap 'kill "$server_pid" 2>/dev/null; rm -rf "$WORK"' EXIT
+trap 'kill "$server_pid" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
 check server-latest-redirect 0 "/valid/releases/tag/v9.0.1" -- curl -sI -o /dev/null -w '%{redirect_url}' "http://127.0.0.1:$port/valid/releases/latest"
 check server-download 0 "hello" -- curl -fsS "http://127.0.0.1:$port/valid/releases/download/v9.0.1/asset.txt"
@@ -132,8 +132,11 @@ check server-head 0 "200" -- curl -sI -o /dev/null -w '%{http_code}' "http://127
 check server-404-asset 0 "404" -- curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/valid/releases/download/v9.0.1/nope"
 check server-404-variant 0 "404" -- curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/other/releases/latest"
 check server-traversal 0 "400" -- curl -s -o /dev/null -w '%{http_code}' --path-as-is "http://127.0.0.1:$port/valid/releases/download/../latest"
-kill "$server_pid"; wait "$server_pid" 2>/dev/null || true
+kill "$server_pid" || true; wait "$server_pid" 2>/dev/null || true
 check server-stopped 1 "" -- kill -0 "$server_pid"
+check server-no-args 2 "usage: fixture-server.py <root> <port>" -- python3 -I "$HERE/testdata/fixture-server.py"
+check server-bad-port 2 "port must be an integer" -- python3 -I "$HERE/testdata/fixture-server.py" "$WORK/fx" abc
+check server-missing-root 2 "$WORK/nope" -- python3 -I "$HERE/testdata/fixture-server.py" "$WORK/nope" 20000
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

@@ -15,6 +15,18 @@ import http.server
 import os
 import sys
 
+
+def usage(msg):
+    print(f"fixture-server.py: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+if len(sys.argv) != 3:
+    usage("usage: fixture-server.py <root> <port>")
+if not sys.argv[2].isascii() or not sys.argv[2].isdigit():
+    usage(f"port must be an integer, got '{sys.argv[2]}'")
+if not os.path.isdir(sys.argv[1]):
+    usage(f"root directory not found: {sys.argv[1]}")
 ROOT = os.path.abspath(sys.argv[1])
 PORT = int(sys.argv[2])
 

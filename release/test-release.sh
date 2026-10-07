@@ -94,8 +94,6 @@ check sum-of-ok 0 "aaaa" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist
 check sum-of-exact 0 "bbbb" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist'; [[ \$(sum_of install.sh) == bbbb ]] && echo bbbb"
 check sum-of-missing 1 "no SHA256SUMS entry for nope.tar.gz" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/dist'; sum_of nope.tar.gz"
 
-mkdir -p "$WORK/repo/release"
-
 printf "PUBKEY_PEM='-----BEGIN PUBLIC KEY-----\nREPLACED-BY-release/embed-key.sh\n-----END PUBLIC KEY-----'\n" > "$WORK/unembedded.sh"
 check embedded-placeholder 1 "install.sh has no embedded release key" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/unembedded.sh' install.sh"
 check embedded-placeholder-hint 1 "embed-key.sh" -- bash -c "source '$HERE/release.sh'; check_script_embedded '$WORK/unembedded.sh' install.sh"
@@ -309,7 +307,7 @@ check list-runs-other-tag 0 "" -- with_stub "TAG=v8.8.8; [[ -z \$(list_run_ids) 
 check dispatch-ignores-stale-run 1 "could not find the dispatched run" -- with_stub "export GH_RUNS='$WORK/runs-stale.json'; dispatch_build"
 check dispatch-adopts-new-run 0 "actions/runs/203" -- with_stub "cp '$WORK/runs-stale.json' '$WORK/runs-live.json'; export GH_RUNS='$WORK/runs-live.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build && [[ \$RUN_ID == 203 ]] && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3' '$WORK/gh.log'"
 check dispatch-failure-stops 1 "could not dispatch release-build.yml on v1.2.3" -- with_stub "GH_RC=1 dispatch_build"
-check draft-created 0 "Creating draft release" -- with_stub "mkdir -p '$WORK/dist'; : > '$WORK/dist/notes.md'; : > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--draft --notes-file' '$WORK/gh.log'"
+check draft-created 0 "Creating draft release" -- with_stub "mkdir -p '$WORK/dist'; : > '$WORK/dist/notes.md'; : > '$WORK/gh.log'; ensure_draft && grep -q 'gh release create v1.2.3 .*--verify-tag.*--draft --notes-file' '$WORK/gh.log'"
 check draft-other-error-fails 1 "could not query release v1.2.3: HTTP 502" -- with_stub ": > '$WORK/gh.log'; GH_VIEW_ERR='HTTP 502: bad gateway' ensure_draft; rc=\$?; ! grep -q 'release create' '$WORK/gh.log' && exit \$rc"
 check draft-reused 0 "Reusing draft release" -- with_stub "GH_VIEW=true ensure_draft && [[ \$PUBLISHED == 0 ]]"
 check draft-reused-despite-stderr-noise 0 "Reusing draft release" -- with_stub "GH_VIEW=true GH_VIEW_STDERR='warning: x' ensure_draft && [[ \$PUBLISHED == 0 ]]"
@@ -346,7 +344,6 @@ check main-order 0 "" -- bash -c "source '$HERE/release.sh'; : > '$WORK/steps'
 for f in require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_signing_vars check_installers_embedded checkout_tag render_notes build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release; do eval \"\$f() { echo \$f >> '$WORK/steps'; }\"; done
 main v1.2.3 --windows-signing=off --no-publish && diff '$WORK/steps' <(printf '%s\n' require_tools check_signing_key check_tag_exists check_tag_pushed check_gh check_workflow_at_tag check_signing_vars check_installers_embedded checkout_tag render_notes build_macos ensure_draft dispatch_build watch_run download_archives verify_attestations copy_scripts write_sums sign_sums upload_assets publish_release)"
 
-
 # --- Authenticode choice (#37) ---------------------------------------------
 check removed-release-notes-args 1 "" -- bash -c "source '$HERE/release.sh'; declare -F release_notes_args"
 check ws-missing 2 "--windows-signing=on|off is required" -- parse_args v1.2.3
@@ -369,8 +366,8 @@ check notes-bad-mode 1 "render_notes_text: mode must be on or off" -- bash -c "s
 cat > "$WORK/gh-vars.sh" <<'EOS'
 gh() {
     case "$1 $2" in
-        "variable list") printf '%s\n' $GH_VARS ;;
-        "api repos/ericfitz/agentbus/releases/generate-notes") printf 'generated notes\n' ;;
+        "variable list") [[ -z "${GH_VARS_FAIL:-}" ]] || return 1; printf '%s\n' $GH_VARS ;;
+        "api repos/ericfitz/agentbus/releases/generate-notes") [[ -z "${GH_API_FAIL:-}" ]] || return 1; printf 'generated notes\n' ;;
         *) return 0 ;;
     esac
 }
@@ -379,6 +376,9 @@ all_vars="AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING
 with_vars() { bash -c "source '$HERE/release.sh'; source '$WORK/gh-vars.sh'; export GH_VARS='$1'; WINDOWS_SIGNING=$2; TAG=v1.2.3; DIST='$WORK/dist'; REPO_ROOT='$WORK/repo'; mkdir -p '$WORK/dist'; $3"; }
 check vars-all-present 0 "" -- with_vars "$all_vars" on check_signing_vars
 check vars-missing-named 1 "ARTIFACT_SIGNING_PROFILE, AUTHENTICODE_SIGNER" -- with_vars "AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT" on check_signing_vars
+check vars-exact-name 1 "AZURE_CLIENT_ID (docs" -- with_vars "AZURE_CLIENT_ID_OLD AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_PROFILE AUTHENTICODE_SIGNER" on check_signing_vars
+check vars-list-fails 1 "could not list the repository variables of ericfitz/agentbus" -- with_vars "" on "GH_VARS_FAIL=1 check_signing_vars"
+check render-notes-generate-fails 1 "could not generate the notes of v1.2.3" -- with_vars "" off "GH_API_FAIL=1 render_notes"
 check vars-skipped-when-off 0 "" -- with_vars "" off check_signing_vars
 check render-notes-generated-off 0 "" -- with_vars "" off "render_notes && grep -q 'generated notes' '$WORK/dist/notes.md' && grep -q 'not Authenticode-signed' '$WORK/dist/notes.md'"
 mkdir -p "$WORK/repo/release" && printf 'from file\n' > "$WORK/repo/release/notes-v1.2.3.md"
@@ -388,7 +388,7 @@ check render-notes-file-on 0 "" -- with_vars "" on "render_notes && grep -q 'fro
 check dispatch-passes-signing 0 "" -- with_stub "WINDOWS_SIGNING=on; cp '$WORK/runs-stale.json' '$WORK/runs-live2.json'; export GH_RUNS='$WORK/runs-live2.json' GH_RUNS_AFTER='$WORK/runs-fresh.json'; : > '$WORK/gh.log'; dispatch_build >/dev/null && grep -q 'gh workflow run release-build.yml --repo ericfitz/agentbus --ref v1.2.3 -f tag=v1.2.3 -f windows_signing=on\$' '$WORK/gh.log'"
 check draft-reuse-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft >/dev/null && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
 check draft-published-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=false ensure_draft >/dev/null 2>&1 && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
-check draft-reuse-edit-failure-stops 1 "" -- with_stub "GH_VIEW=true GH_RC=1 ensure_draft"
+check draft-reuse-edit-failure-stops 1 "could not update the notes of release v1.2.3" -- with_stub "GH_VIEW=true GH_RC=1 ensure_draft"
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

@@ -120,7 +120,8 @@ check_workflow_at_tag() {
 check_signing_vars() {
     [[ "$WINDOWS_SIGNING" == on ]] || return 0
     local have missing=() v
-    have="$(gh variable list --repo "$GH_REPO" --json name --jq '.[].name')"
+    have="$(gh variable list --repo "$GH_REPO" --json name --jq '.[].name')" \
+        || fail "could not list the repository variables of $GH_REPO"
     for v in "${SIGNING_VARS[@]}"; do
         grep -qx "$v" <<<"$have" || missing+=("$v")
     done
@@ -239,7 +240,8 @@ render_notes() {
     if [[ -f "$REPO_ROOT/release/notes-${TAG}.md" ]]; then
         base="$(cat "$REPO_ROOT/release/notes-${TAG}.md")"
     else
-        base="$(gh api "repos/${GH_REPO}/releases/generate-notes" -f "tag_name=$TAG" --jq .body)"
+        base="$(gh api "repos/${GH_REPO}/releases/generate-notes" -f "tag_name=$TAG" --jq .body)" \
+            || fail "could not generate the notes of $TAG"
     fi
     render_notes_text "$base" "$WINDOWS_SIGNING" > "$DIST/notes.md"
 }

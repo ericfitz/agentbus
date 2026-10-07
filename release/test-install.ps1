@@ -455,7 +455,10 @@ function Invoke-SelfTest {
     $emptyDir = Join-Path $Work 'empty-path'
     New-Item -ItemType Directory -Force -Path $emptyDir | Out-Null
     $pathVar = if ($IsWin) { 'Path' } else { 'PATH' }
-    Invoke-Case 'self: Find-OpenSsl with ProgramFiles unset says none was found' 0 'THREW: agentbus install: OpenSSL 3 is required to verify the release signature and none was found' @{ $pathVar = $emptyDir; 'ProgramFiles' = '' } '' $null $null 'file' 'probe-find-openssl.ps1'
+    # A Windows child gets ProgramFiles back even when this process removes
+    # it (windows.yml run 37663250838), so point it at an empty directory.
+    $noPrograms = Join-Path $Work 'no-programs'
+    Invoke-Case 'self: Find-OpenSsl with no OpenSSL on PATH or under ProgramFiles says none was found' 0 'THREW: agentbus install: OpenSSL 3 is required to verify the release signature and none was found' @{ $pathVar = $emptyDir; 'ProgramFiles' = $noPrograms } '' $null $null 'file' 'probe-find-openssl.ps1'
 
     Start-Server
     $srv = $script:Server
@@ -508,7 +511,8 @@ function Invoke-Cases {
     Invoke-Case 'openssl-stderr-warning-still-found' 1 'signature check of SHA256SUMS failed' $fakeErrPath $dir $null $null
     Invoke-Case 'openssl-too-old-with-stderr' 1 'OpenSSL 1.1.1w' $fake1ErrPath $dir $null $null
     Invoke-Case 'git-clangarm64-openssl-found' 0 'installed agentbus 9.0.1' $fakeGitPath $dir $null $null
-    Invoke-Case 'no-programfiles' 1 'none was found' @{ 'Path' = "$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = '' } $dir $null $null
+    # No 'ProgramFiles unset' case: a Windows child gets ProgramFiles back
+    # (windows.yml run 37663250838), and no-openssl covers an empty one.
     Invoke-Case 'openssl-too-old' 1 'OpenSSL 1.1.1w' $fakePath $dir $null $null
     Invoke-Case 'skip-signature-valid' 0 'skipping the signature check' ($noGit + @{ 'AGENTBUS_SKIP_SIGNATURE' = '1' }) $dir $null $null
     Invoke-Case 'skip-signature-tampered' 1 'checksum mismatch' @{ 'AGENTBUS_SKIP_SIGNATURE' = '1'; 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null

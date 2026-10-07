@@ -46,12 +46,44 @@ const (
 	searchPageMax     = 1000
 )
 
+// searchTerm is one whitespace-separated word of a search query with its
+// trailing stars removed; Prefix reports whether it had any.
+type searchTerm struct {
+	Text   string
+	Prefix bool
+}
+
+// searchTerms splits a query into its terms (ADR 0019). A word that is only
+// stars (`*`, `**`) is dropped: FTS5 would reject it as syntax, and it names
+// nothing. A star anywhere but the end is part of the word; the tokenizer
+// discards it. Shared by ftsQuery and semanticQuery so the text and
+// semantic halves of a search read the query the same way.
+func searchTerms(q string) []searchTerm {
+	var terms []searchTerm
+	for _, w := range strings.Fields(q) {
+		bare := strings.TrimRight(w, "*")
+		if bare == "" {
+			continue
+		}
+		terms = append(terms, searchTerm{Text: bare, Prefix: len(bare) < len(w)})
+	}
+	return terms
+}
+
 // ftsQuery turns free text into an FTS5 query of quoted terms (implicit AND),
-// so user punctuation cannot produce a syntax error.
+// so user punctuation cannot produce a syntax error. A prefix term becomes a
+// quoted prefix phrase, "e159e8c"*: FTS5 applies the star to the phrase's
+// last token, so commit:e159e8c* and owner/repo@e159* work too. The result
+// is empty only when the query has no terms; Search refuses that before
+// textSearch builds a MATCH.
 func ftsQuery(q string) string {
 	var terms []string
-	for _, w := range strings.Fields(q) {
-		terms = append(terms, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
+	for _, st := range searchTerms(q) {
+		term := `"` + strings.ReplaceAll(st.Text, `"`, `""`) + `"`
+		if st.Prefix {
+			term += "*"
+		}
+		terms = append(terms, term)
 	}
 	return strings.Join(terms, " ")
 }
@@ -96,8 +128,9 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 
 // textSearch runs the FTS5 query joined back to messages (excluding
 // tombstones) and returns hits ranked by bm25, best match first. Every
-// caller reaches this through Search, which already rejects a blank query,
-// so fq (derived from in.Query) is never empty here.
+// caller reaches this through Search, which already rejects a blank query
+// and one left with no terms after dropping star-only words (ADR 0019), so
+// fq (derived from in.Query) is never empty here.
 func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, error) {
 	fq := ftsQuery(in.Query)
 	filters, fargs := b.searchFilters(as, in)
@@ -143,6 +176,11 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	}
 	if strings.TrimSpace(in.Query) == "" {
 		return SearchResult{}, errf("validation", false, "query is required")
+	}
+	// A query of only stars has no term to match or embed (ADR 0019);
+	// refused here, before the mode switch, so semantic mode never embeds it.
+	if len(searchTerms(in.Query)) == 0 {
+		return SearchResult{}, errf("validation", false, "query must contain a word; * alone matches nothing")
 	}
 	if in.Channel != "" && !b.dmReadable(as, in.Channel) {
 		// No %q: see the matching comment in History.

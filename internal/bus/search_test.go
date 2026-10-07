@@ -105,3 +105,47 @@ func TestSearchFiltersBySinceAndUntilAndOrdersByScore(t *testing.T) {
 		}
 	}
 }
+
+// TestFTSQueryPrefixTerms (ADR 0019): a term ending in * becomes a quoted
+// prefix phrase; a term that is only stars is dropped; a star anywhere else
+// stays inside the quotes; embedded quotes are still doubled.
+func TestFTSQueryPrefixTerms(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"e159e8c*", `"e159e8c"*`},
+		{"commit:e159e8c*", `"commit:e159e8c"*`},
+		{"ericfitz/agentbus@e159*", `"ericfitz/agentbus@e159"*`},
+		{"a**", `"a"*`},
+		{"*", ""},
+		{"**", ""},
+		{"* **", ""},
+		{"widget *", `"widget"`},
+		{"a*b", `"a*b"`},
+		{"*abc", `"*abc"`},
+		{`say "hi"`, `"say" """hi"""`},
+		{"deploy widget", `"deploy" "widget"`},
+	}
+	for _, c := range cases {
+		if got := ftsQuery(c.in); got != c.want {
+			t.Errorf("ftsQuery(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSearchRejectsStarOnlyQuery (ADR 0019): a query left with no terms
+// after dropping star-only words is refused with validation in every
+// mode, before any MATCH is built or anything is embedded.
+func TestSearchRejectsStarOnlyQuery(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	for _, q := range []string{"*", "**", "* **"} {
+		for _, mode := range []string{"text", "semantic", "both"} {
+			if _, err := b.Search(sam, SearchInput{Query: q, Mode: mode}); err == nil || !strings.Contains(err.Error(), "validation") {
+				t.Fatalf("Search(%q, %s) must fail with validation, got %v", q, mode, err)
+			}
+		}
+	}
+	// A star that is not at the end of a word is plain text, not syntax.
+	if _, err := b.Search(sam, SearchInput{Query: "a*b *abc", Mode: "text"}); err != nil {
+		t.Fatalf("stars inside words must be searchable text: %v", err)
+	}
+}

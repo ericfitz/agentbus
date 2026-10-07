@@ -156,15 +156,17 @@ build_windows() {
 }
 
 # check_windows_pe: this host cannot run Windows binaries, so `file` must
-# report a PE32+ console executable for the expected machine. Actions
-# (windows.yml) and the VM run them.
+# report a PE32+ executable for the expected machine on MS Windows. The match
+# is loose (case-folded words, not one exact sentence) because the phrasing
+# differs across `file` versions. Actions (windows.yml) and the VM run them.
 check_windows_pe() {
-    local arch want got
+    local arch want got lower
     for arch in amd64 arm64; do
-        case "$arch" in amd64) want="x86-64" ;; arm64) want="Aarch64" ;; esac
+        case "$arch" in amd64) want="x86-64" ;; arm64) want="aarch64" ;; esac
         got="$(file -b "$DIST/windows-$arch/$BIN_NAME.exe")"
-        [[ "$got" == "PE32+ executable (console) $want, for MS Windows"* ]] \
-            || fail "windows/$arch binary: '$got' (want PE32+ executable (console) $want)"
+        lower="$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')"
+        [[ "$lower" == *"pe32+"* && "$lower" == *"$want"* && "$lower" == *"ms windows"* ]] \
+            || fail "windows/$arch binary: '$got' (want a PE32+ executable for $want on MS Windows)"
     done
 }
 

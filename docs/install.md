@@ -56,7 +56,8 @@ arm64) and adds that directory to your user `PATH`; open a new terminal
 afterwards. Windows PowerShell 5.1 and PowerShell 7 both work. The script
 verifies the release's Ed25519-signed `SHA256SUMS` with OpenSSL 3 and then
 the zip's hash. It looks for OpenSSL 3 on `PATH` first, then in Git for
-Windows (`usr\bin\openssl.exe`, then `mingw64\bin\openssl.exe`);
+Windows (`usr\bin\openssl.exe`, `mingw64\bin\openssl.exe`, then, on ARM64,
+`clangarm64\bin\openssl.exe`);
 `winget install --id Git.Git -e` provides one, and without OpenSSL 3 the
 script refuses. Rerunning upgrades: a running `agentbus.exe` is renamed, not
 overwritten, so restart harness sessions and the TUI afterwards. The script

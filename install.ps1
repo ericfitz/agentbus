@@ -36,14 +36,26 @@ function Get-Arch {
     }
 }
 
+# Get-OpenSslVersion returns the "OpenSSL X.Y.Z ..." line the executable
+# prints for `version`, or $null. Windows PowerShell 5.1 turns captured stderr
+# into a terminating error under 'Stop' (an OpenSSL config warning is enough),
+# so the call runs with the preference relaxed; the output is collected whole.
+function Get-OpenSslVersion([string]$Exe) {
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 1 # a launch failure must not read a stale 0
+    try { $out = @(& $Exe version 2>&1 | ForEach-Object { "$_" }) } catch { return $null } finally { $ErrorActionPreference = $eap }
+    return ($out | Where-Object { $_ -match '^OpenSSL \d+\.' } | Select-Object -First 1)
+}
+
 function Get-OpenSslMajor([string]$Exe) {
-    try { $v = (& $Exe version 2>$null | Select-Object -First 1) } catch { return $null }
+    $v = Get-OpenSslVersion $Exe
     if ("$v" -match '^OpenSSL (\d+)\.') { return [int]$Matches[1] }
     return $null
 }
 
 # Find-OpenSsl returns the first OpenSSL 3+ among: openssl on PATH, then Git
-# for Windows' usr\bin\openssl.exe and mingw64\bin\openssl.exe.
+# for Windows' usr\bin\openssl.exe, mingw64\bin\openssl.exe and (ARM64 builds)
+# clangarm64\bin\openssl.exe.
 function Find-OpenSsl {
     $candidates = @()
     $onPath = Get-Command openssl -ErrorAction SilentlyContinue
@@ -55,16 +67,18 @@ function Find-OpenSsl {
             if ($exec) { $gitRoot = (Resolve-Path (Join-Path $exec '..\..\..')).Path }
         } catch { $gitRoot = $null }
     }
-    if (-not $gitRoot) { $gitRoot = Join-Path $env:ProgramFiles 'Git' }
-    foreach ($rel in @('usr\bin\openssl.exe', 'mingw64\bin\openssl.exe')) {
-        $p = Join-Path $gitRoot $rel
-        if (Test-Path -LiteralPath $p) { $candidates += $p }
+    if (-not $gitRoot -and $env:ProgramFiles) { $gitRoot = Join-Path $env:ProgramFiles 'Git' }
+    if ($gitRoot) {
+        foreach ($rel in @('usr\bin\openssl.exe', 'mingw64\bin\openssl.exe', 'clangarm64\bin\openssl.exe')) {
+            $p = Join-Path $gitRoot $rel
+            if (Test-Path -LiteralPath $p) { $candidates += $p }
+        }
     }
     $old = $null
     foreach ($cand in $candidates) {
         $major = Get-OpenSslMajor $cand
         if ($major -ge 3) { return $cand }
-        if ($major -and -not $old) { $old = "$cand ($(& $cand version 2>$null | Select-Object -First 1))" }
+        if ($major -and -not $old) { $old = "$cand ($(Get-OpenSslVersion $cand))" }
     }
     if ($old) {
         throw "agentbus install: found $old, but verifying the release signature needs OpenSSL 3. Install Git for Windows (winget install --id Git.Git -e), which ships OpenSSL 3, or rerun with AGENTBUS_SKIP_SIGNATURE=1 to verify the hash only"
@@ -159,12 +173,24 @@ function Install-Binary([string]$Dir, [string]$Asset, [string]$InstallDir) {
     }
 }
 
+# Add-UserPath appends $Dir to the user Path in the registry. The value is read
+# and written as stored: GetEnvironmentVariable expands %VAR% entries and
+# SetEnvironmentVariable writes REG_SZ, which would bake every expansion into
+# the user's Path and change its type.
 function Add-UserPath([string]$Dir) {
-    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $parts = @()
-    if ($user) { $parts = @($user -split ';' | Where-Object { $_ }) }
-    if ($parts -contains $Dir) { return }
-    [Environment]::SetEnvironmentVariable('Path', (($parts + $Dir) -join ';'), 'User')
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $user = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $parts = @($user -split ';' | Where-Object { $_ })
+        foreach ($part in $parts) {
+            if ($part -eq $Dir -or [Environment]::ExpandEnvironmentVariables($part) -eq $Dir) { return }
+        }
+        $key.SetValue('Path', (($parts + $Dir) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+    } finally { $key.Close() }
+    # SetEnvironmentVariable broadcasts WM_SETTINGCHANGE, which the registry
+    # write above does not; deleting a variable that does not exist is the
+    # cheapest way to send it, so running programs see the new Path.
+    try { [Environment]::SetEnvironmentVariable('AGENTBUS_PATH_REFRESH', $null, 'User') } catch { }
     Write-Host "added $Dir to your user PATH; new terminals pick it up"
 }
 

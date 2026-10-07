@@ -22,11 +22,36 @@ $OpenSsl = $null
 $HostExe = (Get-Process -Id $PID).Path
 $IsWin = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $Hidden = if ($IsWin) { @{ WindowStyle = 'Hidden' } } else { @{} }
-$SavedUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+
+# Get-RawUserPath reads the user Path value from the registry as stored (%VAR%
+# entries unexpanded) with its value kind, so Cleanup puts back exactly what
+# was there. Outside Windows there is no registry: Value is null.
+function Get-RawUserPath {
+    if (-not $IsWin) { return @{ Value = $null; Kind = $null } }
+    $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $v = $k.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -eq $v) { return @{ Value = $null; Kind = $null } }
+        return @{ Value = [string]$v; Kind = $k.GetValueKind('Path') }
+    } finally { $k.Close() }
+}
+
+function Set-RawUserPath([hashtable]$Saved) {
+    if (-not $IsWin) { return }
+    $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        if ($null -eq $Saved.Value) { $k.DeleteValue('Path', $false) }
+        else { $k.SetValue('Path', $Saved.Value, $Saved.Kind) }
+    } finally { $k.Close() }
+    # Let running programs see the change, as setting a user variable does.
+    try { [Environment]::SetEnvironmentVariable('AGENTBUS_PATH_REFRESH', $null, 'User') } catch { }
+}
+
+$SavedUserPath = Get-RawUserPath
 $script:Pass = 0; $script:Fail = 0
 
 function Find-OpenSsl3 {
-    foreach ($c in @('openssl', "$env:ProgramFiles\Git\usr\bin\openssl.exe", "$env:ProgramFiles\Git\mingw64\bin\openssl.exe")) {
+    foreach ($c in @('openssl', "$env:ProgramFiles\Git\usr\bin\openssl.exe", "$env:ProgramFiles\Git\mingw64\bin\openssl.exe", "$env:ProgramFiles\Git\clangarm64\bin\openssl.exe")) {
         $cmd = Get-Command $c -ErrorAction SilentlyContinue
         if ($cmd -and ((& $cmd.Source version | Select-Object -First 1) -match '^OpenSSL 3')) { return $cmd.Source }
     }
@@ -38,9 +63,10 @@ function Get-OpenSsl3 {
     return $script:OpenSsl
 }
 
-# Invoke-Ssl runs OpenSSL and throws on a non-zero exit. No stderr
-# redirection: under Windows PowerShell 5.1 with 'Stop', a redirected stderr
-# line becomes a terminating NativeCommandError.
+# Invoke-Ssl runs OpenSSL and throws on a non-zero exit. stderr is merged and
+# discarded under a relaxed ErrorActionPreference: with 'Stop', Windows
+# PowerShell 5.1 turns a redirected stderr line into a terminating
+# NativeCommandError.
 function Invoke-Ssl([string[]]$SslArgs) {
     $ssl = Get-OpenSsl3
     $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -51,9 +77,8 @@ function Invoke-Ssl([string[]]$SslArgs) {
 
 # Cleanup runs on every exit path (success, failure, Ctrl-C) and twice is fine.
 function Cleanup {
-    if ([Environment]::GetEnvironmentVariable('Path', 'User') -ne $SavedUserPath) {
-        [Environment]::SetEnvironmentVariable('Path', $SavedUserPath, 'User')
-    }
+    $cur = Get-RawUserPath
+    if ($cur.Value -ne $SavedUserPath.Value -or $cur.Kind -ne $SavedUserPath.Kind) { Set-RawUserPath $SavedUserPath }
     if ($script:Server) {
         Stop-Process -Id $script:Server.Id -Force -ErrorAction SilentlyContinue
         $null = $script:Server.WaitForExit(3000)
@@ -112,21 +137,45 @@ function Write-Sums([string]$Dir, [string]$Tag) {
     Invoke-Ssl @('pkeyutl', '-sign', '-rawin', '-inkey', (Join-Path $Work 'key.pem'), '-in', (Join-Path $Dir 'SHA256SUMS'), '-out', (Join-Path $Dir 'SHA256SUMS.sig'))
 }
 
-function New-Release([string]$Variant, [string]$Tag, [string]$Version) {
-    $d = Join-Path $Fx (Join-Path $Variant $Tag)
-    New-Item -ItemType Directory -Force -Path $d | Out-Null
-    $bin = Join-Path $d 'bin'
-    New-Item -ItemType Directory -Force -Path $bin | Out-Null
+# New-Stub builds the stub agentbus.exe (or another stub, for a fake OpenSSL
+# or git) reporting $Version.
+function New-Stub([string]$Version, [string]$Out) {
     $savedCgo = Set-EnvMap @{ 'CGO_ENABLED' = '0' }
     Push-Location (Join-Path (Join-Path $Here 'testdata') 'stub')
     try {
-        & go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $bin 'agentbus.exe') .
+        & go build -trimpath -ldflags "-s -w -X 'main.version=$Version'" -o $Out .
         if ($LASTEXITCODE -ne 0) { throw 'stub build failed' }
     } finally { Pop-Location; Restore-EnvMap $savedCgo }
-    foreach ($a in 'amd64', 'arm64') {
-        Compress-Archive -LiteralPath (Join-Path $bin 'agentbus.exe') -DestinationPath (Join-Path $d "agentbus-$Tag-windows-$a.zip") -Force
+}
+
+# Get-HostArch is the architecture of this machine as the release assets name
+# it, read independently of install.ps1's Get-Arch (which uses
+# RuntimeInformation) so a wrong choice there is caught.
+function Get-HostArch {
+    if ($IsWin) { $a = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+    else { $a = (& uname -m) }
+    switch -Regex ("$a".ToLower()) {
+        '^(amd64|x86_64)$' { return 'amd64' }
+        '^(arm64|aarch64)$' { return 'arm64' }
+        default { throw "test-install.ps1: unsupported host architecture '$a'" }
     }
-    Remove-Item -Recurse -Force $bin
+}
+
+# New-Release writes one release directory. The zip for this machine's
+# architecture holds a stub reporting $Version; the other zip's stub reports
+# WRONGARCH-$Version, so installing the wrong asset fails every case that
+# checks the version.
+function New-Release([string]$Variant, [string]$Tag, [string]$Version) {
+    $d = Join-Path $Fx (Join-Path $Variant $Tag)
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+    $hostArch = Get-HostArch
+    foreach ($a in 'amd64', 'arm64') {
+        $bin = Join-Path $d "bin-$a"
+        New-Item -ItemType Directory -Force -Path $bin | Out-Null
+        New-Stub $(if ($a -eq $hostArch) { $Version } else { "WRONGARCH-$Version" }) (Join-Path $bin 'agentbus.exe')
+        Compress-Archive -LiteralPath (Join-Path $bin 'agentbus.exe') -DestinationPath (Join-Path $d "agentbus-$Tag-windows-$a.zip") -Force
+        Remove-Item -Recurse -Force $bin
+    }
     Copy-Item (Join-Path $Fx 'install.ps1') (Join-Path $d 'install.ps1')
     Write-Sums $d $Tag
 }
@@ -149,6 +198,24 @@ function Build-Fixture {
     New-Item -ItemType Directory -Force -Path $fakes, $fakes3 | Out-Null
     Set-Content -LiteralPath (Join-Path $fakes 'openssl.cmd') -Value '@echo OpenSSL 1.1.1w  11 Sep 2023'
     Set-Content -LiteralPath (Join-Path $fakes3 'openssl.cmd') -Value @('@echo off', 'if "%1"=="version" (echo OpenSSL 3.0.13 30 Jan 2024 & exit /b 0)', 'exit /b 1')
+    # fakes-stderr: OpenSSL 3 that also writes a warning to stderr (found and
+    # used); fakes1-stderr: OpenSSL 1.x that writes to stderr (reported as too old).
+    $fakesErr = Join-Path $Fx 'fakes-stderr'; $fakes1Err = Join-Path $Fx 'fakes1-stderr'
+    New-Item -ItemType Directory -Force -Path $fakesErr, $fakes1Err | Out-Null
+    Set-Content -LiteralPath (Join-Path $fakesErr 'openssl.cmd') -Value @('@echo off', 'echo a configuration warning 1>&2', 'if "%1"=="version" (echo OpenSSL 3.0.13 30 Jan 2024 & exit /b 0)', 'exit /b 1')
+    Set-Content -LiteralPath (Join-Path $fakes1Err 'openssl.cmd') -Value @('@echo off', 'echo a configuration warning 1>&2', 'echo OpenSSL 1.1.1w  11 Sep 2023')
+    # fakegit: a Git for Windows ARM64 layout (clangarm64, no usr or mingw64
+    # openssl) whose git.cmd reports its exec path; openssl.exe is a stub that
+    # claims OpenSSL 3 and exits 0 for any call.
+    if ($IsWin) {
+        $fg = Join-Path $Fx 'fakegit'
+        New-Item -ItemType Directory -Force -Path (Join-Path $fg 'cmd'), (Join-Path $fg 'mingw64\libexec\git-core'), (Join-Path $fg 'clangarm64\bin') | Out-Null
+        Set-Content -LiteralPath (Join-Path $fg 'cmd\git.cmd') -Value "@echo $fg\mingw64\libexec\git-core"
+        New-Stub 'OpenSSL 3.0.99 stub' (Join-Path $fg 'clangarm64\bin\openssl.exe')
+    }
+    # probe-find-openssl.ps1 dot-sources the install.ps1 copy and reports what
+    # Find-OpenSsl does (it runs on any OS, unlike Main's drive-path checks).
+    [IO.File]::WriteAllText((Join-Path $Fx 'probe-find-openssl.ps1'), ". (Join-Path (Split-Path -Parent `$MyInvocation.MyCommand.Path) 'install.ps1')`ntry { `$null = Find-OpenSsl; Write-Output 'FOUND' } catch { Write-Output ('THREW: ' + `$_.Exception.Message) }`n")
     foreach ($tag in 'v9.0.0', 'v9.0.1') { New-Release 'valid' $tag $tag.Substring(1) }
     Set-Content -LiteralPath (Join-Path (Join-Path $Fx 'valid') 'latest') -Value 'v9.0.1'
     foreach ($v in 'tampered-zip', 'tampered-sums', 'tampered-sig', 'missing-entry', 'broken-exe', 'slow') {
@@ -317,6 +384,10 @@ function Invoke-SelfTest {
     Expand-Archive -LiteralPath (Join-Path $Fx 'valid/v9.0.0/agentbus-v9.0.0-windows-amd64.zip') -DestinationPath (Join-Path $Work 'x') -Force
     if (-not $IsWin) { & chmod +x (Join-Path $Work 'x/agentbus.exe') } # Expand-Archive drops the mode on Unix
     Assert 'self: stub prints its version' ((& (Join-Path $Work 'x/agentbus.exe') version) -eq '9.0.0')
+    $other = if ((Get-HostArch) -eq 'amd64') { 'arm64' } else { 'amd64' }
+    Expand-Archive -LiteralPath (Join-Path $Fx "valid/v9.0.0/agentbus-v9.0.0-windows-$other.zip") -DestinationPath (Join-Path $Work 'y') -Force
+    if (-not $IsWin) { & chmod +x (Join-Path $Work 'y/agentbus.exe') }
+    Assert 'self: the non-host-arch zip holds a stub that reports WRONGARCH' ((& (Join-Path $Work 'y/agentbus.exe') version) -eq 'WRONGARCH-9.0.0')
     if ($IsWin) {
         $fake3 = Join-Path $Fx 'fakes3/openssl.cmd'
         $ver3 = (& $fake3 version | Select-Object -First 1)
@@ -379,6 +450,13 @@ function Invoke-SelfTest {
     Invoke-Case 'self: . { iex } runs Main' 1 'AGENTBUS_SKIP_SIGNATURE must be 1 or unset' @{ 'AGENTBUS_SKIP_SIGNATURE' = 'yes' } '' $null $null 'iex-dot'
     Invoke-Case 'self: iex refusal is a throw' 7 'THROWN: agentbus install: AGENTBUS_SKIP_SIGNATURE must be 1 or unset' @{ 'AGENTBUS_SKIP_SIGNATURE' = 'yes' } '' $null $null 'iex-catch'
 
+    # Find-OpenSsl with nothing on PATH and ProgramFiles unset must reach its
+    # own "none was found" message, not a Join-Path binding error.
+    $emptyDir = Join-Path $Work 'empty-path'
+    New-Item -ItemType Directory -Force -Path $emptyDir | Out-Null
+    $pathVar = if ($IsWin) { 'Path' } else { 'PATH' }
+    Invoke-Case 'self: Find-OpenSsl with ProgramFiles unset says none was found' 0 'THREW: agentbus install: OpenSSL 3 is required to verify the release signature and none was found' @{ $pathVar = $emptyDir; 'ProgramFiles' = '' } '' $null $null 'file' 'probe-find-openssl.ps1'
+
     Start-Server
     $srv = $script:Server
     $req = [System.Net.HttpWebRequest]::Create("$Base/valid/releases/latest"); $req.Method = 'HEAD'; $req.AllowAutoRedirect = $false
@@ -395,7 +473,8 @@ function Invoke-SelfTest {
     Cleanup
     Assert 'self: cleanup stopped the server' ($srv.HasExited)
     Assert 'self: cleanup removed the work directory' (-not (Test-Path -LiteralPath $Work))
-    Assert 'self: user PATH restored' ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $SavedUserPath)
+    $cur = Get-RawUserPath
+    Assert 'self: user PATH restored' (($cur.Value -eq $SavedUserPath.Value) -and ($cur.Kind -eq $SavedUserPath.Kind))
 }
 
 function Invoke-Cases {
@@ -405,6 +484,16 @@ function Invoke-Cases {
     $fake3Path = @{ 'Path' = (Join-Path $Fx 'fakes3') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
     Invoke-Case 'valid' 0 'installed agentbus 9.0.1' @{} $dir $null { (& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1' }
     Invoke-Case 'path-added' 0 'to your user PATH' @{} (Join-Path $Work 'bin2') $null { (Get-UserPathEntries) -contains (Join-Path $Work 'bin2') }
+    # A %VAR% entry in the user Path survives the edit, and the value stays
+    # REG_EXPAND_SZ.
+    $dirX = Join-Path $Work 'bin-expand'
+    Invoke-Case 'path-keeps-expand-entries' 0 'to your user PATH' @{} $dirX {
+        $raw = Get-RawUserPath
+        Set-RawUserPath @{ Value = ('%USERPROFILE%\agentbus-itest-marker;' + $raw.Value); Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    } {
+        $raw = Get-RawUserPath
+        $raw.Value.Contains('%USERPROFILE%\agentbus-itest-marker') -and ($raw.Kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) -and $raw.Value.Contains($dirX)
+    }
     Invoke-Case 'pinned-version' 0 'installed agentbus 9.0.0' @{ 'AGENTBUS_VERSION' = 'v9.0.0' } $dir $null $null
     Invoke-Case 'version-no-v' 1 'version must look like vX.Y.Z' @{ 'AGENTBUS_VERSION' = '9.0.0' } $dir $null $null
     Invoke-Case 'latest-404' 1 'could not determine the latest release' @{ 'AGENTBUS_BASE_URL' = "$Base/nope" } $dir $null $null
@@ -413,6 +502,13 @@ function Invoke-Cases {
     Invoke-Case 'tampered-sig' 1 'signature check of SHA256SUMS failed' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-sig" } $dir $null $null
     Invoke-Case 'sums-missing-entry' 1 'SHA256SUMS has no entry for' @{ 'AGENTBUS_BASE_URL' = "$Base/missing-entry" } $dir $null $null
     Invoke-Case 'no-openssl' 1 'none was found' $noGit $dir $null $null
+    $fakeErrPath = @{ 'Path' = (Join-Path $Fx 'fakes-stderr') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
+    $fake1ErrPath = @{ 'Path' = (Join-Path $Fx 'fakes1-stderr') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
+    $fakeGitPath = @{ 'Path' = (Join-Path $Fx 'fakegit\cmd') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
+    Invoke-Case 'openssl-stderr-warning-still-found' 1 'signature check of SHA256SUMS failed' $fakeErrPath $dir $null $null
+    Invoke-Case 'openssl-too-old-with-stderr' 1 'OpenSSL 1.1.1w' $fake1ErrPath $dir $null $null
+    Invoke-Case 'git-clangarm64-openssl-found' 0 'installed agentbus 9.0.1' $fakeGitPath $dir $null $null
+    Invoke-Case 'no-programfiles' 1 'none was found' @{ 'Path' = "$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = '' } $dir $null $null
     Invoke-Case 'openssl-too-old' 1 'OpenSSL 1.1.1w' $fakePath $dir $null $null
     Invoke-Case 'skip-signature-valid' 0 'skipping the signature check' ($noGit + @{ 'AGENTBUS_SKIP_SIGNATURE' = '1' }) $dir $null $null
     Invoke-Case 'skip-signature-tampered' 1 'checksum mismatch' @{ 'AGENTBUS_SKIP_SIGNATURE' = '1'; 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null

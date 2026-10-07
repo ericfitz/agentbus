@@ -181,6 +181,26 @@ for a in amd64 arm64; do (cd "$WORK/repo" && printf 'package main\nfunc main(){}
 check pe-ok 0 "" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
 printf 'not a PE\n' > "$WORK/pe/windows-arm64/agentbus.exe"
 check pe-wrong 1 "windows/arm64 binary" -- bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
+# check_windows_pe matches loosely, so a newer `file` phrasing still passes:
+# a stub `file` on PATH prints FILE_OUT_<arch> for the matching binary.
+mkdir -p "$WORK/filebin"
+cat > "$WORK/filebin/file" <<'STUB'
+#!/bin/sh
+case "$2" in
+*windows-amd64*) printf '%s\n' "$FILE_OUT_AMD64" ;;
+*) printf '%s\n' "$FILE_OUT_ARM64" ;;
+esac
+STUB
+chmod +x "$WORK/filebin/file"
+pe_stub() { # <name> <status> <message> <amd64 line> <arm64 line>
+    check "$1" "$2" "$3" -- env PATH="$WORK/filebin:$PATH" FILE_OUT_AMD64="$4" FILE_OUT_ARM64="$5" bash -c "source '$HERE/release.sh'; DIST='$WORK/pe'; check_windows_pe"
+}
+pe_stub pe-old-phrasing 0 "" "PE32+ executable (console) x86-64, for MS Windows" "PE32+ executable (console) Aarch64, for MS Windows"
+pe_stub pe-new-phrasing 0 "" "PE32+ executable for MS Windows 5.02 (console), x86-64, 7 sections" "PE32+ executable for MS Windows 5.02 (console), Aarch64, 7 sections"
+pe_stub pe-case-folded 0 "" "pe32+ executable (console) X86-64, for ms windows" "PE32+ EXECUTABLE (console) AARCH64, for MS WINDOWS"
+pe_stub pe-swapped-arch 1 "windows/amd64 binary" "PE32+ executable (console) Aarch64, for MS Windows" "PE32+ executable (console) x86-64, for MS Windows"
+pe_stub pe-not-pe32plus 1 "windows/amd64 binary" "PE32 executable (console) Intel 80386, for MS Windows" "PE32+ executable (console) Aarch64, for MS Windows"
+pe_stub pe-not-windows 1 "windows/arm64 binary" "PE32+ executable (console) x86-64, for MS Windows" "ELF 64-bit LSB executable, ARM aarch64"
 # copy_scripts ships install.ps1 and refuses an unembedded one like install.sh.
 mkdir -p "$WORK/cs/src" "$WORK/cs/dist"
 cp "$WORK/real-install.sh" "$WORK/cs/src/install.sh"
@@ -213,7 +233,6 @@ rerun_push_case() { # <function> <dir-var> <name>
     check "$name-pushed" 0 "" -- bash -c "[[ \$(git -C '$clone' rev-list --count @{u}..HEAD) == 0 && \$(git -C '$WORK/rp-origin.git' log --oneline | wc -l) -ge 2 ]]"
 }
 rerun_push_case update_tap TAP_DIR tap
-git -C "$WORK/rp-origin.git" update-ref -d refs/heads/none 2>/dev/null || true
 rerun_push_case update_scoop SCOOP_DIR scoop
 
 echo "test-release: $PASS passed, $FAIL failed"

@@ -42,6 +42,15 @@ openssl pkeyutl -verify -rawin -pubin -inkey agentbus-release-ed25519.pub -in SH
 grep agentbus-vX.Y.Z-linux-amd64.tar.gz SHA256SUMS | sha256sum -c
 ```
 
+The Linux and Windows archives are built in GitHub Actions on runners of
+their own OS and architecture and carry a build provenance attestation.
+With the GitHub CLI you can check that an archive was built from this
+repository by that workflow, in addition to the signature check:
+
+```sh
+gh attestation verify agentbus-vX.Y.Z-linux-amd64.tar.gz --repo ericfitz/agentbus
+```
+
 Homebrew on Linux works too: `brew install ericfitz/tap/agentbus` installs
 the static amd64 or arm64 binary.
 
@@ -122,9 +131,16 @@ which may lag the tag. From a clone, `CGO_ENABLED=0 go build -o agentbus .`
 at the repository root does the same. Put the binary on your `PATH` so
 harnesses can find it by name.
 
-Maintainers cut a release with `release/release.sh <tag>`; every release
-carries `SHA256SUMS` over all archives and `install.sh`, signed with the
-Ed25519 release key.
+Maintainers cut a release with `release/release.sh <tag>` (a stable `vX.Y.Z`
+tag that is already pushed): macOS is built and notarized locally, the other
+archives come from the `release-build` workflow, and the release is a draft
+until `SHA256SUMS` is signed. The script needs an authenticated `gh` that can
+verify attestations, and `.github/workflows/release-build.yml` must be on the
+default branch and in the tag, because `gh workflow run --ref <tag>` only
+dispatches a workflow the default branch knows. The workflow builds and runs
+each Windows zip's binary on a native Windows runner. `--no-publish` stops with
+the signed draft for a dry run. Every release carries `SHA256SUMS` over all
+archives, `install.sh` and `install.ps1`, signed with the Ed25519 release key.
 
 ## Before first run: bootstrap with `agentbus init`
 

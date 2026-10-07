@@ -56,8 +56,8 @@ END;`
 // TestMigrateV1DropsMessagesBytes (ADR 0006 item 4): opening a schema
 // version 1 database rebuilds messages without bytes in one transaction,
 // keeps every row and FTS entry, carries the AUTOINCREMENT counter over,
-// and stamps user_version 2. The chain keeps every row and FTS entry, but
-// row 1's embedding is dropped because foldRefs changes its content.
+// and stamps user_version 2. Row 1's embedding is dropped by the chain
+// because foldRefs changes its content.
 func TestMigrateV1DropsMessagesBytes(t *testing.T) {
 	// Row 1 carries refs (a path with a space, a URL with non-ASCII and a
 	// query string) so the v11 fold is proven through the messages_v2 and
@@ -1027,7 +1027,7 @@ func TestMigrateV10FoldsRefs(t *testing.T) {
 		"/tmp/b":           5,
 		"example.com/chat": 8,
 		"example.com/rev2": 10,
-		"control":          4,  // quoted newline
+		"nb":               4,  // token of the quoted newline "a\nb"
 		"json":             7,  // Refs: not json
 		"kind":             12, // raw array
 		"issue link":       1,  // the old entry was replaced, not duplicated
@@ -1050,6 +1050,60 @@ func TestMigrateV10FoldsRefs(t *testing.T) {
 	}
 	if failed != "11" {
 		t.Fatalf("embed_failures after the fold: %q, want 11 (a folded row's rejection concerned its old content)", failed)
+	}
+}
+
+// TestMigrateV8FileWithoutEmbedFailuresFoldsRefs (ADR 0019): a file last
+// written by a binary through v1.12.0 (schema 8) has the refs column but no
+// embed_failures table, which only the schema DDL creates and which runs
+// after migrate. The fold must not touch that table when it is absent, and
+// the DDL creates it afterwards.
+func TestMigrateV8FileWithoutEmbedFailuresFoldsRefs(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{schema,
+		"DROP INDEX sessions_heartbeat", "DROP TABLE sessions", schemaV8Sessions,
+		"DROP TABLE embed_failures",
+		"ALTER TABLE messages ADD COLUMN refs TEXT",
+		"PRAGMA user_version = 8",
+		`INSERT INTO messages(channel,sender,context,created_at,type,content,memory_id,revision,refs) VALUES('memory','sam','r',1,'','issue link',1,1,'[{"kind":"url","value":"https://github.com/ericfitz/agentbus/issues/874"}]')`,
+		"INSERT INTO embeddings(seq,model,vector) VALUES(1,'m',x'00')",
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open v8 file with live refs and no embed_failures: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+		t.Fatalf("user_version = %d, want %d, %v", uv, schemaVersion, err)
+	}
+	var content string
+	if err := b.db.QueryRow("SELECT content FROM messages WHERE seq=1").Scan(&content); err != nil || content != foldedSeq1 {
+		t.Fatalf("content = %q, want %q, %v", content, foldedSeq1, err)
+	}
+	var embedded, failures int
+	if err := b.db.QueryRow("SELECT (SELECT count(*) FROM embeddings), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='embed_failures')").Scan(&embedded, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if embedded != 0 || failures != 1 {
+		t.Fatalf("embeddings = %d (want 0, folded row re-embeds), embed_failures tables = %d (want 1, created by the DDL)", embedded, failures)
 	}
 }
 

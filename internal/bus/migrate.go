@@ -379,6 +379,13 @@ func foldRefs(tx *sql.Tx) error {
 	if has == 0 {
 		return nil
 	}
+	// embed_failures is created only by the schema DDL, which runs after
+	// migrate, so a file last written by a binary through v1.12.0 (schema
+	// 8) lacks it and has no failures to clear.
+	var hasFailures int
+	if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='embed_failures'").Scan(&hasFailures); err != nil {
+		return err
+	}
 	type fold struct {
 		seq                     int64
 		subject, content, block string // block is the text appended to content
@@ -413,9 +420,13 @@ func foldRefs(tx *sql.Tx) error {
 			{"UPDATE messages SET content=? WHERE seq=?", []any{next, f.seq}},
 			{"INSERT INTO messages_fts(rowid, subject, content) VALUES(?, ?, ?)", []any{f.seq, f.subject, next}},
 			{"DELETE FROM embeddings WHERE seq=?", []any{f.seq}},
-			{"DELETE FROM embed_failures WHERE seq=?", []any{f.seq}},
 		} {
 			if _, err := tx.Exec(s.q, s.args...); err != nil {
+				return err
+			}
+		}
+		if hasFailures > 0 {
+			if _, err := tx.Exec("DELETE FROM embed_failures WHERE seq=?", f.seq); err != nil {
 				return err
 			}
 		}

@@ -1,3 +1,15 @@
+## Install on Windows
+
+Run this in PowerShell, then open a new terminal:
+
+    irm https://github.com/ericfitz/agentbus/releases/latest/download/install.ps1 | iex
+
+It verifies the download, installs `agentbus.exe` to
+`%LocalAppData%\Programs\agentbus` and adds it to your user `PATH`. Unzipping
+`agentbus-v1.14.1-windows-<arch>.zip` by hand does not install it (the zip's
+`README.txt` has the manual steps), and `agentbus init` refuses to run until
+the `agentbus.exe` on `PATH` is the one you ran.
+
 ## Windows
 
 agentbus runs natively on Windows 10/11 (amd64 and arm64): `agentbus wait`
@@ -68,7 +80,7 @@ message (#33, ADR 0019).
 
 ## Upgrading
 
-This release moves the database to **schema v11**. The first 1.14.0 process
+This release moves the database to **schema v11**. The first 1.14.1 process
 to open it migrates it, and older binaries then refuse it.
 
 1. `brew upgrade agentbus`

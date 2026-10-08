@@ -28,17 +28,21 @@ func splitTags(v string) []string {
 	return parts
 }
 
+// usage is the top-level usage line, printed to stdout for help and to
+// stderr when no command is given.
+const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|stop-hook|subagent-hook|version> [flags]"
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|stop-hook|subagent-hook|version> [flags]")
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
 	code := run(os.Args[1], os.Args[2:])
 	os.Exit(code)
 }
 
-func loadConfig(args []string) (config.Config, error) {
-	fs := flag.NewFlagSet("agentbus", flag.ContinueOnError)
+func loadConfig(cmd string, args []string) (config.Config, error) {
+	fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
 	path := fs.String("config", "", "configuration file")
 	if err := fs.Parse(args); err != nil {
 		return config.Config{}, err
@@ -47,11 +51,22 @@ func loadConfig(args []string) (config.Config, error) {
 	return cfg, err
 }
 
+// parseExit maps a flag parse error to an exit code: -h/--help is success.
+func parseExit(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	return 2
+}
+
 // run dispatches a subcommand.
 func run(cmd string, args []string) int {
 	switch cmd {
 	case "mcp":
-		cfg, err := loadConfig(args)
+		cfg, err := loadConfig(cmd, args)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if err != nil {
 			// The only stderr line the mcp command ever writes: a fatal
 			// config error before serving.
@@ -70,7 +85,7 @@ func run(cmd string, args []string) int {
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
 		path := fs.String("config", "", "configuration file")
 		if err := fs.Parse(args); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
 		if err != nil {
@@ -88,7 +103,7 @@ func run(cmd string, args []string) int {
 		path := fs.String("config", "", "configuration file")
 		as := fs.String("as", "", "identity to register as (default: tui_name from the config)")
 		if err := fs.Parse(args); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
 		if err != nil {
@@ -111,7 +126,7 @@ func run(cmd string, args []string) int {
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep waiting after the harness that started this wait exits (default: exit 4, silently)")
 		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity replaced this one, exit 4 that the harness that started it is gone")
 		if err := fs.Parse(args); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
 		if err != nil {
@@ -149,7 +164,10 @@ func run(cmd string, args []string) int {
 	case "stop-hook":
 		// Installed as a Stop hook by init --global. Always exits 0 so a
 		// broken bus never keeps a harness from stopping.
-		cfg, err := loadConfig(args)
+		cfg, err := loadConfig(cmd, args)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 0
@@ -159,14 +177,20 @@ func run(cmd string, args []string) int {
 	case "subagent-hook":
 		// Installed as a Claude Code SubagentStart hook by init --global
 		// (ADR 0016). Always exits 0 and prints nothing on any failure.
-		cfg, err := loadConfig(args)
+		cfg, err := loadConfig(cmd, args)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 0
 		}
 		cli.SubagentHook(cfg, os.Stdin, os.Stdout, os.Stderr)
 		return 0
-	case "version":
+	case "help", "-h", "--help":
+		fmt.Println(usage)
+		return 0
+	case "version", "-v", "--version":
 		fmt.Println(mcpserver.Version)
 		return 0
 	case "identity":
@@ -181,7 +205,10 @@ func run(cmd string, args []string) int {
 		}
 		return 0
 	case "status":
-		cfg, err := loadConfig(args)
+		cfg, err := loadConfig(cmd, args)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
@@ -192,7 +219,10 @@ func run(cmd string, args []string) int {
 		}
 		return 0
 	case "reset":
-		cfg, err := loadConfig(args)
+		cfg, err := loadConfig(cmd, args)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
@@ -206,7 +236,9 @@ func run(cmd string, args []string) int {
 		fs := flag.NewFlagSet("agentbus delete-channel", flag.ContinueOnError)
 		path := fs.String("config", "", "configuration file")
 		yes := fs.Bool("y", false, "skip the confirmation prompt")
-		if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
+		if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
+			return 0
+		} else if err != nil || fs.NArg() != 1 {
 			fmt.Fprintln(os.Stderr, "usage: agentbus delete-channel [-y] <channel>")
 			return 2
 		}
@@ -225,7 +257,7 @@ func run(cmd string, args []string) int {
 		fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
 		tags := fs.String("tags", "", "comma-separated tag set to follow instead of a channel; a tag ending in * matches every tag with that prefix (env:*)")
 		if err := fs.Parse(args); err != nil {
-			return 2
+			return parseExit(err)
 		}
 		if (fs.NArg() != 1) == (*tags == "") {
 			fmt.Fprintf(os.Stderr, "usage: agentbus %s <channel> | agentbus %s -tags <tag|prefix*>[,<tag|prefix*>...]\n", cmd, cmd)

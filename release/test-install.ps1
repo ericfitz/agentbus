@@ -182,9 +182,11 @@ function New-Release([string]$Variant, [string]$Tag, [string]$Version) {
 
 # Build-Fixture: stub exe for two versions, zips, SHA256SUMS, signature, and
 # the variants valid, tampered-zip, tampered-sums, tampered-sig,
-# missing-entry, broken-exe (a zip whose agentbus.exe cannot run) and slow.
-# Also install-placeholder.ps1 (a copy still holding the placeholder key) and
-# fakes holding stand-in openssl.cmd files.
+# missing-entry, broken-exe (a zip whose agentbus.exe cannot run), slow,
+# no-windows-build (SHA256SUMS and signature but no zips, like a release from
+# before v1.14.1) and no-sums (zips but no SHA256SUMS). Also
+# install-placeholder.ps1 (a copy still holding the placeholder key), fakes
+# holding stand-in openssl.cmd files, and fake Git for Windows layouts.
 function Build-Fixture {
     New-Item -ItemType Directory -Force -Path $Fx | Out-Null
     Invoke-Ssl @('genpkey', '-algorithm', 'ed25519', '-out', (Join-Path $Work 'key.pem'))
@@ -212,18 +214,25 @@ function Build-Fixture {
         New-Item -ItemType Directory -Force -Path (Join-Path $fg 'cmd'), (Join-Path $fg 'mingw64\libexec\git-core'), (Join-Path $fg 'clangarm64\bin') | Out-Null
         Set-Content -LiteralPath (Join-Path $fg 'cmd\git.cmd') -Value "@echo $fg\mingw64\libexec\git-core"
         New-Stub 'OpenSSL 3.0.99 stub' (Join-Path $fg 'clangarm64\bin\openssl.exe')
+        # fakeprograms: a Program Files directory holding a Git for Windows
+        # with the same stub, for the ProgramW6432 lookup.
+        $fp = Join-Path $Fx 'fakeprograms'
+        New-Item -ItemType Directory -Force -Path (Join-Path $fp 'Git\clangarm64\bin') | Out-Null
+        Copy-Item (Join-Path $fg 'clangarm64\bin\openssl.exe') (Join-Path $fp 'Git\clangarm64\bin\openssl.exe')
     }
     # probe-find-openssl.ps1 dot-sources the install.ps1 copy and reports what
     # Find-OpenSsl does (it runs on any OS, unlike Main's drive-path checks).
-    [IO.File]::WriteAllText((Join-Path $Fx 'probe-find-openssl.ps1'), ". (Join-Path (Split-Path -Parent `$MyInvocation.MyCommand.Path) 'install.ps1')`ntry { `$f = Find-OpenSsl; Write-Output ('FOUND ' + `$f + ' Path=' + `$env:Path + ' PATH=' + `$env:PATH + ' ProgramFiles=' + `$env:ProgramFiles) } catch { Write-Output ('THREW: ' + `$_.Exception.Message) }`n")
+    [IO.File]::WriteAllText((Join-Path $Fx 'probe-find-openssl.ps1'), ". (Join-Path (Split-Path -Parent `$MyInvocation.MyCommand.Path) 'install.ps1')`ntry { `$f = Find-OpenSsl; Write-Output ('FOUND ' + `$f + ' Path=' + `$env:Path + ' PATH=' + `$env:PATH + ' ProgramFiles=' + `$env:ProgramFiles + ' ProgramW6432=' + `$env:ProgramW6432) } catch { Write-Output ('THREW: ' + `$_.Exception.Message) }`n")
     foreach ($tag in 'v9.0.0', 'v9.0.1') { New-Release 'valid' $tag $tag.Substring(1) }
     Set-Content -LiteralPath (Join-Path (Join-Path $Fx 'valid') 'latest') -Value 'v9.0.1'
-    foreach ($v in 'tampered-zip', 'tampered-sums', 'tampered-sig', 'missing-entry', 'broken-exe', 'slow') {
+    foreach ($v in 'tampered-zip', 'tampered-sums', 'tampered-sig', 'missing-entry', 'broken-exe', 'slow', 'no-windows-build', 'no-sums') {
         New-Item -ItemType Directory -Force -Path (Join-Path $Fx $v) | Out-Null
         Copy-Item -Recurse (Join-Path $Fx 'valid/v9.0.1') (Join-Path $Fx "$v/v9.0.1")
         Set-Content -LiteralPath (Join-Path $Fx "$v/latest") -Value 'v9.0.1'
     }
     foreach ($a in 'amd64', 'arm64') { Add-Byte (Join-Path $Fx "tampered-zip/v9.0.1/agentbus-v9.0.1-windows-$a.zip") }
+    foreach ($a in 'amd64', 'arm64') { Remove-Item -LiteralPath (Join-Path $Fx "no-windows-build/v9.0.1/agentbus-v9.0.1-windows-$a.zip") -Force }
+    Remove-Item -LiteralPath (Join-Path $Fx 'no-sums/v9.0.1/SHA256SUMS') -Force
     $sums = Join-Path $Fx 'tampered-sums/v9.0.1/SHA256SUMS'
     $lines = Get-Content -LiteralPath $sums
     $lines[0] = $(if ($lines[0][0] -eq 'f') { 'E' } else { 'f' }) + $lines[0].Substring(1)
@@ -343,21 +352,24 @@ function Invoke-Child([string]$Mode, [string]$ScriptPath, [string[]]$ScriptArgs)
 # otherwise) in a child host with the given environment and compares exit
 # code and output. Env maps variable names to values for the child; a null or
 # empty value removes the variable. Before and After are scriptblocks run in
-# this process around the child; After returns the extra condition.
-function Invoke-Case([string]$Name, [int]$WantExit, [string]$WantOut, [hashtable]$Env, [string]$InstallDir, [scriptblock]$Before, [scriptblock]$After, [string]$Mode = 'file', [string]$ScriptName = 'install.ps1', [string[]]$ScriptArgs = @()) {
+# this process around the child; After returns the extra condition. A
+# non-empty WantNotOut must be absent from the output.
+function Invoke-Case([string]$Name, [int]$WantExit, [string]$WantOut, [hashtable]$Env, [string]$InstallDir, [scriptblock]$Before, [scriptblock]$After, [string]$Mode = 'file', [string]$ScriptName = 'install.ps1', [string[]]$ScriptArgs = @(), [string]$WantNotOut = '') {
     $map = @{ 'AGENTBUS_BASE_URL' = "$script:Base/valid"; 'AGENTBUS_VERSION' = ''; 'AGENTBUS_INSTALL_DIR' = $InstallDir; 'AGENTBUS_SKIP_SIGNATURE' = ''; 'AGENTBUS_TEST_OSARCH' = '' }
     if ($Env) { foreach ($k in $Env.Keys) { $map[$k] = $Env[$k] } }
     # 64-bit Windows resets a starting 64-bit process's ProgramFiles from
     # ProgramW6432, so an override has to set both to reach the child
-    # (windows.yml runs 37663250838 and 37664428742).
-    if ($IsWin -and $map.ContainsKey('ProgramFiles')) { $map['ProgramW6432'] = $map['ProgramFiles'] }
+    # (windows.yml runs 37663250838 and 37664428742), unless the case sets
+    # ProgramW6432 itself.
+    if ($IsWin -and $map.ContainsKey('ProgramFiles') -and -not $map.ContainsKey('ProgramW6432')) { $map['ProgramW6432'] = $map['ProgramFiles'] }
     $saved = Set-EnvMap $map
     try {
         if ($Before) { & $Before }
         $r = Invoke-Child $Mode (Join-Path $Fx $ScriptName) $ScriptArgs
         $extra = if ($After) { [bool](& $After) } else { $true }
-        if ($r.Exit -eq $WantExit -and $r.Squashed.Contains(($WantOut -replace '\s', '')) -and $extra) { $script:Pass++; Write-Host "PASS $Name" }
-        else { $script:Fail++; Write-Host "FAIL $Name (exit=$($r.Exit) want=$WantExit extra=$extra)"; Write-Host ($r.Out -replace '(?m)^', '    ') }
+        $absent = (-not $WantNotOut) -or (-not $r.Squashed.Contains(($WantNotOut -replace '\s', '')))
+        if ($r.Exit -eq $WantExit -and $r.Squashed.Contains(($WantOut -replace '\s', '')) -and $extra -and $absent) { $script:Pass++; Write-Host "PASS $Name" }
+        else { $script:Fail++; Write-Host "FAIL $Name (exit=$($r.Exit) want=$WantExit extra=$extra absent=$absent)"; Write-Host ($r.Out -replace '(?m)^', '    ') }
     } finally {
         Restore-EnvMap $saved
     }
@@ -378,6 +390,10 @@ function Invoke-SelfTest {
     $be = Join-Path $Fx 'broken-exe/v9.0.1'
     Assert 'self: broken-exe verifies and hashes its own zips' ((Test-Verify $be) -and (@(Get-Content -LiteralPath (Join-Path $be 'SHA256SUMS')) -contains ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $be 'agentbus-v9.0.1-windows-amd64.zip')).Hash.ToLower() + '  agentbus-v9.0.1-windows-amd64.zip')))
     Assert 'self: broken-exe differs from valid' ((Get-FileHash -LiteralPath (Join-Path $be 'agentbus-v9.0.1-windows-amd64.zip')).Hash -ne (Get-FileHash -LiteralPath (Join-Path $v 'agentbus-v9.0.1-windows-amd64.zip')).Hash)
+    $nwb = Join-Path $Fx 'no-windows-build/v9.0.1'
+    Assert 'self: no-windows-build keeps SHA256SUMS and its signature but has no zip' ((Test-Verify $nwb) -and (@(Get-ChildItem -LiteralPath $nwb -Filter '*.zip').Count -eq 0))
+    $ns = Join-Path $Fx 'no-sums/v9.0.1'
+    Assert 'self: no-sums keeps the zips but has no SHA256SUMS' ((@(Get-ChildItem -LiteralPath $ns -Filter '*.zip').Count -eq 2) -and -not (Test-Path -LiteralPath (Join-Path $ns 'SHA256SUMS')))
     $pem = Get-Content -LiteralPath (Join-Path $Work 'key.pub')
     Assert 'self: install.ps1 copy carries the throwaway key' ((Get-Content -LiteralPath (Join-Path $Fx 'install.ps1') -Raw).Contains($pem[1]))
     $ph = Get-Content -LiteralPath (Join-Path $Fx 'install-placeholder.ps1') -Raw
@@ -443,9 +459,10 @@ function Invoke-SelfTest {
     Invoke-Case 'self-probe-wrong-exit (expected FAIL, not counted)' 0 'boommessage' @{ 'AGENTBUS_SELFTEST_FAIL' = '1' } '' $null $null 'file' 'probe.ps1'
     Invoke-Case 'self-probe-wrong-output (expected FAIL, not counted)' 1 'not in the output' @{ 'AGENTBUS_SELFTEST_FAIL' = '1' } '' $null $null 'file' 'probe.ps1'
     Invoke-Case 'self-probe-wrong-extra (expected FAIL, not counted)' 1 'boommessage' @{ 'AGENTBUS_SELFTEST_FAIL' = '1' } '' $null { $false } 'file' 'probe.ps1'
+    Invoke-Case -Name 'self-probe-forbidden-output-present (expected FAIL, not counted)' -WantExit 1 -WantOut 'boommessage' -Env @{ 'AGENTBUS_SELFTEST_FAIL' = '1' } -InstallDir '' -Before $null -After $null -Mode 'file' -ScriptName 'probe.ps1' -WantNotOut 'boom message'
     $gotFail = $script:Fail - $f0
     $script:Pass = $p0; $script:Fail = $f0
-    Assert 'self: Invoke-Case passes one match and fails three mismatches' (($gotPass -eq 1) -and ($gotFail -eq 3))
+    Assert 'self: Invoke-Case passes one match and fails four mismatches' (($gotPass -eq 1) -and ($gotFail -eq 4))
     Assert 'self: Invoke-Case left no AGENTBUS_ variable behind' (-not (@('AGENTBUS_BASE_URL', 'AGENTBUS_INSTALL_DIR', 'AGENTBUS_SELFTEST_FAIL', 'AGENTBUS_SKIP_SIGNATURE', 'AGENTBUS_TEST_OSARCH') | Where-Object { [Environment]::GetEnvironmentVariable($_) }))
 
     # install.ps1's own entry point under every run form. The refusals tested
@@ -507,6 +524,11 @@ function Invoke-Cases {
     Invoke-Case 'tampered-sums' 1 'signature check of SHA256SUMS failed' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-sums" } $dir $null $null
     Invoke-Case 'tampered-sig' 1 'signature check of SHA256SUMS failed' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-sig" } $dir $null $null
     Invoke-Case 'sums-missing-entry' 1 'SHA256SUMS has no entry for' @{ 'AGENTBUS_BASE_URL' = "$Base/missing-entry" } $dir $null $null
+    # A 404 for the zip is a release from before the Windows builds; a 404 for
+    # anything else (here SHA256SUMS) stays a plain download failure.
+    Invoke-Case -Name 'release-without-windows-build' -WantExit 1 -WantOut 'release v9.0.1 has no Windows build: agentbus-v9.0.1-windows-' -Env @{ 'AGENTBUS_BASE_URL' = "$Base/no-windows-build" } -InstallDir $dir -Before $null -After $null -WantNotOut 'download failed'
+    Invoke-Case -Name 'release-without-windows-build-names-the-floor' -WantExit 1 -WantOut 'Windows builds start at v1.14.1; rerun with AGENTBUS_VERSION=v1.14.1 or later' -Env @{ 'AGENTBUS_BASE_URL' = "$Base/no-windows-build"; 'AGENTBUS_VERSION' = 'v9.0.1' } -InstallDir $dir -Before $null -After $null -WantNotOut 'download failed'
+    Invoke-Case -Name 'sums-download-404-is-a-download-failure' -WantExit 1 -WantOut "download failed: $Base/no-sums/releases/download/v9.0.1/SHA256SUMS" -Env @{ 'AGENTBUS_BASE_URL' = "$Base/no-sums" } -InstallDir $dir -Before $null -After $null -WantNotOut 'no Windows build'
     Invoke-Case 'no-openssl' 1 'none was found' $noGit $dir $null $null
     $fakeErrPath = @{ 'Path' = (Join-Path $Fx 'fakes-stderr') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
     $fake1ErrPath = @{ 'Path' = (Join-Path $Fx 'fakes1-stderr') + ";$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs') }
@@ -516,27 +538,59 @@ function Invoke-Cases {
     Invoke-Case 'git-clangarm64-openssl-found' 0 'installed agentbus 9.0.1' $fakeGitPath $dir $null $null
     # No 'ProgramFiles unset' case: a 64-bit Windows child gets ProgramFiles
     # from ProgramW6432 (see Invoke-Case), and no-openssl covers an empty one.
+    # A 32-bit PowerShell sees ProgramFiles as Program Files (x86) and the
+    # 64-bit Git only under ProgramW6432. The probe prints both variables: if
+    # the child's ProgramFiles was reset to ProgramW6432 as well, this proves
+    # only that a Git under the ProgramW6432 root is found, not which lookup
+    # found it.
+    $fakePrograms = Join-Path $Fx 'fakeprograms'
+    Invoke-Case 'git-under-programw6432-found' 0 ('FOUND ' + (Join-Path $fakePrograms 'Git\clangarm64\bin\openssl.exe')) @{ 'Path' = "$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs'); 'ProgramW6432' = $fakePrograms } '' $null $null 'file' 'probe-find-openssl.ps1'
+    # The same lookup in this process, where no process start can reset
+    # ProgramFiles: the two variables stay distinct, so only the ProgramW6432
+    # branch can find the stub. Dot-sourcing install.ps1 inside the block
+    # defines its functions there and skips Main ($PSCommandPath is set).
+    $inProc = $null
+    $saved = Set-EnvMap @{ 'Path' = "$env:SystemRoot\System32;$env:SystemRoot"; 'ProgramFiles' = (Join-Path $Work 'no-programs'); 'ProgramW6432' = $fakePrograms }
+    try { $inProc = & { . (Join-Path $Fx 'install.ps1'); Find-OpenSsl } } catch { $inProc = "THREW: $($_.Exception.Message)" } finally { Restore-EnvMap $saved }
+    Assert 'find-openssl-in-process-uses-programw6432' ("$inProc" -eq (Join-Path $fakePrograms 'Git\clangarm64\bin\openssl.exe'))
+    if ("$inProc" -ne (Join-Path $fakePrograms 'Git\clangarm64\bin\openssl.exe')) { Write-Host "    Find-OpenSsl returned: '$inProc'" }
     Invoke-Case 'openssl-too-old' 1 'OpenSSL 1.1.1w' $fakePath $dir $null $null
     Invoke-Case 'skip-signature-valid' 0 'skipping the signature check' ($noGit + @{ 'AGENTBUS_SKIP_SIGNATURE' = '1' }) $dir $null $null
     Invoke-Case 'skip-signature-tampered' 1 'checksum mismatch' @{ 'AGENTBUS_SKIP_SIGNATURE' = '1'; 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null $null
     Invoke-Case 'skip-signature-bad-value' 1 'AGENTBUS_SKIP_SIGNATURE must be 1 or unset' @{ 'AGENTBUS_SKIP_SIGNATURE' = 'yes' } $dir $null $null
     Invoke-Case 'unknown-arch' 1 'unsupported architecture: Riscv64' @{ 'AGENTBUS_TEST_OSARCH' = 'Riscv64' } $dir $null $null
     Invoke-Case 'relative-dir' 1 'must be an absolute path' @{} 'bin' $null $null
+    # Reinstalls and upgrades. $dir holds 9.0.1 here; the installer reports a
+    # same-version reinstall, an upgrade from the version the old binary
+    # printed, or a plain upgrade when the old binary did not run.
+    Invoke-Case -Name 'reinstall-same-version' -WantExit 0 -WantOut 'reinstalled: agentbus 9.0.1 was already installed' -Env @{} -InstallDir $dir -Before $null -After { (& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1' } -WantNotOut 'upgraded'
+    Invoke-Case -Name 'pin-older-over-newer' -WantExit 0 -WantOut 'upgraded from 9.0.1: restart every harness session' -Env @{ 'AGENTBUS_VERSION' = 'v9.0.0' } -InstallDir $dir -Before $null -After { (& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.0' } -WantNotOut 'reinstalled'
     $script:Running = $null
-    Invoke-Case 'upgrade-while-running' 0 'upgraded: restart' @{} $dir { $script:Running = Start-Process -FilePath (Join-Path $dir 'agentbus.exe') -ArgumentList 'sleep' -PassThru @Hidden } {
+    Invoke-Case 'upgrade-while-running' 0 'upgraded from 9.0.0: restart' @{} $dir { $script:Running = Start-Process -FilePath (Join-Path $dir 'agentbus.exe') -ArgumentList 'sleep' -PassThru @Hidden } {
         ((& (Join-Path $dir 'agentbus.exe') version) -eq '9.0.1') -and (@(Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 1)
     }
     if ($script:Running) { Stop-Process -Id $script:Running.Id -Force; Start-Sleep -Milliseconds 500 }
-    Invoke-Case 'leftover-old-cleaned' 0 'installed agentbus' @{} $dir $null { @(Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 0 }
+    Invoke-Case 'leftover-old-cleaned' 0 'reinstalled: agentbus 9.0.1 was already installed' @{} $dir $null { @(Get-ChildItem -LiteralPath $dir -Filter 'agentbus.exe.old-*').Count -eq 0 }
+    $dirBroken = Join-Path $Work 'bin-broken-old'
+    Invoke-Case -Name 'upgrade-over-binary-that-does-not-run' -WantExit 0 -WantOut 'upgraded: restart every harness session' -Env @{} -InstallDir $dirBroken -Before {
+        New-Item -ItemType Directory -Force -Path $dirBroken | Out-Null
+        Set-Content -LiteralPath (Join-Path $dirBroken 'agentbus.exe') -Value 'this is not an executable'
+    } -After { ((& (Join-Path $dirBroken 'agentbus.exe') version) -eq '9.0.1') -and (@(Get-ChildItem -LiteralPath $dirBroken -Filter 'agentbus.exe.old-*').Count -eq 0) } -WantNotOut 'upgraded from'
     # Two installers racing into a fresh directory. The environment is set
     # around both launches and put back at once: without it they would
-    # install from github.com into the real install directory.
+    # install from github.com into the real install directory. Each child's
+    # stdout and stderr go to files, printed when the case fails (windows.yml
+    # run 37710180972 lost the exit-1 child's message).
     $dir3 = Join-Path $Work 'bin3'
     $saved = Set-EnvMap @{ 'AGENTBUS_BASE_URL' = "$Base/valid"; 'AGENTBUS_INSTALL_DIR' = $dir3; 'AGENTBUS_VERSION' = ''; 'AGENTBUS_SKIP_SIGNATURE' = ''; 'AGENTBUS_TEST_OSARCH' = '' }
+    $logs = @(
+        @{ Out = (Join-Path $Work 'concurrent-1.out'); Err = (Join-Path $Work 'concurrent-1.err') },
+        @{ Out = (Join-Path $Work 'concurrent-2.out'); Err = (Join-Path $Work 'concurrent-2.err') }
+    )
     try {
         $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Quote-Arg (Join-Path $Fx 'install.ps1')))
-        $c1 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru @Hidden
-        $c2 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru @Hidden
+        $c1 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru -RedirectStandardOutput $logs[0].Out -RedirectStandardError $logs[0].Err @Hidden
+        $c2 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru -RedirectStandardOutput $logs[1].Out -RedirectStandardError $logs[1].Err @Hidden
     } finally { Restore-EnvMap $saved }
     $done1 = $c1.WaitForExit(120000); $done2 = $c2.WaitForExit(120000)
     if (-not ($done1 -and $done2)) { foreach ($c in $c1, $c2) { if (-not $c.HasExited) { Stop-Process -Id $c.Id -Force -ErrorAction SilentlyContinue } } }
@@ -544,7 +598,16 @@ function Invoke-Cases {
     if (Test-Path -LiteralPath (Join-Path $dir3 'agentbus.exe')) { $served = "$(& (Join-Path $dir3 'agentbus.exe') version)" }
     $ok = $done1 -and $done2 -and ($c1.ExitCode -eq 0) -and ($c2.ExitCode -eq 0) -and ($served -eq '9.0.1')
     Assert 'concurrent' $ok
-    if (-not $ok) { Write-Host "    finished=$done1/$done2 exit codes: $(if ($done1) { $c1.ExitCode }) and $(if ($done2) { $c2.ExitCode }); served version: '$served' (want 9.0.1)" }
+    if (-not $ok) {
+        Write-Host "    finished=$done1/$done2 exit codes: $(if ($done1) { $c1.ExitCode }) and $(if ($done2) { $c2.ExitCode }); served version: '$served' (want 9.0.1)"
+        Write-Host "    $dir3 holds: $((@(Get-ChildItem -LiteralPath $dir3 -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })) -join ', ')"
+        foreach ($log in $logs) {
+            foreach ($f in $log.Out, $log.Err) {
+                Write-Host "    --- $(Split-Path -Leaf $f)"
+                if (Test-Path -LiteralPath $f) { Get-Content -LiteralPath $f | ForEach-Object { Write-Host "    $_" } }
+            }
+        }
+    }
     Invoke-Case 'failed-run-leaves-no-temp' 1 'checksum mismatch' @{ 'AGENTBUS_BASE_URL' = "$Base/tampered-zip" } $dir $null { @(Get-ChildItem ([IO.Path]::GetTempPath()) -Filter 'agentbus-install-*' -Directory).Count -eq 0 }
 
     # Refusals and paths install.ps1 has beyond the plan.

@@ -8,8 +8,10 @@
 #   AGENTBUS_TEST_OSARCH    test hook: pretend the OS architecture is this value
 # Downloads the zip, SHA256SUMS and SHA256SUMS.sig, verifies the Ed25519
 # signature with OpenSSL 3 (Git for Windows ships one) and the public key
-# below, verifies the zip's hash, then swaps agentbus.exe into place (a running
-# copy is renamed, not overwritten) and adds the directory to the user PATH.
+# below, verifies the zip's hash, runs the new agentbus.exe once in the
+# temporary directory, then swaps it into place (whatever is there, running or
+# not, is renamed aside, never overwritten) and adds the directory to the user
+# PATH. Windows builds start at v1.14.1; an older AGENTBUS_VERSION is refused.
 # Never runs agentbus init. A refusal throws, so a piped `iex` leaves the
 # session open; `powershell -File install.ps1` exits 1.
 #Requires -Version 5.1
@@ -25,7 +27,10 @@ MCowBQYDK2VwAyEAx7/YtImf3eM+x0+mN3CEmMiGsSZ404MWe0G7UModNsQ=
 '@
 # END agentbus release public key
 
+# Upgrade: agentbus.exe was already there. OldVersion: what it reported, or
+# $null when it did not run (or vanished under a concurrent installer).
 $script:Upgrade = $false
+$script:OldVersion = $null
 
 # Get-Arch reads the OS's native architecture from the registry, which neither
 # WOW64 nor x64 emulation on ARM64 changes. Not RuntimeInformation: PSReadLine
@@ -62,25 +67,31 @@ function Get-OpenSslMajor([string]$Exe) {
     return $null
 }
 
-# Find-OpenSsl returns the first OpenSSL 3+ among: openssl on PATH, then Git
-# for Windows' usr\bin\openssl.exe, mingw64\bin\openssl.exe and (ARM64 builds)
-# clangarm64\bin\openssl.exe.
+# Find-OpenSsl returns the first OpenSSL 3+ among: openssl on PATH, then the
+# usr\bin\openssl.exe, mingw64\bin\openssl.exe and (ARM64 builds)
+# clangarm64\bin\openssl.exe of each Git for Windows root: the one git on PATH
+# reports, ProgramFiles\Git, then ProgramW6432\Git (a 32-bit PowerShell sees
+# ProgramFiles as "Program Files (x86)"; the 64-bit Git is under ProgramW6432).
 function Find-OpenSsl {
     $candidates = @()
     $onPath = Get-Command openssl -ErrorAction SilentlyContinue
     if ($onPath) { $candidates += $onPath.Source }
-    $gitRoot = $null
+    $roots = @()
     if (Get-Command git -ErrorAction SilentlyContinue) {
         try {
             $exec = (& git --exec-path 2>$null | Select-Object -First 1)
-            if ($exec) { $gitRoot = (Resolve-Path (Join-Path $exec '..\..\..')).Path }
-        } catch { $gitRoot = $null }
+            if ($exec) { $roots += (Resolve-Path (Join-Path $exec '..\..\..')).Path }
+        } catch { $roots = @() }
     }
-    if (-not $gitRoot -and $env:ProgramFiles) { $gitRoot = Join-Path $env:ProgramFiles 'Git' }
-    if ($gitRoot) {
+    foreach ($programs in @($env:ProgramFiles, $env:ProgramW6432)) {
+        if (-not $programs) { continue }
+        $root = Join-Path $programs 'Git'
+        if ($roots -notcontains $root) { $roots += $root }
+    }
+    foreach ($root in $roots) {
         foreach ($rel in @('usr\bin\openssl.exe', 'mingw64\bin\openssl.exe', 'clangarm64\bin\openssl.exe')) {
-            $p = Join-Path $gitRoot $rel
-            if (Test-Path -LiteralPath $p) { $candidates += $p }
+            $p = Join-Path $root $rel
+            if ((Test-Path -LiteralPath $p) -and ($candidates -notcontains $p)) { $candidates += $p }
         }
     }
     $old = $null
@@ -117,9 +128,26 @@ function Resolve-Tag([string]$Base) {
     return $tag
 }
 
-function Get-Asset([string]$Url, [string]$Out) {
+# Get-Asset downloads $Url to $Out. An HTTP 404 throws $NotFound when one is
+# given (the zip of a release without a Windows build); every other failure
+# is a download error. The status is read through PSObject.Properties: Windows
+# PowerShell 5.1 throws System.Net.WebException and PowerShell 7
+# Microsoft.PowerShell.Commands.HttpResponseException, both with a Response
+# carrying StatusCode, but a connection failure has no Response at all and
+# Set-StrictMode makes a missing property a terminating error.
+function Get-Asset([string]$Url, [string]$Out, [string]$NotFound) {
     $pp = $ProgressPreference; $ProgressPreference = 'SilentlyContinue' # Windows PowerShell 5.1 crawls with the progress bar
-    try { Invoke-WebRequest -Uri $Url -OutFile $Out -UseBasicParsing } catch { throw "agentbus install: download failed: $Url" } finally { $ProgressPreference = $pp }
+    try { Invoke-WebRequest -Uri $Url -OutFile $Out -UseBasicParsing }
+    catch {
+        $status = 0
+        $resp = $_.Exception.PSObject.Properties['Response']
+        if ($resp -and $resp.Value) {
+            $sc = $resp.Value.PSObject.Properties['StatusCode']
+            if ($sc -and $sc.Value) { try { $status = [int]$sc.Value } catch { $status = 0 } }
+        }
+        if ($status -eq 404 -and $NotFound) { throw $NotFound }
+        throw "agentbus install: download failed: $Url"
+    } finally { $ProgressPreference = $pp }
 }
 
 function Test-Signature([string]$OpenSsl, [string]$Dir, [string]$Base) {
@@ -152,17 +180,26 @@ function Test-Hash([string]$Dir, [string]$Asset) {
     if ($got -ne $want) { throw "agentbus install: checksum mismatch for $Asset" }
 }
 
-# Move-WithRetry: a rename or move racing another installer is retried once.
-function Move-WithRetry([string]$From, [string]$To) {
-    try { Move-Item -LiteralPath $From -Destination $To -Force }
-    catch { Start-Sleep -Milliseconds 500; Move-Item -LiteralPath $From -Destination $To -Force }
-}
-
+# Install-Binary extracts agentbus.exe, runs it once where it was extracted
+# (a download that does not run never replaces a working install), records
+# the version the current binary reports, swaps the new one into place and
+# returns the new version.
+#
+# The swap: Windows allows renaming a running executable but not overwriting
+# or deleting it, so whatever sits at the target is renamed aside and the new
+# file is then moved in without -Force. Two installers racing into the same
+# directory each see the other's steps as a failed rename (the target
+# vanished) or a failed move (a file appeared), and the loop starts over;
+# neither ever deletes a binary the other may be running. Running the target
+# is not part of the loop: the version check already happened on the
+# extracted copy, so a target renamed aside by the other installer at the
+# wrong moment cannot fail this one.
 function Install-Binary([string]$Dir, [string]$Asset, [string]$InstallDir) {
     $extract = Join-Path $Dir 'extract'
     Expand-Archive -LiteralPath (Join-Path $Dir $Asset) -DestinationPath $extract -Force
     $new = Join-Path $extract 'agentbus.exe'
     if (-not (Test-Path -LiteralPath $new)) { throw "agentbus install: $Asset does not contain agentbus.exe" }
+    $version = Get-InstalledVersion $new
     try {
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $probe = Join-Path $InstallDir ('.agentbus-write-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -172,14 +209,26 @@ function Install-Binary([string]$Dir, [string]$Asset, [string]$InstallDir) {
     $target = Join-Path $InstallDir 'agentbus.exe'
     if (Test-Path -LiteralPath $target -PathType Container) { throw "agentbus install: $target is a directory; remove it or choose another AGENTBUS_INSTALL_DIR" }
     $script:Upgrade = Test-Path -LiteralPath $target
+    $script:OldVersion = $null
     if ($script:Upgrade) {
-        # Windows allows renaming a running executable but not overwriting it.
-        Move-WithRetry $target ("$target.old-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        # A binary that does not run, or that another installer renamed aside
+        # between the test and the launch, is an upgrade from an unknown version.
+        try { $script:OldVersion = Get-InstalledVersion $target } catch { $script:OldVersion = $null }
     }
-    Move-WithRetry $new $target
+    $placed = $false
+    foreach ($attempt in 1..10) {
+        try {
+            if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination ("$target.old-" + [guid]::NewGuid().ToString('N').Substring(0, 8)) }
+            Move-Item -LiteralPath $new -Destination $target
+            $placed = $true
+            break
+        } catch { Start-Sleep -Milliseconds 300 }
+    }
+    if (-not $placed) { throw "agentbus install: could not replace $target (another installer or a scanner kept it busy); rerun the installer" }
     Get-ChildItem -LiteralPath $InstallDir -Filter 'agentbus.exe.old-*' | ForEach-Object {
         try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop } catch { } # still running: a later run removes it
     }
+    return $version
 }
 
 # Add-UserPath appends $Dir to the user Path in the registry. The value is read
@@ -203,10 +252,13 @@ function Add-UserPath([string]$Dir) {
     Write-Host "added $Dir to your user PATH; new terminals pick it up"
 }
 
-# Get-InstalledVersion runs the installed binary. The output is collected
-# whole (not piped to Select-Object -First 1, which stops the pipeline before
-# the native exit code is recorded) and the exit code is seeded non-zero so a
-# launch failure cannot read a stale 0.
+# Get-InstalledVersion runs an agentbus.exe (the extracted one before the swap,
+# the installed one for its old version) and returns the version it prints,
+# or throws. The output is collected whole (not piped to Select-Object -First
+# 1, which stops the pipeline before the native exit code is recorded), stderr
+# is left alone (a captured stderr line is a terminating error in Windows
+# PowerShell 5.1) and the exit code is seeded non-zero so a launch failure
+# cannot read a stale 0.
 function Get-InstalledVersion([string]$Exe) {
     $global:LASTEXITCODE = 1
     $out = @()
@@ -237,19 +289,22 @@ function Main {
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
         $dl = "$base/releases/download/$tag"
-        Get-Asset "$dl/$asset" (Join-Path $tmp $asset)
+        Get-Asset "$dl/$asset" (Join-Path $tmp $asset) "agentbus install: release $tag has no Windows build: $asset was not found at $dl/$asset. Windows builds start at v1.14.1; rerun with AGENTBUS_VERSION=v1.14.1 or later"
         Get-Asset "$dl/SHA256SUMS" (Join-Path $tmp 'SHA256SUMS')
         if (-not $skip) {
             Get-Asset "$dl/SHA256SUMS.sig" (Join-Path $tmp 'SHA256SUMS.sig')
             Test-Signature $openssl $tmp $base
         }
         Test-Hash $tmp $asset
-        Install-Binary $tmp $asset $installDir
+        $v = Install-Binary $tmp $asset $installDir
         Add-UserPath $installDir
-        $v = Get-InstalledVersion (Join-Path $installDir 'agentbus.exe')
         Write-Host "installed agentbus $v to $installDir\agentbus.exe"
         Write-Host 'next: agentbus init --global (once per machine), then agentbus init inside each repository'
-        if ($script:Upgrade) { Write-Host 'upgraded: restart every harness session and the TUI to pick up the new binary' }
+        if ($script:Upgrade) {
+            if ($script:OldVersion -and $script:OldVersion -eq $v) { Write-Host "reinstalled: agentbus $v was already installed" }
+            elseif ($script:OldVersion) { Write-Host "upgraded from $($script:OldVersion): restart every harness session and the TUI to pick up the new binary" }
+            else { Write-Host 'upgraded: restart every harness session and the TUI to pick up the new binary' }
+        }
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
     }

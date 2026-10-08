@@ -27,11 +27,20 @@ MCowBQYDK2VwAyEAx7/YtImf3eM+x0+mN3CEmMiGsSZ404MWe0G7UModNsQ=
 
 $script:Upgrade = $false
 
+# Get-Arch reads the OS's native architecture from the registry, which neither
+# WOW64 nor x64 emulation on ARM64 changes. Not RuntimeInformation: PSReadLine
+# 3.0 defines its own System.Runtime.InteropServices.RuntimeInformation, with
+# no OSArchitecture, and it shadows the real type in interactive Windows
+# PowerShell 5.1 sessions.
 function Get-Arch {
-    $a = if ($env:AGENTBUS_TEST_OSARCH) { $env:AGENTBUS_TEST_OSARCH } else { "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
-    switch ($a) {
-        'X64'   { return 'amd64' }
-        'Arm64' { return 'arm64' }
+    $a = $env:AGENTBUS_TEST_OSARCH
+    if (-not $a) {
+        try { $a = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -Name PROCESSOR_ARCHITECTURE).PROCESSOR_ARCHITECTURE } catch { $a = $null }
+        if (-not $a) { $a = 'unknown' }
+    }
+    switch ("$a") {
+        'AMD64' { return 'amd64' }
+        'ARM64' { return 'arm64' }
         default { throw "agentbus install: unsupported architecture: $a (releases cover windows-amd64 and windows-arm64)" }
     }
 }

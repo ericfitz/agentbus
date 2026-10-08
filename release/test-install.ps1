@@ -149,8 +149,8 @@ function New-Stub([string]$Version, [string]$Out) {
 }
 
 # Get-HostArch is the architecture of this machine as the release assets name
-# it, read independently of install.ps1's Get-Arch (which uses
-# RuntimeInformation) so a wrong choice there is caught.
+# it, read independently of install.ps1's Get-Arch (which reads the registry)
+# so a wrong choice there is caught.
 function Get-HostArch {
     if ($IsWin) { $a = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
     else { $a = (& uname -m) }

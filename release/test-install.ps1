@@ -591,6 +591,9 @@ function Invoke-Cases {
         $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Quote-Arg (Join-Path $Fx 'install.ps1')))
         $c1 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru -RedirectStandardOutput $logs[0].Out -RedirectStandardError $logs[0].Err @Hidden
         $c2 = Start-Process -FilePath $HostExe -ArgumentList $childArgs -PassThru -RedirectStandardOutput $logs[1].Out -RedirectStandardError $logs[1].Err @Hidden
+        # Read Handle now: a redirected Start-Process child otherwise reports an
+        # empty ExitCode after it exits (windows.yml run 37723169379).
+        $null = $c1.Handle; $null = $c2.Handle
     } finally { Restore-EnvMap $saved }
     $done1 = $c1.WaitForExit(120000); $done2 = $c2.WaitForExit(120000)
     if (-not ($done1 -and $done2)) { foreach ($c in $c1, $c2) { if (-not $c.HasExited) { Stop-Process -Id $c.Id -Force -ErrorAction SilentlyContinue } } }

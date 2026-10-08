@@ -1,0 +1,35 @@
+## Fixes
+
+- **install.ps1 in interactive Windows PowerShell 5.1.** The v1.14.1
+  installer failed when PSReadLine 3.0 was loaded, because its lookalike
+  `RuntimeInformation` type shadowed the real one under `Set-StrictMode`.
+  The installer now reads the native architecture from the registry, which
+  is also correct under WOW64 and x64 emulation on ARM64.
+- **Concurrent installs on Windows.** Two installers writing to the same
+  directory could make one of them fail. The installer now checks the
+  downloaded binary's version before swapping it in, so a broken download
+  never replaces a working install. It also never deletes or overwrites a
+  binary that another installer may be running.
+- **Reinstall wording.** `install.sh` and `install.ps1` print
+  "reinstalled: agentbus <v> was already installed" for the same version
+  and "upgraded from <old>" for a different one.
+- **Releases without a build for your OS.** Setting `AGENTBUS_VERSION` to a
+  release older than v1.14.1 now says that release has no Linux or Windows
+  build and to use v1.14.1 or later. It used to fail with
+  "download failed".
+- **Git for Windows from 32-bit PowerShell.** `install.ps1` also finds
+  OpenSSL under `ProgramW6432\Git`.
+
+## CLI
+
+`agentbus help`, `-h` and `--help` print usage on stdout and exit 0.
+`-v` and `--version` match `agentbus version`. `agentbus <command> -h`
+prints the command's flags and exits 0. Bare `agentbus` still prints usage
+on stderr and exits 2.
+
+## Upgrading
+
+The database schema is unchanged (v11).
+
+1. `brew upgrade agentbus` (or rerun the install script)
+2. Restart harness sessions and `agentbus tui` to pick up the new binary.

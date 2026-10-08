@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,9 @@ func testBinary(t *testing.T) string {
 			return
 		}
 		binPath = filepath.Join(dir, "agentbus")
+		if runtime.GOOS == "windows" {
+			binPath += ".exe"
+		}
 		if out, err := exec.Command("go", "build", "-o", binPath, ".").CombinedOutput(); err != nil {
 			buildErr = errors.New(string(out))
 		}

@@ -569,6 +569,13 @@ function Invoke-Cases {
     Invoke-Case 'openssl-fails-to-run' 1 'signature check of SHA256SUMS failed' $fake3Path $dir $null $null
     Invoke-Case 'base-url-trailing-slash' 0 'installed agentbus 9.0.1' @{ 'AGENTBUS_BASE_URL' = "$Base/valid/" } $dir $null $null
 
+    # PSReadLine 3.0 defines a lookalike System.Runtime.InteropServices.
+    # RuntimeInformation (no OSArchitecture) that wins in an interactive
+    # Windows PowerShell 5.1 session, so install.ps1 must not name that type.
+    # The CI hosts resolve it to mscorlib's and cannot reproduce the shadow.
+    $ps1 = Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1') -Raw
+    Assert 'no-runtimeinformation-type' (-not $ps1.Contains('[System.Runtime.InteropServices.RuntimeInformation]'))
+
     $pub = Join-Path $RepoRoot 'release/agentbus-release-ed25519.pub'
     if (Test-Path -LiteralPath $pub) {
         $text = Get-Content -LiteralPath (Join-Path $RepoRoot 'install.ps1') -Raw

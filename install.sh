@@ -19,7 +19,7 @@ MCowBQYDK2VwAyEAx7/YtImf3eM+x0+mN3CEmMiGsSZ404MWe0G7UModNsQ=
 
 BASE_URL="${AGENTBUS_BASE_URL:-https://github.com/ericfitz/agentbus}"
 while [ "${BASE_URL%/}" != "$BASE_URL" ]; do BASE_URL="${BASE_URL%/}"; done
-ARCH="" TAG="" ASSET="" OPENSSL="" OLD_OPENSSL="" SHA_CMD="" SKIP_SIG=0 INSTALL_DIR="" TMP="" UPGRADE=0
+ARCH="" TAG="" ASSET="" OPENSSL="" OLD_OPENSSL="" SHA_CMD="" SKIP_SIG=0 INSTALL_DIR="" TMP="" UPGRADE=0 OLD_VERSION=""
 
 die() { printf 'agentbus install: %s\n' "$*" >&2; exit 1; }
 
@@ -116,7 +116,18 @@ resolve_version() {
     ASSET="agentbus-$TAG-linux-$ARCH.tar.gz"
 }
 
-fetch() { curl -fsSL -o "$TMP/$2" "$BASE_URL/releases/download/$TAG/$1" || die "download failed: $BASE_URL/releases/download/$TAG/$1"; }
+# fetch <remote-name> <local-name>. A 404 on the release archive means the tag
+# has no Linux build (they began at v1.14.1); any other failure is a download error.
+fetch() {
+    url="$BASE_URL/releases/download/$TAG/$1"
+    rc=0
+    code="$(curl -fsSL -o "$TMP/$2" -w '%{http_code}' "$url")" || rc=$?
+    [ "$rc" -ne 0 ] || return 0
+    if [ "$1" = "$ASSET" ] && [ "$rc" -eq 22 ] && [ "$code" = 404 ]; then
+        die "release $TAG has no Linux build: $ASSET was not found at $url. Linux builds start at v1.14.1; rerun with AGENTBUS_VERSION=v1.14.1 or later"
+    fi
+    die "download failed: $url"
+}
 
 download() {
     TMP="$(mktemp -d)"
@@ -146,7 +157,11 @@ install_binary() {
     [ -d "$INSTALL_DIR" ] && [ -w "$INSTALL_DIR" ] \
         || die "cannot write to $INSTALL_DIR. Rerun with AGENTBUS_INSTALL_DIR=<a writable directory>, or for a system-wide install: curl -fsSL $BASE_URL/releases/latest/download/install.sh | sudo env AGENTBUS_INSTALL_DIR=/usr/local/bin sh"
     [ ! -d "$INSTALL_DIR/agentbus" ] || die "$INSTALL_DIR/agentbus is a directory; remove it or choose another AGENTBUS_INSTALL_DIR"
-    [ -x "$INSTALL_DIR/agentbus" ] && UPGRADE=1
+    if [ -x "$INSTALL_DIR/agentbus" ]; then
+        UPGRADE=1
+        # A binary that does not run counts as an upgrade with an unknown old version.
+        OLD_VERSION="$("$INSTALL_DIR/agentbus" version 2>/dev/null)" || OLD_VERSION=""
+    fi
     tar -xzf "$TMP/$ASSET" -C "$TMP" agentbus || die "could not extract $ASSET"
     cp "$TMP/agentbus" "$INSTALL_DIR/.agentbus.tmp.$$"
     chmod 755 "$INSTALL_DIR/.agentbus.tmp.$$"
@@ -161,7 +176,15 @@ report() {
         *) echo "note: $INSTALL_DIR is not on your PATH; add this to your shell profile: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
     esac
     echo "next: agentbus init --global (once per machine), then agentbus init inside each repository"
-    [ "$UPGRADE" = 1 ] && echo "upgraded: restart every harness session and the TUI to pick up the new binary"
+    if [ "$UPGRADE" = 1 ]; then
+        if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" = "$v" ]; then
+            echo "reinstalled: agentbus $v was already installed"
+        elif [ -n "$OLD_VERSION" ]; then
+            echo "upgraded from $OLD_VERSION: restart every harness session and the TUI to pick up the new binary"
+        else
+            echo "upgraded: restart every harness session and the TUI to pick up the new binary"
+        fi
+    fi
     return 0
 }
 

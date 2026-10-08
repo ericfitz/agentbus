@@ -51,8 +51,9 @@ trap 'exit 143' TERM
 
 # --- fixture ------------------------------------------------------------------
 # build_fixture lays out $FX/<variant>/{latest,<tag>/...} for the variants
-# valid (v9.0.0 and v9.0.1), tampered-tarball, tampered-sums, tampered-sig
-# and missing-entry, plus $FX/install.sh with the throwaway key embedded and
+# valid (v9.0.0 and v9.0.1), tampered-tarball, tampered-sums, tampered-sig,
+# missing-entry and no-archive (v9.0.1 with SHA256SUMS but no tarballs, so
+# the archive download is a 404), plus $FX/install.sh with the throwaway key embedded and
 # $FX/install-nokey.sh with the placeholder key block.
 build_fixture() {
     "$OPENSSL" genpkey -algorithm ed25519 -out "$WORK/key.pem" 2>/dev/null
@@ -80,6 +81,8 @@ build_fixture() {
     for v in tampered-tarball tampered-sums tampered-sig missing-entry; do
         mkdir -p "$FX/$v"; cp -R "$FX/valid/v9.0.1" "$FX/$v/v9.0.1"; printf 'v9.0.1\n' > "$FX/$v/latest"
     done
+    mkdir -p "$FX/no-archive"; cp -R "$FX/valid/v9.0.1" "$FX/no-archive/v9.0.1"; printf 'v9.0.1\n' > "$FX/no-archive/latest"
+    rm -f "$FX"/no-archive/v9.0.1/agentbus-*.tar.gz
     append_byte "$FX/tampered-tarball/v9.0.1/agentbus-v9.0.1-linux-amd64.tar.gz"
     append_byte "$FX/tampered-tarball/v9.0.1/agentbus-v9.0.1-linux-arm64.tar.gz"
     # First hex digit of the first hash changed (f -> E, anything else -> f), so it always differs.
@@ -146,6 +149,7 @@ self_test() {
     assert "tampered-sums does not verify" "! '$OPENSSL' pkeyutl -verify -rawin -pubin -inkey '$WORK/key.pub' -in '$FX/tampered-sums/v9.0.1/SHA256SUMS' -sigfile '$FX/tampered-sums/v9.0.1/SHA256SUMS.sig' >/dev/null 2>&1"
     assert "tampered-tarball differs only in the tarballs" "cmp -s '$FX/valid/v9.0.1/SHA256SUMS' '$FX/tampered-tarball/v9.0.1/SHA256SUMS' && ! cmp -s '$FX/valid/v9.0.1/agentbus-v9.0.1-linux-amd64.tar.gz' '$FX/tampered-tarball/v9.0.1/agentbus-v9.0.1-linux-amd64.tar.gz'"
     assert "missing-entry verifies but lacks tarballs" "'$OPENSSL' pkeyutl -verify -rawin -pubin -inkey '$WORK/key.pub' -in '$FX/missing-entry/v9.0.1/SHA256SUMS' -sigfile '$FX/missing-entry/v9.0.1/SHA256SUMS.sig' >/dev/null 2>&1 && ! grep -q linux '$FX/missing-entry/v9.0.1/SHA256SUMS'"
+    assert "no-archive has sums but no tarballs" "[[ -f '$FX/no-archive/v9.0.1/SHA256SUMS' && -z \$(ls '$FX'/no-archive/v9.0.1/agentbus-*.tar.gz 2>/dev/null) ]]"
     assert "stub prints its version" "[[ \$(tar -xzOf '$FX/valid/v9.0.0/agentbus-v9.0.0-linux-amd64.tar.gz' agentbus | sh) == 9.0.0 ]]"
     assert "install.sh copy carries the throwaway key" "grep -q \"\$(sed -n 2p '$WORK/key.pub')\" '$FX/install.sh'"
     assert "install.sh copy differs from the repo only in the key block" "diff <(sed '/BEGIN agentbus release public key/,/END agentbus release public key/d' '$REPO_ROOT/install.sh') <(sed '/BEGIN agentbus release public key/,/END agentbus release public key/d' '$FX/install.sh') >/dev/null"
@@ -227,7 +231,12 @@ v9.0.1" sh /fixture/install.sh'
     run_case install-dir-is-directory "$d" "$a" 1 "refused-clean" 'mkdir -p /tmp/t /opt/x/agentbus; if out=$(TMPDIR=/tmp/t AGENTBUS_INSTALL_DIR=/opt/x sh /fixture/install.sh 2>&1); then echo "unexpected success"; exit 9; fi; case "$out" in *"/opt/x/agentbus is a directory"*) ;; *) echo "$out"; exit 8 ;; esac; [ -z "$(ls -A /tmp/t)" ] && [ "$(ls -A /opt/x)" = agentbus ] && [ -z "$(ls -A /opt/x/agentbus)" ] && echo refused-clean && exit 1'
     run_case trailing-slashes "$d" "$a" 0 "installed agentbus 9.0.1 to /opt/y/agentbus" 'AGENTBUS_BASE_URL=$BASE/valid// AGENTBUS_INSTALL_DIR=/opt/y// sh /fixture/install.sh && [ "$(/opt/y/agentbus version)" = 9.0.1 ]'
     run_case home-unset "$d" "$a" 1 "HOME is not set" 'env -u HOME sh /fixture/install.sh'
-    run_case upgrade "$d" "$a" 0 "upgraded: restart" 'AGENTBUS_VERSION=v9.0.0 sh /fixture/install.sh >/dev/null && sh /fixture/install.sh && [ "$(~/.local/bin/agentbus version)" = 9.0.1 ]'
+    run_case upgrade "$d" "$a" 0 "upgraded from 9.0.0: restart" 'AGENTBUS_VERSION=v9.0.0 sh /fixture/install.sh >/dev/null && sh /fixture/install.sh && [ "$(~/.local/bin/agentbus version)" = 9.0.1 ]'
+    run_case reinstall-same-version "$d" "$a" 0 "reinstalled: agentbus 9.0.1 was already installed" 'sh /fixture/install.sh >/dev/null && out=$(sh /fixture/install.sh 2>&1) && echo "$out" && case "$out" in *upgraded*) echo "unexpected upgraded line"; exit 9 ;; esac'
+    run_case reinstall-broken-old-binary "$d" "$a" 0 "upgraded: restart" 'mkdir -p ~/.local/bin && printf "#!/bin/sh\nexit 3\n" > ~/.local/bin/agentbus && chmod 755 ~/.local/bin/agentbus && sh /fixture/install.sh && [ "$(~/.local/bin/agentbus version)" = 9.0.1 ]'
+    run_case release-without-linux-build "$d" "$a" 1 "agentbus-v9.0.1-linux-$a.tar.gz" 'AGENTBUS_BASE_URL=$BASE/no-archive sh /fixture/install.sh'
+    run_case release-without-linux-build-advice "$d" "$a" 1 "Linux builds start at v1.14.1" 'AGENTBUS_BASE_URL=$BASE/no-archive sh /fixture/install.sh'
+    run_case download-network-failure "$d" "$a" 1 "download failed: http://host.docker.internal:1/releases/download/v9.0.1/" 'AGENTBUS_VERSION=v9.0.1 AGENTBUS_BASE_URL=http://host.docker.internal:1 sh /fixture/install.sh'
     run_case concurrent "$d" "$a" 0 "9.0.1" 'sh /fixture/install.sh >/dev/null & p1=$!; sh /fixture/install.sh >/dev/null & p2=$!; wait $p1 && wait $p2 && ~/.local/bin/agentbus version'
     run_case leftover-tmp "$d" "$a" 0 "installed agentbus 9.0.1" 'mkdir -p ~/.local/bin && echo junk > ~/.local/bin/.agentbus.tmp.12345 && sh /fixture/install.sh && [ -f ~/.local/bin/.agentbus.tmp.12345 ]'
     # The fake tar is installed in its own statement so that `&` backgrounds

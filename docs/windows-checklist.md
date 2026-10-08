@@ -4,7 +4,9 @@ Run the general checks in the Windows 11 ARM VM (VMware Fusion) and the
 WSL2 shared-database section in a UTM guest with nested virtualization,
 before the first Windows release and after any change to harness detection (`internal/procs`,
 `internal/cli/stophook.go`, `internal/cli/wait.go`). The automated part is
-`pwsh -File release\test-windows.ps1` from a checkout; the rest is by hand.
+`powershell -ExecutionPolicy Bypass -File release\test-windows.ps1` from a
+checkout (needs Go and Git for Windows on PATH: `winget install --id
+GoLang.Go -e` and `winget install --id Git.Git -e`); the rest is by hand.
 
 ## Harness integration
 

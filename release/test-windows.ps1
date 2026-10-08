@@ -1,10 +1,18 @@
 # Runs the Windows checks natively in the user's Windows 11 ARM VM: go vet,
 # go test, and the install.ps1 harness under both PowerShell hosts. Prints a
-# summary; exits 1 if anything failed. Run from the repository root:
-#   pwsh -File release\test-windows.ps1
+# summary; exits 1 if anything failed. Needs Go (go.dev/dl or
+# `winget install --id GoLang.Go -e`) and Git for Windows (`winget install
+# --id Git.Git -e`; the harness uses its OpenSSL 3). Run from the repository
+# root in Windows PowerShell or pwsh:
+#   powershell -ExecutionPolicy Bypass -File release\test-windows.ps1
 param()
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Continue'
+$missing = @(@('go', 'git') | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+if ($missing.Count -gt 0) {
+    Write-Host "test-windows.ps1: not on PATH: $($missing -join ', '). Install Go (winget install --id GoLang.Go -e) and Git for Windows (winget install --id Git.Git -e), open a new terminal, and rerun."
+    exit 1
+}
 $root = (Resolve-Path (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '..')).Path
 $results = @()
 function Step([string]$Name, [scriptblock]$Body) {

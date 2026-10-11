@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -337,72 +338,206 @@ func (m Model) renderHeader() string {
 	return cut(s, m.stream.Width, "")
 }
 
-// renderRails draws the left column: the channel list with the session list
-// under it, the two sharing the stream's height. Each row is truncated (never wrapped) to its rail's width via MaxWidth --
-// Style.Width word-wraps overlong content instead of clipping it, which would
-// silently grow the rail past the stream's height and push rows below it (the
-// compose line, the status bar) off the bottom of the screen. MaxHeight on
-// the container caps the row count the same way, for more rows than fit.
+// Rail lists, top to bottom. railTop holds each one's scroll offset.
+const (
+	listChannels = iota
+	listTags
+	listSessions
+	railLists
+)
+
+// railFixedRows are the rail rows outside the three lists' items: the
+// "channels", "tags" and "sessions" labels, the blank row before each of
+// the last two, and the "press t to create" hint closing the tags list.
+const railFixedRows = 6
+
+// railTagHint closes the tags list, and is all of it while no tag set is
+// followed. It is a hint, not a row the arrow keys select.
+const railTagHint = "press t to create"
+
+// railBudgets splits rows (the whole rail's height) among the lists of n
+// items each. A list gets every row it needs when they all fit; otherwise
+// each gets room for at least two items -- four rows, so both scroll
+// arrows fit too -- and what is left goes round-robin to the lists still
+// short. On a screen too short even for that, the rail's own MaxHeight
+// clips the bottom.
+func railBudgets(rows int, n [railLists]int) [railLists]int {
+	var b [railLists]int
+	left := rows - railFixedRows
+	for i := range n {
+		b[i] = min(n[i], 4)
+		left -= b[i]
+	}
+	for left > 0 {
+		grew := false
+		for i := range n {
+			if left > 0 && b[i] < n[i] {
+				b[i]++
+				left--
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return b
+}
+
+// railWindow is the slice [top, end) of n items drawn in budget rows. When
+// they do not all fit, an arrow row above (items hidden before top) and one
+// below (items hidden from end) each take a row of the budget. top starts
+// from the list's previous offset and moves as little as it takes to show
+// sel (-1 when the selection is in another list), so stepping past the
+// last shown item scrolls the list by one; it never leaves empty rows
+// under the last item.
+func railWindow(n, budget, top, sel int) (int, int) {
+	if n <= budget {
+		return 0, n
+	}
+	end := func(t int) int {
+		k := budget
+		if t > 0 {
+			k-- // the up arrow
+		}
+		if t+k < n {
+			k-- // the down arrow
+		}
+		return min(t+max(k, 1), n)
+	}
+	top = min(max(top, 0), n-1)
+	if sel >= 0 && sel < n {
+		top = min(top, sel)
+		for sel >= end(top) {
+			top++
+		}
+	}
+	for top > 0 && end(top-1) == n {
+		top--
+	}
+	return top, end(top)
+}
+
+// railSpan is one list's place in the rail: its item count, the selected
+// item's index in it (-1 if the selection is elsewhere), and the window
+// railWindow picked.
+type railSpan struct{ n, sel, top, end int }
+
+// railSpans lays the three lists out for the current height and selection,
+// scrolling each from its saved offset (railTop). Tag sets come after every
+// real channel in m.channels, so the split is the first tag pane.
+func (m Model) railSpans() [railLists]railSpan {
+	nc := slices.IndexFunc(m.channels, func(c bus.Channel) bool { return isTagPane(c.Name) })
+	if nc < 0 {
+		nc = len(m.channels)
+	}
+	var s [railLists]railSpan
+	s[listChannels] = railSpan{n: nc, sel: -1}
+	s[listTags] = railSpan{n: len(m.channels) - nc, sel: -1}
+	s[listSessions] = railSpan{n: len(m.sessionNames()), sel: m.sessSel}
+	if m.sessSel < 0 && m.sel >= 0 {
+		if m.sel < nc {
+			s[listChannels].sel = m.sel
+		} else {
+			s[listTags].sel = m.sel - nc
+		}
+	}
+	var n [railLists]int
+	for i := range s {
+		n[i] = s[i].n
+	}
+	b := railBudgets(m.stream.Height+1, n)
+	for i := range s {
+		s[i].top, s[i].end = railWindow(s[i].n, b[i], m.railTop[i], s[i].sel)
+	}
+	return s
+}
+
+// scrollRail saves each list's scroll offset after an update, so the next
+// selection move scrolls from where the list is drawn now.
+func (m *Model) scrollRail() {
+	for i, s := range m.railSpans() {
+		m.railTop[i] = s.top
+	}
+}
+
+// renderRails draws the left column: the channel list, the followed tag
+// sets, and the session list, each under its label and always shown, even
+// empty. A list longer than its share of the stream's height scrolls (see
+// railBudgets and railWindow), with a dim arrow row above or below for the
+// items out of view. Every row is one line, cut with a trailing ellipsis to
+// the rail's width -- the selected one too, since the header over the
+// stream names it in full. Never Style.Width alone: it word-wraps overlong
+// content instead of clipping it, which would grow the rail past the
+// stream's height and push the rows below it (the compose line, the status
+// bar) off the bottom of the screen.
 func (m Model) renderRails() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
 	rail := m.railWidth()
-	trunc := lipgloss.NewStyle().MaxWidth(rail)
 	// Focus as pane() reports it: a rail row selected while the stream or
 	// compose has focus takes the inactive selection color, so the one blue
 	// row on screen is the one the arrow keys move.
 	focus := m.pane()
-	var l strings.Builder
-	l.WriteString(dim.Render("channels") + "\n")
-	// tagsShown tracks whether the "tags" section header has been written
-	// yet: tag panes sort after every real channel (their names start
-	// "tags:"), so the header goes up once, right before the first one.
-	tagsShown := false
-	for i, c := range m.channels {
-		var line string
-		if isTagPane(c.Name) {
-			if !tagsShown {
-				l.WriteString("\n" + dim.Render("tags") + "\n") // a blank row before the label, like the one before sessions
-				tagsShown = true
-			}
-			line = m.tagChips(tagPaneSet(c.Name))
-		} else {
-			mark := iconChat
-			switch {
-			case bus.IsTaskChannel(c.Name):
-				mark = iconTasks
-			case c.Kind == "memory":
-				mark = iconMem
-			}
-			line = m.chanStyle(c).Render(mark + c.Name)
-			if n := m.unread(c.Name); n > 0 {
-				line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
-			}
-			if m.taskChannelIdle(c) {
-				line += " " + iconIdle
-			}
-			if !isTagPane(c.Name) && !m.c.isSubscribed(c.Name) {
-				line += dim.Render(" (off)")
-			}
+	spans := m.railSpans()
+	var b strings.Builder
+	// list writes one list's window of rows; row(i) draws item i unselected.
+	list := func(s railSpan, focused bool, row func(i int) string) {
+		if s.top > 0 {
+			b.WriteString(cut(dim.Render(fmt.Sprintf(" ▲ %d more", s.top)), rail, "…") + "\n")
 		}
-		// While a session is selected, the channel list draws no highlighted
-		// row; the sessions list below highlights instead.
-		if m.sessSel < 0 && i == m.sel {
-			line = th.RailSel(focus == paneChannels, markSel+line, rail)
-		} else {
-			line = " " + line
+		for i := s.top; i < s.end; i++ {
+			line := row(i)
+			if i == s.sel {
+				line = th.RailSel(focused, cut(markSel+line, rail, "…"), rail)
+			} else {
+				line = cut(" "+line, rail, "…")
+			}
+			b.WriteString(line + "\n")
 		}
-		l.WriteString(trunc.Render(line) + "\n")
+		if s.end < s.n {
+			b.WriteString(cut(dim.Render(fmt.Sprintf(" ▼ %d more", s.n-s.end)), rail, "…") + "\n")
+		}
 	}
 
-	var r strings.Builder
-	r.WriteString(dim.Render("sessions") + "\n")
+	b.WriteString(dim.Render("channels") + "\n")
+	list(spans[listChannels], focus == paneChannels, func(i int) string {
+		c := m.channels[i]
+		mark := iconChat
+		switch {
+		case bus.IsTaskChannel(c.Name):
+			mark = iconTasks
+		case c.Kind == "memory":
+			mark = iconMem
+		}
+		line := m.chanStyle(c).Render(mark + c.Name)
+		if n := m.unread(c.Name); n > 0 {
+			line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
+		}
+		if m.taskChannelIdle(c) {
+			line += " " + iconIdle
+		}
+		if !m.c.isSubscribed(c.Name) {
+			line += dim.Render(" (off)")
+		}
+		return line
+	})
+
+	b.WriteString("\n" + dim.Render("tags") + "\n")
+	nc := spans[listChannels].n
+	list(spans[listTags], focus == paneChannels, func(i int) string {
+		return m.tagChips(tagPaneSet(m.channels[nc+i].Name))
+	})
+	b.WriteString(cut(" "+dim.Render(railTagHint), rail, "…") + "\n")
+
+	b.WriteString("\n" + dim.Render("sessions") + "\n")
 	live := map[string]bus.Session{}
 	for _, s := range m.status.Sessions {
 		live[s.Sender] = s
 	}
 	names := m.sessionNames()
-	for i, n := range names {
+	list(spans[listSessions], focus == paneSessions, func(i int) string {
+		n := names[i]
 		var row string
 		if s, ok := live[n]; ok {
 			ctx, name := s.Context, th.Style(th.Agent).Render(n)
@@ -421,25 +556,10 @@ func (m Model) renderRails() string {
 		if c := m.unread(bus.DMChannel(n)); c > 0 {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))
 		}
-		if i == m.sessSel {
-			row = th.RailSel(focus == paneSessions, markSel+row, rail)
-		} else {
-			row = " " + row
-		}
-		r.WriteString(trunc.Render(row) + "\n")
-	}
-	// Channels take what they need up to half the column; sessions get the
-	// rest, and a blank row separates the two lists.
-	extra := 0
-	if tagsShown {
-		extra = 2 // the blank separator and the "tags" label
-	}
-	total := m.stream.Height + 1
-	chanRows := min(len(m.channels)+1+extra, max(total/2, total-len(names)-2))
-	channels := lipgloss.NewStyle().MaxHeight(chanRows).Render(l.String())
-	sessions := lipgloss.NewStyle().MaxHeight(max(total-chanRows-1, 1)).Render(r.String())
-	col := lipgloss.JoinVertical(lipgloss.Left, channels, "", sessions)
-	return lipgloss.NewStyle().Width(rail).MaxHeight(total).Render(col)
+		return row
+	})
+	col := strings.TrimSuffix(b.String(), "\n")
+	return lipgloss.NewStyle().Width(rail).MaxHeight(m.stream.Height + 1).Render(col)
 }
 
 // taskChannelIdle reports whether c is a task channel whose last activity

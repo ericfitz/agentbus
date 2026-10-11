@@ -69,7 +69,8 @@ type Model struct {
 	channels     []bus.Channel
 	dms          []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
 	sel          int
-	sessSel      int // index into sessionNames(); -1 unless the sessions pane is the selection source
+	sessSel      int            // index into sessionNames(); -1 unless the sessions pane is the selection source
+	railTop      [railLists]int // each rail list's scroll offset: its first item drawn (see railWindow)
 	msgs         map[string][]bus.Message
 	tasks        map[string][]bus.TaskSummary // task channel name -> its current tree
 	taskOpen     map[int64]bool               // task id -> its detail block is expanded
@@ -171,7 +172,19 @@ func keyString(msg tea.Msg) string {
 	return ""
 }
 
+// Update is update followed by saving the rail lists' scroll offsets, so
+// every path that moves the selection, resizes the screen, or changes a
+// list scrolls the rail the same way.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		nm.scrollRail()
+		next = nm
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if k := keyString(msg); k != "" {
 		if m.toast != "" {

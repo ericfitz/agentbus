@@ -98,6 +98,9 @@ func TestRailSelectedRowStaysOneLine(t *testing.T) {
 		t.Fatalf("selecting the long channel changed the rail from %d to %d rows:\n%s", before, len(lines), strings.Join(lines, "\n"))
 	}
 	i := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "xxxx") })
+	if i < 0 || i+1 >= len(lines) {
+		t.Fatalf("want the long channel shown, with a row after it:\n%s", strings.Join(lines, "\n"))
+	}
 	if !strings.HasSuffix(lines[i], "…") || strings.Contains(lines[i+1], "x") {
 		t.Fatalf("want one row ending in an ellipsis:\n%s", strings.Join(lines, "\n"))
 	}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -257,7 +258,7 @@ func TestAcquireWaitLockKeepsOtherHarnessWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if exited(done, 300*time.Millisecond) {
+	if exited(done, time.Second) {
 		t.Fatal("a wait from another harness must not be terminated")
 	}
 	// Same harness pid but a different start time is a reused pid: another harness.
@@ -267,7 +268,7 @@ func TestAcquireWaitLockKeepsOtherHarnessWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release2()
-	if exited(done, 300*time.Millisecond) {
+	if exited(done, time.Second) {
 		t.Fatal("a harness with a mismatched start time must not match")
 	}
 }
@@ -282,7 +283,7 @@ func TestAcquireWaitLockHarnessScanNeverSignalsReusedWaitPid(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if exited(done, 300*time.Millisecond) {
+	if exited(done, time.Second) {
 		t.Fatal("a reused wait pid (start mismatch) must never be signaled")
 	}
 }
@@ -297,19 +298,50 @@ func TestAcquireWaitLockSubagentDoesNotScanOrRecordHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if exited(done, 300*time.Millisecond) {
+	if exited(done, time.Second) {
 		t.Fatal("a subagent wait must not terminate its parent harness's top-level wait")
 	}
 	rec, ok := readPidfile(waitPidfile(dir, "agentbus/sub"))
 	if !ok || rec.Harness != (procs.Ref{}) || rec.Self != selfRef() || rec.Source != SourceAs {
 		t.Fatalf("subagent record = %+v, want harness 0 0", rec)
 	}
-	// A top-level wait from the same harness must not find the subagent's wait.
-	release2, err := acquireWaitLock(dir, "other", procs.Ref{Pid: 1, Start: 1}, h, SourceSession)
+	// A top-level wait from the same harness kills the top-level sleeper but
+	// must not find the subagent's wait, which recorded no harness.
+	other := procs.Ref{Pid: 1, Start: 1}
+	release2, err := acquireWaitLock(dir, "other", other, h, SourceSession)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release2()
+	if !exited(done, 5*time.Second) {
+		t.Fatal("the top-level sleeper should be terminated by the top-level acquire")
+	}
+	if rec, ok := readPidfile(waitPidfile(dir, "agentbus/sub")); !ok || rec.Self != selfRef() || rec.Harness != (procs.Ref{}) {
+		t.Fatalf("subagent record changed: %+v", rec)
+	}
+	if !procs.Alive(procs.System, selfRef()) {
+		t.Fatal("the subagent wait must still be alive")
+	}
+}
+
+// A wait terminated by the harness scan leaves no pidfile behind (Windows'
+// TerminateProcess skips its release).
+func TestAcquireWaitLockScanRemovesTerminatedPidfile(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	h := harnessRef(4242)
+	writeRecord(t, dir, "agentbus2", old, h, SourceSession)
+	release, err := acquireWaitLock(dir, "agentbus", selfRef(), h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if !exited(done, 5*time.Second) {
+		t.Fatal("the other wait was not terminated")
+	}
+	if _, err := os.Stat(waitPidfile(dir, "agentbus2")); !os.IsNotExist(err) {
+		t.Fatalf("terminated wait's pidfile should be removed, stat err = %v", err)
+	}
 }
 
 func TestAcquireWaitLockOldFormOtherIdentityIgnoredButReplacedByName(t *testing.T) {
@@ -320,7 +352,7 @@ func TestAcquireWaitLockOldFormOtherIdentityIgnoredButReplacedByName(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exited(done, 300*time.Millisecond) {
+	if exited(done, time.Second) {
 		t.Fatal("an old-form record has no harness and must be ignored by the scan")
 	}
 	release()
@@ -348,7 +380,7 @@ func TestReadPidfileForms(t *testing.T) {
 		{"10 20 30\n", false, waitRecord{}},
 		{"10 20 30 40\n", false, waitRecord{}},
 		{"10 20 30 40 as extra\n", false, waitRecord{}},
-		{"10 20 x 40 as\n", false, waitRecord{}},
+		{"10 20 x 40 as\n", true, waitRecord{Self: procs.Ref{Pid: 10, Start: 20}}},
 		{"a b\n", false, waitRecord{}},
 		{"", false, waitRecord{}},
 	}
@@ -396,8 +428,8 @@ func TestWaitRejectsUnknownIdentitySource(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
 	var out bytes.Buffer
-	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat"}, &out); err == nil {
-		t.Fatal("Wait without a known IdentitySource must fail")
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat"}, &out); err == nil || !strings.Contains(err.Error(), "identity source") {
+		t.Fatalf("Wait without a known IdentitySource: err = %v, want an identity source error", err)
 	}
 }
 

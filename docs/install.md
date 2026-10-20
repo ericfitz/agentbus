@@ -469,7 +469,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   identity also replaces the other top-level waits from the same harness;
   its pid, harness and how the identity was chosen are recorded in
   `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
-  wait.
+  wait. Shared-harness caveat: any two top-level waits or watches from one
+  harness replace each other regardless of `-as` (panes of tmux or screen
+  share the tmux server as their harness), and a `-no-harness-watch` wait
+  still records its harness.
 - `agentbus watch` is `wait` for Claude Code's Monitor tool (ADR 0021). It
   takes `wait`'s flags except `-timeout`, runs until Monitor kills it (at
   most 30 minutes, so run it with `timeout_ms` 1800000 and re-arm it when the

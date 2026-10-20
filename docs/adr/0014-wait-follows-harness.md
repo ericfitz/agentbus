@@ -59,7 +59,8 @@ wait keep running. After a laptop sleep longer than the 30-second
 attachment expiry, every session on the host looks stale: the heartbeat
 ticker runs on the monotonic clock, which stops during sleep, but expiry is
 measured on the wall clock. The next register by any process deletes the
-stale rows (`Register` sweeps them), and `Heartbeat` only updates rows it
+stale rows (`Register` sweeps them, and so does the maintenance tick in
+`internal/bus/maintenance.go`), and `Heartbeat` only updates rows it
 still owns, so the session row stays gone until the agent registers again.
 When it does, it can get a different name: a session that was `agentbus2`
 asks for `agentbus`, which is now free. Its next wait, resolved through the
@@ -85,6 +86,12 @@ always wins.
 **Mixed versions.** A wait from an older binary reads the new pidfile as
 garbage and overwrites it without signaling, and it does not take the
 directory lock. Upgrade all hosts' binaries together, as with schema bumps.
+
+**Shared-harness caveat.** Any two top-level waits or watches from one
+harness replace each other, whatever `-as` says. Panes of tmux or screen
+share the tmux server as their harness, so waits started in different panes
+for different sessions replace each other. A `-no-harness-watch` wait still
+records its harness and is replaced the same way.
 
 **Not fixed here.** The session row lost to the sweep while its MCP server
 lives on (the deeper cause) is a separate decision about session expiry.

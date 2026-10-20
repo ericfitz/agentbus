@@ -63,9 +63,11 @@ type waitRecord struct {
 }
 
 // readPidfile parses `pid start` (old form) or `pid start harness_pid
-// harness_start source`. Anything else is treated as absent. The source is
-// diagnostic only, so any value is accepted on read; the writer emits only
-// the known ones.
+// harness_start source`. Anything else is treated as absent, except that a
+// five-field line with an unparsable harness keeps its valid pid and start
+// with a zero harness, so the wait can still be replaced by identity. The
+// source is diagnostic only, so any value is accepted on read; the writer
+// emits only the known ones.
 func readPidfile(path string) (waitRecord, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -84,11 +86,10 @@ func readPidfile(path string) (waitRecord, bool) {
 	if len(f) == 5 {
 		hpid, err1 := strconv.Atoi(f[2])
 		hstart, err2 := strconv.ParseInt(f[3], 10, 64)
-		if err1 != nil || err2 != nil {
-			return waitRecord{}, false
+		if err1 == nil && err2 == nil {
+			rec.Harness = procs.Ref{Pid: hpid, Start: hstart}
+			rec.Source = f[4]
 		}
-		rec.Harness = procs.Ref{Pid: hpid, Start: hstart}
-		rec.Source = f[4]
 	}
 	return rec, true
 }
@@ -151,7 +152,11 @@ func acquireWaitLock(dataDir, as string, self, harness procs.Ref, source string)
 				continue
 			}
 			if rec, ok := readPidfile(p); ok && rec.Harness == harness && rec.Self != self && procs.Alive(procs.System, rec.Self) {
-				_ = terminateWait(rec.Self.Pid)
+				// Remove the victim's pidfile: on Windows TerminateProcess skips
+				// its release; on Unix its compare-remove then finds nothing.
+				if terminateWait(rec.Self.Pid) == nil {
+					_ = os.Remove(p)
+				}
 			}
 		}
 	}

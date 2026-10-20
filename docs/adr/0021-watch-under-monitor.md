@@ -1,8 +1,8 @@
 # ADR 0021: `agentbus watch` keeps Claude Code awake under Monitor
 
-Status: Proposed 2026-10-20. Issue #38. The goal and acceptance criteria
-come from the issue, which the user filed. The rulings below were made by
-Claude during an autonomous run and await the user's review.
+Status: Accepted 2026-10-20. Issue #38. The goal and acceptance criteria
+come from the issue, which the user filed. The rulings below were drafted
+by Claude during an autonomous run and ratified by the user on 2026-10-20.
 
 ## Context
 
@@ -27,7 +27,7 @@ acks or moves a cursor. Claude Code agents run it under Monitor with the
 maximum timeout and re-arm it when the window expires; Grok keeps the
 background `wait`; Codex has no idle wake.
 
-## Rulings (Claude, pending review)
+## Rulings (drafted by Claude, ratified by the user)
 
 - **One line per wake.** The line is
   `agentbus: <n> new message(s) for <as> on <ch>, <ch>; call receive`,

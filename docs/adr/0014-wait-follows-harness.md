@@ -51,8 +51,8 @@ one identity.
 
 ## Amendment (2026-10-20): one top-level wait per harness (#39)
 
-Status: Proposed. Decided by Claude during an autonomous run; the user's
-decision is pending.
+Status: Accepted 2026-10-20. Drafted by Claude during an autonomous run;
+ratified by the user on 2026-10-20.
 
 **Problem.** A session's identity can change while its harness and its
 wait keep running. After a laptop sleep longer than the 30-second

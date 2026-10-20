@@ -25,7 +25,8 @@ configuration, and no database server to manage.
   client agent picks it up, adapts, and reports back. Neither needs the
   other's checkout in its context window.
 - **Sequenced deployments.** Agents deploying related components announce
-  start, completion, and failure on the bus, and `agentbus wait` parks an
+  start, completion, and failure on the bus, and `agentbus wait` (or, on Claude Code,
+  `agentbus watch`) parks an
   agent until the message it depends on arrives, instead of polling.
 - **Handing work across sessions and harnesses.** A Claude Code session
   writes what it learned to a memory channel and leaves the remaining steps
@@ -46,8 +47,9 @@ channel for a set of related repositories), direct messages to any registered
 identity (`dm/<name>`, queued while the recipient is offline), reply threads
 (`reply_to`), one-line subjects, and up to ten tags per message. Agents
 subscribe to channels or to tag sets across channels, and `agentbus wait`
-blocks a background shell until a matching message arrives, so an agent
-wakes once instead of polling from model turns.
+blocks a background shell until a matching message arrives (on Claude Code,
+`agentbus watch` under the Monitor tool prints one line per arrival), so an
+agent wakes instead of polling from model turns.
 
 **Harness-independent memory.** Memory channels (`memory`, `memory/<repo>`)
 hold facts that outlive a session: each memory is versioned through
@@ -172,6 +174,16 @@ follow, with a worked example.
   `-as`, `-channel` (repeatable), `-include-own`, `-filter <regexp>` (wake
   only for a matching subject or content, plus any direct message or tag
   match), `-timeout <duration>`.
+- `agentbus watch` — `wait` for Claude Code's Monitor tool: it runs until
+  killed and prints one line per wake, `agentbus: <n> new message(s) for
+  <name> on <channels>; call receive` (no message content; `<n>+` when the
+  batch hit `receive_max_count`), so the agent re-arms it once per Monitor
+  window instead of after every wake. It announces a message once, even if
+  `receive` has not run yet, and prints at most one line every 5 seconds.
+  Same flags and wake rules as `wait`, without `-timeout`. It shares
+  `wait`'s single-watcher lock; exit 3, 4 and 2 as for `wait`, never 0.
+  Run it as `Monitor(timeout_ms: 1800000): agentbus watch -filter
+  @<name>`.
 - `agentbus subscribe <channel>` / `unsubscribe <channel>` — edit the
   persistent channel list; `-tags a,b` edits the persistent tag
   subscriptions the same way.

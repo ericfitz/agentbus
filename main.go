@@ -30,7 +30,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and to
 // stderr when no command is given.
-const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -162,6 +162,50 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		return 0
+	case "watch":
+		fs := flag.NewFlagSet("agentbus watch", flag.ContinueOnError)
+		var o cli.WatchOptions
+		path := fs.String("config", "", "configuration file")
+		fs.StringVar(&o.As, "as", "", "identity to watch for (default: the session registered from the same harness, else what `agentbus identity` reports)")
+		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
+		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
+		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages")
+		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep watching after the harness that started this watch exits (default: exit 4, silently)")
+		if err := fs.Parse(args); err != nil {
+			return parseExit(err)
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		o.Config = cfg
+		o.IdentitySource = cli.SourceAs
+		if o.As == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "agentbus:", err)
+				return 2
+			}
+			if o.As, o.IdentitySource = cli.WaitIdentitySource(cfg, cwd, os.Stderr); o.As == "" {
+				fmt.Fprintln(os.Stderr, "agentbus: this session has not registered, and another session holds this repository's name; register first or pass -as")
+				return 2
+			}
+		}
+		// Installed before Watch acquires the wait locks, so the
+		// SIGTERM a replacing wait or watch sends is always handled, never fatal.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+		defer stop()
+		switch err := cli.Watch(ctx, o, os.Stdout); {
+		case errors.Is(err, cli.ErrWaitReplaced):
+			return 3 // replaced by a newer wait or watch for this identity: silent, no wake-up
+		case errors.Is(err, cli.ErrHarnessGone):
+			return 4 // the harness that started this watch exited: silent
+		case err != nil:
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		return 2 // unreachable: Watch runs until it fails
 	case "stop-hook":
 		// Installed as a Stop hook by init --global. Always exits 0 so a
 		// broken bus never keeps a harness from stopping.

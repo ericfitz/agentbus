@@ -119,7 +119,7 @@ func TestUnknownCommandExit2(t *testing.T) {
 }
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
-	cmds := []string{"mcp", "init", "tui", "wait", "status", "reset", "delete-channel",
+	cmds := []string{"mcp", "init", "tui", "wait", "watch", "status", "reset", "delete-channel",
 		"subscribe", "unsubscribe", "stop-hook", "subagent-hook"}
 	for _, c := range cmds {
 		for _, h := range []string{"-h", "--help"} {
@@ -137,11 +137,26 @@ func TestSubcommandHelpExitsZero(t *testing.T) {
 }
 
 func TestUnknownFlagStillFails(t *testing.T) {
-	for _, c := range []string{"init", "tui", "wait", "status", "reset", "delete-channel", "subscribe", "unsubscribe"} {
+	for _, c := range []string{"init", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe"} {
 		t.Run(c, func(t *testing.T) {
 			r := execBin(t, c, "-bogus")
 			if r.code == 0 {
 				t.Errorf("%s -bogus exited 0", c)
+			}
+		})
+	}
+}
+
+func TestWatchErrorsExit2WithNothingOnStdout(t *testing.T) {
+	for name, args := range map[string][]string{
+		"bad filter":       {"watch", "-as", "Pat", "-filter", "("},
+		"unknown identity": {"watch", "-as", "Ghost"},
+		"no -timeout":      {"watch", "-as", "Pat", "-timeout", "1s"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := execBin(t, args...)
+			if r.code != 2 || r.stdout != "" || r.stderr == "" {
+				t.Errorf("exit %d stdout %q stderr %q; want exit 2, error on stderr only", r.code, r.stdout, r.stderr)
 			}
 		})
 	}

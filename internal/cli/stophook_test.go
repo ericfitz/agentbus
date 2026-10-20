@@ -49,6 +49,10 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 		!strings.Contains(res["reason"], "receive") || !strings.Contains(res["reason"], "dm/"+me) {
 		t.Fatalf("waiting message must block with a receive reason: %q", got)
 	}
+	// No recorded harness: the original background-wait text, no watch.
+	if want := "except on Codex, make sure a background `agentbus wait -as " + me + " -filter @" + me + "` is running"; !strings.Contains(res["reason"], want) || strings.Contains(res["reason"], "agentbus watch") {
+		t.Fatalf("unknown harness must get the wait text: %q", res["reason"])
+	}
 	if strings.Contains(got, "secret") {
 		t.Fatalf("reason must not carry message content: %q", got)
 	}
@@ -71,5 +75,51 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	StopHook(cfg, strings.NewReader(`{"cwd":"/nonexistent/elsewhere"}`), &out, io.Discard)
 	if out.Len() != 0 {
 		t.Fatalf("unregistered identity must not block: %q", out.String())
+	}
+}
+
+func TestStopHookReasonByHarness(t *testing.T) {
+	for _, tc := range []struct {
+		harness string
+		watch   bool
+	}{{"claude-code", true}, {"grok", false}, {"codex-mcp-client", false}, {"", false}} {
+		t.Run("harness="+tc.harness, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.DataDirectory = t.TempDir()
+			cwd := t.TempDir()
+			me := filepath.Base(cwd)
+			b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = b.Close() }()
+			if _, err := b.RegisterWithClient(me, "", "", false, tc.harness, "1.0"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Register("Sam", "", "", false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(me), Content: "x"}); err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(map[string]any{"cwd": cwd})
+			var out bytes.Buffer
+			StopHook(cfg, bytes.NewReader(body), &out, io.Discard)
+			var res map[string]string
+			if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+				t.Fatalf("%v: %q", err, out.String())
+			}
+			r := res["reason"]
+			if tc.watch {
+				if !strings.Contains(r, "`agentbus watch -as "+me+" -filter @"+me+"` is running under the Monitor tool") || !strings.Contains(r, "timeout_ms 1800000") || strings.Contains(r, "agentbus wait") {
+					t.Fatalf("claude-code must get the watch text only: %q", r)
+				}
+				return
+			}
+			want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + " -filter @" + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."
+			if !strings.Contains(r, want) || strings.Contains(r, "agentbus watch") {
+				t.Fatalf("other harness must get the original wait text: %q", r)
+			}
+		})
 	}
 }

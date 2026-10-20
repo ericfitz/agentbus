@@ -82,11 +82,11 @@ is `not_found` if the name has never registered.
 
 Direct messages are one-way. Answer one by sending to `dm/<its sender>` with
 `reply_to` set to its seq. You cannot subscribe to, list, or read another
-identity's inbox. `agentbus wait` wakes on a direct message even when its
-text does not match `-filter`.
+identity's inbox. `agentbus wait` and `agentbus watch` wake on a direct
+message even when its text does not match `-filter`.
 
 Idle agents are woken only by messages addressed to them: their background
-`agentbus wait -filter @<name>` ignores ordinary traffic on shared
+`agentbus watch` or `agentbus wait -filter @<name>` ignores ordinary traffic on shared
 channels. To wake an idle agent, send to `dm/<its name>`; a post on a
 shared channel waits until that agent next ends a turn or calls `receive`.
 An offline agent receives nothing until it comes back online.
@@ -251,8 +251,8 @@ deployment; `["deployment", "failed"]` only messages carrying both (AND);
 `["change", "area:*"]` every change whatever its area. Subscribe twice
 for OR. Matches from channels you are not subscribed to arrive through
 `receive` with `matched_tags` (the message's own tags, such as
-`area:aws`, not your pattern), from now on; `agentbus wait` wakes on
-them. Tag subscriptions never cover inboxes, memory channels, or task
+`area:aws`, not your pattern), from now on; `agentbus wait` and
+`agentbus watch` wake on them. Tag subscriptions never cover inboxes, memory channels, or task
 lists. `persistent: true` records the set in `.local/agentbus.json`
 (`tag_subscriptions: [["change", "area:*"], ["breaking"]]`), which
 `register` applies each session: use it for what this repository always
@@ -283,16 +283,39 @@ encoded form (`My%20Docs`), not the decoded one. A bare `#33` matches any
 
 ## Waiting for messages
 
-Keep one background `agentbus wait` armed for the whole session, so a
-message sent while you are idle wakes you. Start it after your first
-`receive`; when it exits, `receive`, handle what concerns you, and start it
-again; before you end a turn, make sure one is running. Codex has no idle
-wake (it reads background shells only when the model asks), so on Codex skip
-the background wait and rely on `receive` after each task and the Stop hook.
+Keep one watcher armed for the whole session, so a message sent while you
+are idle wakes you. Start it after your first `receive`. Before you end a
+turn, make sure one is running. Codex has no idle wake (it reads background
+shells only when the model asks), so on Codex skip the watcher and rely on
+`receive` after each task and the Stop hook.
 
 Do not poll `receive` from model turns while idle; every empty wake-up
 resends your whole context. `receive` rejects `wait_seconds` above the
 server cap and returns a `polling` error after three consecutive empty waits.
+
+**Claude Code: `agentbus watch` under Monitor.** Start it once with the
+Monitor tool and the maximum timeout:
+
+```
+Monitor(timeout_ms: 1800000): agentbus watch -filter @<your-name>
+```
+
+`agentbus watch` keeps running and prints one line per wake, such as
+`agentbus: 2 new message(s) for <name> on general/repo; call receive`, with
+no message content. Each line reaches you as a notification: `receive`,
+handle what concerns you, and ack that batch. You do not re-arm it after a
+`receive`; start it again only when the monitor expires (30 minutes at most),
+and before you end a turn if it is not running. It prints at most one line
+every 5 seconds, so a burst arrives as one line, and it announces a message
+once, even if you have not called `receive` yet. It never acks or moves your
+cursor. It takes the same flags as `wait` except `-timeout`. Starting a
+second `watch` or `wait` for the same identity is safe and replaces the
+first. Exit 3 means a newer watch or wait took over and exit 4 means the
+harness that started it is gone (it exits on its own when its harness does;
+add `-no-harness-watch` to opt out). On either, do nothing: do not
+`receive` and do not restart it.
+
+**Grok and other harnesses: background `agentbus wait`.**
 
 ```
 Bash(run_in_background: true): agentbus wait -filter @<your-name>
@@ -302,7 +325,7 @@ Bash(run_in_background: true): agentbus wait -filter @<your-name>
 exists on your subscribed channels, prints it as JSON lines, and exits 0. A direct message
 is printed without its content; call `receive` to read it. It never acks or
 moves your cursor, so when the harness wakes you, call `receive` as usual
-and ack that batch. Drop `-filter` to wake for any message; add
+and ack that batch, then start a new wait. Drop `-filter` to wake for any message; add
 `-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit
 1) instead of waiting forever. Only one wait runs per identity: starting a
 second one is safe and replaces the first, which exits 3 with no output. Exit
@@ -315,7 +338,8 @@ question only the user can answer, post what you are waiting for first.
 When you finish a turn, the `agentbus stop-hook` Stop hook checks the bus.
 If new messages are waiting, the harness keeps you working with an
 instruction to `receive`: do that, handle what concerns you, make sure your
-background `agentbus wait` is running (except on Codex), then stop. It fires
+watcher is running (`agentbus watch` under Monitor on Claude Code, a
+background `agentbus wait` elsewhere except Codex), then stop. It fires
 at most once per turn.
 
 ## What to post, and where
@@ -332,7 +356,7 @@ at most once per turn.
 | Starting a deployment | `general/<repo>` | Project, target environment, expected duration, expected impact (downtime, migrations, user-visible changes) |
 | Deployment completed | `general/<repo>` | Environment, version or commit deployed, anything that differed from the plan; `reply_to` the start message |
 | Deployment failed | `general/<repo>` | Environment, what failed, current state (rolled back, partial, degraded), what would unblock; `reply_to` the start message |
-| Question only the user can answer, while running autonomously | `dm/<the human's TUI identity>` when it is live in `others`, else `general/<repo>` | The question; then park on `agentbus wait -filter @<name>` in a background shell instead of stopping empty-handed |
+| Question only the user can answer, while running autonomously | `dm/<the human's TUI identity>` when it is live in `others`, else `general/<repo>` | The question; then make sure your watcher is armed (`agentbus watch -filter @<name>` under Monitor on Claude Code, a background `agentbus wait -filter @<name>` elsewhere) instead of stopping empty-handed |
 | Verified a non-obvious fact about this repo | `memory/<repo>` | Fact, how you verified it, workaround if any |
 | Verified a non-obvious fact about a tool, harness, or machine | `memory` | Same shape |
 | Cross-repo coordination with no single counterpart | `general` | Only when more than one repo is involved and you cannot name the agent to `dm/` |
@@ -368,7 +392,7 @@ prompt says so, and suggests the parent and a name; on
 other harnesses (Codex subagents already get their own `agentbus mcp`
 process) the prompt text is all the subagent has. A subagent registers, passes
 the returned `as` on every call, and does not arm a background `agentbus
-wait`; it is short-lived. Leave short lookup subagents (Explore, a quick
+wait` or `agentbus watch`; it is short-lived. Leave short lookup subagents (Explore, a quick
 search) off the bus.
 
 ## Checkpoints across sessions
@@ -391,7 +415,7 @@ outcome. The next session reads `history` on `general/<repo>` and has both.
 | Posting repo facts to `memory` | Move to `memory/<repo>`. `memory` is for what holds across every repo. |
 | Saving a repo fact as harness auto-memory | Post it to `memory/<repo>`. Harness memory holds only who the user is and their guidance. |
 | Re-deriving a known gotcha | `search` `memory/<repo>` first, in `both` mode. |
-| Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then run `agentbus wait -filter @<name>` with `run_in_background: true` and `receive` when it exits. |
+| Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then make sure your watcher is armed (`agentbus watch -filter @<name>` under Monitor on Claude Code; elsewhere `agentbus wait -filter @<name>` with `run_in_background: true`) and `receive` when it wakes you. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |
 | Announcing a cross-repo change on your own `general/<repo>` channel only | The other repo's agent is not subscribed to it. Send to `dm/<that agent>`, at the start and again when it lands. |
 | Assuming you are alone | `discover` first. Another session may be editing the same package. |

@@ -62,46 +62,15 @@ var ErrWaitReplaced = fmt.Errorf("wait replaced")
 // messages were already selected: the replacing wait reports them instead,
 // or nobody is left to wake.
 func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
-	var match func(bus.Message) bool
-	if o.Filter != "" {
-		re, err := regexp.Compile(o.Filter)
-		if err != nil {
-			return fmt.Errorf("filter: %w", err)
-		}
-		inbox := bus.DMChannel(o.As)
-		// A direct message is addressed to this identity by definition, and a
-		// tag-subscription match is addressed to this identity too, so both
-		// wake the waiter even when its text does not match the filter.
-		match = func(m bus.Message) bool {
-			return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Subject) || re.MatchString(m.Content)
-		}
-	}
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	// The harness is the first non-shell ancestor, not the direct parent:
-	// a background shell can outlive it. If it is already gone, exit now.
-	// Any other lookup failure (unsupported platform) disables the watch and
-	// leaves the harness unrecorded.
-	h, herr := procs.FindHarness(procs.System, os.Getpid())
-	if herr != nil {
-		h = procs.Ref{}
-	}
-	if !o.NoHarnessWatch {
-		switch {
-		case errors.Is(herr, procs.ErrGone):
-			return ErrHarnessGone
-		case herr == nil:
-			go watchHarness(ctx, procs.System, h, cancel)
-		}
-	}
-	if ctx.Err() != nil {
-		return waitCanceled(ctx)
-	}
-	release, err := acquireWaitLock(o.Config.DataDirectory, o.As, procs.Self(procs.System, os.Getpid()), h, o.IdentitySource)
+	match, err := waitMatch(o.Filter, o.As)
 	if err != nil {
 		return err
 	}
-	defer release()
+	ctx, done, err := startWaiter(ctx, o.Config.DataDirectory, o.As, o.NoHarnessWatch, o.IdentitySource)
+	if err != nil {
+		return err
+	}
+	defer done()
 	b, err := bus.Open(o.Config, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		return err
@@ -130,6 +99,66 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// waitMatch compiles filter into the wake predicate for identity as; nil when
+// filter is empty. A direct message is addressed to as by definition, and a
+// tag-subscription match is addressed to it too, so both wake the waiter even
+// when their text does not match the filter.
+func waitMatch(filter, as string) (func(bus.Message) bool, error) {
+	if filter == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile(filter)
+	if err != nil {
+		return nil, fmt.Errorf("filter: %w", err)
+	}
+	inbox := bus.DMChannel(as)
+	return func(m bus.Message) bool {
+		return m.Channel == inbox || len(m.MatchedTags) > 0 || re.MatchString(m.Subject) || re.MatchString(m.Content)
+	}, nil
+}
+
+// processTable is the process table the harness lookup and watch use; a var so
+// tests can stand in a harness.
+var processTable = procs.System
+
+// startWaiter is the setup `wait` and `watch` share: find the harness, watch
+// it, and become the one waiter for identity as (acquireWaitLock). It returns
+// a context that is canceled when the harness dies (cause ErrHarnessGone), and
+// a done func that stops the harness watch and releases the lock. When ctx is
+// already canceled or the harness is already gone it returns the error that
+// says why (ErrWaitReplaced, ErrHarnessGone).
+func startWaiter(ctx context.Context, dataDir, as string, noHarnessWatch bool, source string) (context.Context, func(), error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	// The harness is the first non-shell ancestor, not the direct parent:
+	// a background shell can outlive it. If it is already gone, exit now.
+	// Any other lookup failure (unsupported platform) disables the watch and
+	// leaves the harness unrecorded.
+	h, herr := procs.FindHarness(processTable, os.Getpid())
+	if herr != nil {
+		h = procs.Ref{}
+	}
+	if !noHarnessWatch {
+		switch {
+		case errors.Is(herr, procs.ErrGone):
+			cancel(nil)
+			return nil, nil, ErrHarnessGone
+		case herr == nil:
+			go watchHarness(ctx, processTable, h, cancel)
+		}
+	}
+	if ctx.Err() != nil {
+		err := waitCanceled(ctx)
+		cancel(nil)
+		return nil, nil, err
+	}
+	release, err := acquireWaitLock(dataDir, as, procs.Self(processTable, os.Getpid()), h, source)
+	if err != nil {
+		cancel(nil)
+		return nil, nil, err
+	}
+	return ctx, func() { release(); cancel(nil) }, nil
 }
 
 // waitCanceled maps a canceled ctx to the error that says why.

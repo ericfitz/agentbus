@@ -27,7 +27,7 @@ func (b *Bus) Wait(ctx context.Context, as string, channels []string, includeOwn
 	}
 	skipBelow := map[string]int64{} // channel -> highest seq already rejected by match
 	for {
-		msgs, err := b.peek(as, channels, includeOwn, skipBelow)
+		msgs, err := b.peek(as, channels, includeOwn, skipBelow, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +48,47 @@ func (b *Bus) Wait(ctx context.Context, as string, channels []string, includeOwn
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(waitPollInterval):
+		case <-time.After(WaitPollInterval):
+		}
+	}
+}
+
+// WaitAbove is Wait for a caller that keeps waiting (`agentbus watch`, ADR
+// 0021). It blocks until a message with seq > floor that match accepts is
+// undelivered for as, then returns the matching messages and the new floor:
+// the highest seq examined, rejected messages included, so none is looked at
+// again. A peek truncated at receive_max_count raises the floor only to the
+// last seq it returned, so the messages past the cut are found next call.
+// Wake rules and read-only behavior are Wait's. Canceling ctx returns
+// ctx.Err().
+func (b *Bus) WaitAbove(ctx context.Context, as string, channels []string, includeOwn bool, match func(Message) bool, floor int64) ([]Message, int64, error) {
+	if as == "" {
+		return nil, floor, errf("validation", false, "as is required")
+	}
+	for {
+		msgs, err := b.peek(as, channels, includeOwn, nil, floor)
+		if err != nil {
+			return nil, floor, err
+		}
+		var out []Message
+		for _, m := range msgs {
+			if match == nil || match(m) {
+				out = append(out, m)
+			}
+		}
+		if len(msgs) > 0 {
+			floor = max(floor, msgs[len(msgs)-1].Seq) // peek orders by seq
+		}
+		if len(out) > 0 {
+			return out, floor, nil
+		}
+		if len(msgs) > 0 {
+			continue // everything rejected: look past it at once
+		}
+		select {
+		case <-ctx.Done():
+			return nil, floor, ctx.Err()
+		case <-time.After(WaitPollInterval):
 		}
 	}
 }
@@ -56,8 +96,9 @@ func (b *Bus) Wait(ctx context.Context, as string, channels []string, includeOwn
 // peek selects, without side effects, the messages as has not been handed
 // yet: everything past each subscription's cursor and pending batch, the tag
 // source (receive's tags/ row) included. skipBelow raises the floor per
-// channel for messages a caller has already rejected.
-func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[string]int64) ([]Message, error) {
+// channel for messages a caller has already rejected; above raises it for
+// every channel (0 for none).
+func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[string]int64, above int64) ([]Message, error) {
 	rows, err := b.db.Query("SELECT channel, cursor_seq, pending_end_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
 	if err != nil {
 		return nil, internal(err)
@@ -93,7 +134,7 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 	var sets []tagSet
 	direct := map[string]bool{}
 	for _, s := range subs {
-		floor := max(s.cursor, s.pending, skipBelow[s.channel])
+		floor := max(s.cursor, s.pending, skipBelow[s.channel], above)
 		if s.channel == tagSource {
 			if sets, err = b.tagSets(b.db, as); err != nil {
 				return nil, err

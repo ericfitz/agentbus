@@ -64,3 +64,14 @@ model asks.
   keeps `-filter @<name>` (user decision), so agents are told that
   waking an idle agent takes a direct message, and that an offline agent
   receives nothing until it comes back online.
+
+## Amendment (2026-10-20)
+
+For Claude Code the idle wake is now `agentbus watch` under the Monitor tool
+([ADR 0021](0021-watch-under-monitor.md), #38), not a background `wait`
+restarted after each `receive`: one process prints a line per wake, and the
+agent re-arms it only when the Monitor window (30 minutes at most) expires.
+Grok keeps the background `agentbus wait` exactly as decided above, and Codex
+still has no idle wake. The Stop hook's reason names the watch for Claude Code
+and the wait for the other harnesses. The text above is the original decision
+and is left unchanged.

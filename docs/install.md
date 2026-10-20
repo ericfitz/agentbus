@@ -105,7 +105,7 @@ winget install ericfitz.agentbus
 
 The winget command works once the winget package is published.
 
-Stop agentbus sessions (MCP servers, `agentbus wait`, the TUI) before
+Stop agentbus sessions (MCP servers, `agentbus wait`, `agentbus watch`, the TUI) before
 `scoop update agentbus` or `winget upgrade ericfitz.agentbus`: neither can
 replace the files of a running program.
 
@@ -449,7 +449,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for its session. Always exits 0.
-- The hooks and `agentbus wait` without `-as` find their session by harness
+- The hooks and `agentbus wait` or `watch` without `-as` find their session by harness
   process (ADR 0017): the `agentbus mcp` server records the harness (its
   first non-shell ancestor) on each session it registers, and they use the
   live top-level session registered from their own harness. Without a match
@@ -470,6 +470,20 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   its pid, harness and how the identity was chosen are recorded in
   `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
   wait.
+- `agentbus watch` is `wait` for Claude Code's Monitor tool (ADR 0021). It
+  takes `wait`'s flags except `-timeout`, runs until Monitor kills it (at
+  most 30 minutes, so run it with `timeout_ms` 1800000 and re-arm it when the
+  monitor expires), and prints one line per wake:
+  `agentbus: <n> new message(s) for <name> on <channels>; call receive`, with
+  a `+` after `<n>` when the batch hit `receive_max_count`. The line carries
+  no message content. A message is announced once, even if `receive` has not
+  run yet, and lines are at least 5 seconds apart; messages arriving in the
+  gap share the next line. Nothing but wake lines goes to stdout. It never
+  exits 0: 2 on an error (message on stderr), 3 when a newer `watch` or
+  `wait` for the same identity replaced it, and 4 when its harness exited
+  (both silent). `wait` and `watch` share one lock and pidfile, so either
+  replaces the other. Grok keeps the background `wait`; Codex has no idle
+  wake.
 - `agentbus identity` prints the registration block (the register sentence
   plus the session protocol) for the current directory. It's also what the
   SessionStart hooks above run.

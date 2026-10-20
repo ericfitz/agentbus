@@ -72,7 +72,7 @@ func SubagentHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 		"register tool with parent=%q and name=%q, or the parent= or name= your prompt "+
 		"names (pick another name if it is taken), then pass the \"as\" it returns on "+
 		"every later agentbus call. Follow the using-agentbus protocol, but do not start "+
-		"a background `agentbus wait`: you are short-lived, so use receive instead. "+
+		"a background `agentbus wait` or `agentbus watch`: you are short-lived, so use receive instead. "+
 		"Otherwise ignore this note: you do not need to register.",
 		parent, subagentName(hi.AgentType))
 	_ = json.NewEncoder(out).Encode(map[string]any{"hookSpecificOutput": map[string]string{

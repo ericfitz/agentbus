@@ -70,3 +70,73 @@ func TestWaitMatchSkipsRejectedMessages(t *testing.T) {
 		t.Fatalf("%v %v", got, err)
 	}
 }
+
+func TestWaitAboveFloorSkipsAnnouncedAndRejected(t *testing.T) {
+	old := WaitPollInterval
+	WaitPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { WaitPollInterval = old })
+	b, sam, kim := setupTwo(t)
+	m1, _ := b.Send(sam, SendInput{Channel: "dev", Content: "one"})
+	got, floor, err := b.WaitAbove(context.Background(), kim, nil, false, nil, 0)
+	if err != nil || len(got) != 1 || got[0].Seq != m1.Seq || floor != m1.Seq {
+		t.Fatalf("first: %v floor %d err %v", got, floor, err)
+	}
+	// Nothing new above the floor, though the message is still undelivered.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	if got, _, err := b.WaitAbove(ctx, kim, nil, false, nil, floor); err != context.DeadlineExceeded || len(got) != 0 {
+		t.Fatalf("announced message came back: %v %v", got, err)
+	}
+	// A rejected message raises the floor too, and a later match wakes.
+	at := func(m Message) bool { return strings.Contains(m.Content, "@kim") }
+	m2, _ := b.Send(sam, SendInput{Channel: "dev", Content: "noise"})
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "@kim ping"})
+	}()
+	got, floor2, err := b.WaitAbove(context.Background(), kim, nil, false, at, floor)
+	if err != nil || len(got) != 1 || got[0].Content != "@kim ping" || floor2 <= m2.Seq {
+		t.Fatalf("second: %v floor %d err %v", got, floor2, err)
+	}
+}
+
+func TestWaitAboveSkipsPendingBatch(t *testing.T) {
+	old := WaitPollInterval
+	WaitPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { WaitPollInterval = old })
+	b, sam, kim := setupTwo(t)
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "seen"})
+	if r, _ := b.Receive(kim, ReceiveInput{}); len(r.Messages) != 1 || r.Batch == "" {
+		t.Fatalf("receive: %+v", r)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	if got, _, err := b.WaitAbove(ctx, kim, nil, false, nil, 0); err != context.DeadlineExceeded || len(got) != 0 {
+		t.Fatalf("pending batch woke: %v %v", got, err)
+	}
+}
+
+// A peek truncated at ReceiveMaxCount must not lose the messages past the cut:
+// the floor rises only to the highest seq returned.
+func TestWaitAboveTruncatedBatchKeepsRest(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	b.cfg.ReceiveMaxCount = 2
+	for i := 0; i < 5; i++ {
+		_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "m"})
+	}
+	got, floor, err := b.WaitAbove(context.Background(), kim, nil, false, nil, 0)
+	if err != nil || len(got) != 2 || floor != got[1].Seq {
+		t.Fatalf("first: %v floor %d err %v", got, floor, err)
+	}
+	got2, floor2, err := b.WaitAbove(context.Background(), kim, nil, false, nil, floor)
+	if err != nil || len(got2) != 2 || got2[0].Seq <= floor || floor2 != got2[1].Seq {
+		t.Fatalf("second: %v floor %d err %v", got2, floor2, err)
+	}
+}
+
+func TestWaitAboveRequiresIdentity(t *testing.T) {
+	b, _, _ := setupTwo(t)
+	if _, _, err := b.WaitAbove(context.Background(), "", nil, false, nil, 0); err == nil {
+		t.Fatal("empty as must error")
+	}
+}

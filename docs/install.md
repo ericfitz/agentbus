@@ -465,8 +465,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   4 when the harness that started it exited (both silent, no output; ADR 0014).
   The harness is the first ancestor that is not a shell, checked every 2
   seconds with its start time to guard against pid reuse; `-no-harness-watch`
-  turns this off. Only one wait runs per identity; its pid is recorded
-  in `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
+  turns this off. Only one wait runs per identity, and a wait for a top-level
+  identity also replaces the other top-level waits from the same harness;
+  its pid, harness and how the identity was chosen are recorded in
+  `<data dir>/wait/<identity>.pid`, and a stale pidfile never blocks a new
   wait.
 - `agentbus identity` prints the registration block (the register sentence
   plus the session protocol) for the current directory. It's also what the

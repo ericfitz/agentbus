@@ -29,6 +29,10 @@ type WaitOptions struct {
 	// NoHarnessWatch keeps the wait running after the harness that started it
 	// is gone (see ErrHarnessGone).
 	NoHarnessWatch bool
+	// IdentitySource says how As was chosen: SourceAs, SourceSession or
+	// SourceCwd. It is recorded in the wait's pidfile; Wait rejects any other
+	// value.
+	IdentitySource string
 }
 
 // ErrWaitTimeout is returned when no message arrived before Timeout.
@@ -50,6 +54,9 @@ var ErrWaitReplaced = fmt.Errorf("wait replaced")
 // a second one signals the first to exit silently (see acquireWaitLock). The
 // caller cancels ctx on SIGTERM/SIGINT/SIGHUP, installed before calling so the
 // replacement signal is never lost; a canceled ctx returns ErrWaitReplaced.
+// A wait for a top-level identity also replaces the other waits that
+// top-level identities started from the same harness, because a session's
+// identity can change while its harness lives on (see acquireWaitLock).
 // A wait also exits with ErrHarnessGone when the harness that started it
 // dies (unless NoHarnessWatch). Either way it prints nothing, even when
 // messages were already selected: the replacing wait reports them instead,
@@ -71,21 +78,26 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	// The harness is the first non-shell ancestor, not the direct parent:
+	// a background shell can outlive it. If it is already gone, exit now.
+	// Any other lookup failure (unsupported platform) disables the watch and
+	// leaves the harness unrecorded.
+	h, herr := procs.FindHarness(procs.System, os.Getpid())
+	if herr != nil {
+		h = procs.Ref{}
+	}
 	if !o.NoHarnessWatch {
-		// The harness is the first non-shell ancestor, not the direct parent:
-		// a background shell can outlive it. If it is already gone, exit now.
-		// Any other lookup failure (unsupported platform) disables the watch.
-		switch h, err := procs.FindHarness(procs.System, os.Getpid()); {
-		case errors.Is(err, procs.ErrGone):
+		switch {
+		case errors.Is(herr, procs.ErrGone):
 			return ErrHarnessGone
-		case err == nil:
+		case herr == nil:
 			go watchHarness(ctx, procs.System, h, cancel)
 		}
 	}
 	if ctx.Err() != nil {
 		return waitCanceled(ctx)
 	}
-	release, err := acquireWaitLock(o.Config.DataDirectory, o.As, procs.Self(procs.System, os.Getpid()))
+	release, err := acquireWaitLock(o.Config.DataDirectory, o.As, procs.Self(procs.System, os.Getpid()), h, o.IdentitySource)
 	if err != nil {
 		return err
 	}

@@ -48,3 +48,43 @@ one identity.
   file only if it still names this wait.
 - **Shared-identity caveat.** Two sessions that share one identity replace
   each other's wait.
+
+## Amendment (2026-10-20): one top-level wait per harness (#39)
+
+Status: Proposed. Decided by Claude during an autonomous run; the user's
+decision is pending.
+
+**Problem.** A session's identity can change while its harness and its
+wait keep running. After a laptop sleep longer than the 30-second
+attachment expiry, every session on the host looks stale: the heartbeat
+ticker runs on the monotonic clock, which stops during sleep, but expiry is
+measured on the wall clock. The next register by any process deletes the
+stale rows (`Register` sweeps them), and `Heartbeat` only updates rows it
+still owns, so the session row stays gone until the agent registers again.
+When it does, it can get a different name: a session that was `agentbus2`
+asks for `agentbus`, which is now free. Its next wait, resolved through the
+harness lookup (ADR 0017), uses `agentbus.pid` and never replaces the old
+wait in `agentbus2.pid`. The old wait's harness is still alive, so the
+harness watch does not end it either: it stays up and later wakes the agent
+for messages addressed to a name it no longer holds.
+
+**Ruling.** A wait for a top-level identity (no `/` in the name) also
+replaces every other live wait that a top-level identity started from the
+same harness (pid and start time), whatever identity that wait resolved.
+The pidfile records `pid start harness_pid harness_start source`, where
+source is how the identity was chosen (`as` for `-as`, `session` for the
+harness lookup, `cwd` for the working-directory fallback), so the next
+unexplained wait can be diagnosed from the file. Readers accept the old
+two-field form. Waits for subagent identities (`parent/name`) record no
+harness and are replaced only by identity, as before. The whole
+read-terminate-write sequence runs under one directory-wide lock
+(`wait/.lock`), taken before the per-identity lock, so two waits for
+different identities from one harness cannot deadlock and the newer one
+always wins.
+
+**Mixed versions.** A wait from an older binary reads the new pidfile as
+garbage and overwrites it without signaling, and it does not take the
+directory lock. Upgrade all hosts' binaries together, as with schema bumps.
+
+**Not fixed here.** The session row lost to the sweep while its MCP server
+lives on (the deeper cause) is a separate decision about session expiry.

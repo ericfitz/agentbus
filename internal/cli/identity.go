@@ -42,31 +42,45 @@ var findHarness = func() (procs.Ref, error) { return procs.FindHarness(procs.Sys
 // name is live under another known harness: that name is provably another
 // session's, so a session that has not registered yet does not borrow it.
 func SessionIdentity(b *bus.Bus, cwd string, warn io.Writer) string {
+	name, _ := sessionIdentity(b, cwd, warn)
+	return name
+}
+
+// sessionIdentity is SessionIdentity plus where the name came from:
+// SourceSession for the harness's registered session, else SourceCwd.
+func sessionIdentity(b *bus.Bus, cwd string, warn io.Writer) (name, source string) {
 	h, herr := findHarness()
 	if herr == nil {
 		if name, err := b.IdentityForHarness(h); err == nil && name != "" {
-			return name
+			return name, SourceSession
 		}
 	}
-	name := IdentityName(cwd, warn)
+	name = IdentityName(cwd, warn)
 	if herr == nil {
 		if other, live, err := b.SessionHarness(name); err == nil && live && other.Pid > 0 && other != h {
-			return ""
+			return "", SourceCwd
 		}
 	}
-	return name
+	return name, SourceCwd
 }
 
 // WaitIdentity is SessionIdentity for a caller with no bus open: `agentbus
 // wait` without -as, "" included. If the bus cannot be opened it falls back
 // to IdentityName(cwd); the wait itself then reports the open error.
 func WaitIdentity(cfg config.Config, cwd string, warn io.Writer) string {
+	name, _ := WaitIdentitySource(cfg, cwd, warn)
+	return name
+}
+
+// WaitIdentitySource is WaitIdentity plus how the name was chosen
+// (SourceSession or SourceCwd), for the wait's pidfile.
+func WaitIdentitySource(cfg config.Config, cwd string, warn io.Writer) (name, source string) {
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		return IdentityName(cwd, warn)
+		return IdentityName(cwd, warn), SourceCwd
 	}
 	defer func() { _ = b.Close() }()
-	return SessionIdentity(b, cwd, warn)
+	return sessionIdentity(b, cwd, warn)
 }
 
 // IdentityName is the name identity would print, without the prompt.

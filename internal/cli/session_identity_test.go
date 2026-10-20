@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -141,6 +142,62 @@ func TestUnregisteredSessionDoesNotBorrowAnotherHarnessName(t *testing.T) {
 	StopHook(cfg, strings.NewReader(`{"cwd":`+strconvQuote(cwd)+`}`), &out, io.Discard)
 	if out.Len() != 0 {
 		t.Fatalf("unregistered session must not block for %s's messages: %q", first, out.String())
+	}
+}
+
+// The trigger for #39: after a stale sweep (every attachment expired, e.g.
+// after a laptop sleep) a session that re-registers gets the bare cwd name
+// it did not have before, while its harness is unchanged. Its identity
+// changed under a live harness, so its old wait (under the suffixed name)
+// is the one a new wait must replace.
+func TestIdentityChangesAfterStaleSweepWhileHarnessSame(t *testing.T) {
+	cfg, cwd, first, second, b := twoSessions(t)
+	if second != first+"2" {
+		t.Fatalf("setup: first=%q second=%q", first, second)
+	}
+	h2 := procs.Ref{Pid: 200, Start: 2}
+	setHarness(t, h2, nil)
+	if got := WaitIdentity(cfg, cwd, io.Discard); got != second {
+		t.Fatalf("before the sweep WaitIdentity = %q, want %q", got, second)
+	}
+	// Both sessions' heartbeats are now older than the expiry; any Register sweeps them.
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sweeper, err := bus.Open(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sweeper.Close() }()
+	sweeper.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
+	if _, err := sweeper.Register("Sam", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	// The second session re-registers from the same harness, asking for the cwd name.
+	again, err := bus.Open(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = again.Close() }()
+	again.Now = sweeper.Now
+	again.SetHarness(h2)
+	r, err := again.Register(filepath.Base(cwd), "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Sender != first || r.Sender == second {
+		t.Fatalf("re-registered as %q, want the bare name %q (was %q)", r.Sender, first, second)
+	}
+	name, src := WaitIdentitySource(cfg, cwd, io.Discard)
+	if name != first || src != SourceSession {
+		t.Fatalf("WaitIdentitySource = %q, %q; want %q, session", name, src, first)
+	}
+}
+
+func TestWaitIdentitySourceCwdFallback(t *testing.T) {
+	cfg, cwd, first, _, _ := twoSessions(t)
+	setHarness(t, procs.Ref{}, procs.ErrGone)
+	name, src := WaitIdentitySource(cfg, cwd, io.Discard)
+	if name != first || src != SourceCwd {
+		t.Fatalf("WaitIdentitySource = %q, %q; want %q, cwd", name, src, first)
 	}
 }
 

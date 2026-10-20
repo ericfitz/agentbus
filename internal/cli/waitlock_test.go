@@ -56,7 +56,7 @@ func TestAcquireWaitLockReplacesLiveWait(t *testing.T) {
 	dir := t.TempDir()
 	old, done := startSleeper(t)
 	writeRef(t, dir, "Pat", old)
-	release, err := acquireWaitLock(dir, "Pat", selfRef())
+	release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestAcquireWaitLockReplacesLiveWait(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("old wait was not terminated")
 	}
-	if got, ok := readPidfile(waitPidfile(dir, "Pat")); !ok || got != selfRef() {
+	if got, ok := readPidfile(waitPidfile(dir, "Pat")); !ok || got.Self != selfRef() {
 		t.Fatalf("pidfile = %+v, want ours", got)
 	}
 }
@@ -86,7 +86,7 @@ func TestAcquireWaitLockStaleNotSignaled(t *testing.T) {
 	// Stale: the recorded process is gone. Use a reused-pid shape for the live
 	// sleeper (start mismatch) and a dead one for the gone case.
 	writeRef(t, dir, "Pat", procs.Ref{Pid: old.Pid, Start: old.Start + 1})
-	release, err := acquireWaitLock(dir, "Pat", selfRef())
+	release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestAcquireWaitLockStaleNotSignaled(t *testing.T) {
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
 	writeRef(t, dir, "Pat", procs.Ref{Pid: cmd.Process.Pid, Start: start})
-	release, err = acquireWaitLock(dir, "Pat", selfRef())
+	release, err = acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatalf("stale pidfile must not block: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestAcquireWaitLockGarbagePidfile(t *testing.T) {
 	p := waitPidfile(dir, "Pat")
 	_ = os.MkdirAll(filepath.Dir(p), 0o700)
 	_ = os.WriteFile(p, []byte("not a pidfile"), 0o600)
-	release, err := acquireWaitLock(dir, "Pat", selfRef())
+	release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,21 +127,21 @@ func TestAcquireWaitLockGarbagePidfile(t *testing.T) {
 
 func TestReleaseLeavesForeignPidfile(t *testing.T) {
 	dir := t.TempDir()
-	release, err := acquireWaitLock(dir, "Pat", selfRef())
+	release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	other := procs.Ref{Pid: os.Getpid() + 100000, Start: 5}
 	writeRef(t, dir, "Pat", other)
 	release()
-	if got, ok := readPidfile(waitPidfile(dir, "Pat")); !ok || got != other {
+	if got, ok := readPidfile(waitPidfile(dir, "Pat")); !ok || got.Self != other {
 		t.Fatalf("release removed or changed a foreign pidfile: %+v", got)
 	}
 }
 
 func TestReleaseRemovesOwnPidfile(t *testing.T) {
 	dir := t.TempDir()
-	release, err := acquireWaitLock(dir, "Pat", selfRef())
+	release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, SourceAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestWaitCanceledProducesNoOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out bytes.Buffer
-	err := Wait(ctx, WaitOptions{Config: cfg, As: "Pat"}, &out)
+	err := Wait(ctx, WaitOptions{Config: cfg, As: "Pat", IdentitySource: SourceAs}, &out)
 	if err != ErrWaitReplaced || out.Len() != 0 {
 		t.Fatalf("err = %v, out = %q; want ErrWaitReplaced and no output", err, out.String())
 	}
@@ -179,7 +179,7 @@ func TestWaitCanceledMidWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	res := make(chan error, 1)
 	var out bytes.Buffer
-	go func() { res <- Wait(ctx, WaitOptions{Config: cfg, As: "Pat"}, &out) }()
+	go func() { res <- Wait(ctx, WaitOptions{Config: cfg, As: "Pat", IdentitySource: SourceAs}, &out) }()
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	select {
@@ -204,5 +204,227 @@ func registerPat(t *testing.T, cfg config.Config) {
 	defer func() { _ = b.Close() }()
 	if _, err := b.Register("Pat", "", "", false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func harnessRef(pid int) procs.Ref { return procs.Ref{Pid: pid, Start: int64(pid) * 10} }
+
+// writeRecord writes a new-form pidfile for identity as.
+func writeRecord(t *testing.T, dir, as string, self, harness procs.Ref, source string) {
+	t.Helper()
+	p := waitPidfile(dir, as)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	line := fmt.Sprintf("%d %d %d %d %s\n", self.Pid, self.Start, harness.Pid, harness.Start, source)
+	if err := os.WriteFile(p, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exited(done <-chan error, wait time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(wait):
+		return false
+	}
+}
+
+// #39: the session's identity changed (agentbus2 -> agentbus) while its
+// harness lived on; the wait under the new name replaces the old one.
+func TestAcquireWaitLockReplacesSameHarnessOtherIdentity(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	h := harnessRef(4242)
+	writeRecord(t, dir, "agentbus2", old, h, SourceSession)
+	release, err := acquireWaitLock(dir, "agentbus", selfRef(), h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if !exited(done, 5*time.Second) {
+		t.Fatal("same-harness wait under another identity was not terminated")
+	}
+}
+
+func TestAcquireWaitLockKeepsOtherHarnessWait(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	writeRecord(t, dir, "agentbus2", old, harnessRef(1), SourceSession)
+	release, err := acquireWaitLock(dir, "agentbus", selfRef(), harnessRef(2), SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if exited(done, 300*time.Millisecond) {
+		t.Fatal("a wait from another harness must not be terminated")
+	}
+	// Same harness pid but a different start time is a reused pid: another harness.
+	writeRecord(t, dir, "agentbus2", old, procs.Ref{Pid: 2, Start: 99}, SourceSession)
+	release2, err := acquireWaitLock(dir, "agentbus3", selfRef(), harnessRef(2), SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release2()
+	if exited(done, 300*time.Millisecond) {
+		t.Fatal("a harness with a mismatched start time must not match")
+	}
+}
+
+func TestAcquireWaitLockHarnessScanNeverSignalsReusedWaitPid(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	h := harnessRef(7)
+	writeRecord(t, dir, "agentbus2", procs.Ref{Pid: old.Pid, Start: old.Start + 1}, h, SourceSession)
+	release, err := acquireWaitLock(dir, "agentbus", selfRef(), h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if exited(done, 300*time.Millisecond) {
+		t.Fatal("a reused wait pid (start mismatch) must never be signaled")
+	}
+}
+
+func TestAcquireWaitLockSubagentDoesNotScanOrRecordHarness(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	h := harnessRef(4242)
+	writeRecord(t, dir, "agentbus", old, h, SourceSession)
+	release, err := acquireWaitLock(dir, "agentbus/sub", selfRef(), h, SourceAs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if exited(done, 300*time.Millisecond) {
+		t.Fatal("a subagent wait must not terminate its parent harness's top-level wait")
+	}
+	rec, ok := readPidfile(waitPidfile(dir, "agentbus/sub"))
+	if !ok || rec.Harness != (procs.Ref{}) || rec.Self != selfRef() || rec.Source != SourceAs {
+		t.Fatalf("subagent record = %+v, want harness 0 0", rec)
+	}
+	// A top-level wait from the same harness must not find the subagent's wait.
+	release2, err := acquireWaitLock(dir, "other", procs.Ref{Pid: 1, Start: 1}, h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release2()
+}
+
+func TestAcquireWaitLockOldFormOtherIdentityIgnoredButReplacedByName(t *testing.T) {
+	dir := t.TempDir()
+	old, done := startSleeper(t)
+	writeRef(t, dir, "agentbus2", old) // old two-field form
+	release, err := acquireWaitLock(dir, "agentbus", selfRef(), harnessRef(4242), SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exited(done, 300*time.Millisecond) {
+		t.Fatal("an old-form record has no harness and must be ignored by the scan")
+	}
+	release()
+	release, err = acquireWaitLock(dir, "agentbus2", selfRef(), harnessRef(4242), SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if !exited(done, 5*time.Second) {
+		t.Fatal("same-identity acquire must still replace an old-form wait")
+	}
+}
+
+func TestReadPidfileForms(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.pid")
+	cases := []struct {
+		content string
+		ok      bool
+		want    waitRecord
+	}{
+		{"10 20\n", true, waitRecord{Self: procs.Ref{Pid: 10, Start: 20}}},
+		{"10 20 30 40 session\n", true, waitRecord{procs.Ref{Pid: 10, Start: 20}, procs.Ref{Pid: 30, Start: 40}, "session"}},
+		{"10 20 30 40 weird\n", true, waitRecord{procs.Ref{Pid: 10, Start: 20}, procs.Ref{Pid: 30, Start: 40}, "weird"}},
+		{"10 20 30\n", false, waitRecord{}},
+		{"10 20 30 40\n", false, waitRecord{}},
+		{"10 20 30 40 as extra\n", false, waitRecord{}},
+		{"10 20 x 40 as\n", false, waitRecord{}},
+		{"a b\n", false, waitRecord{}},
+		{"", false, waitRecord{}},
+	}
+	for _, c := range cases {
+		if err := os.WriteFile(p, []byte(c.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := readPidfile(p)
+		if ok != c.ok || got != c.want {
+			t.Errorf("readPidfile(%q) = %+v, %v; want %+v, %v", c.content, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestAcquireWaitLockRecordsSource(t *testing.T) {
+	for _, src := range []string{SourceAs, SourceSession, SourceCwd} {
+		dir := t.TempDir()
+		h := harnessRef(9)
+		release, err := acquireWaitLock(dir, "Pat", selfRef(), h, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, ok := readPidfile(waitPidfile(dir, "Pat"))
+		if !ok || rec.Source != src || rec.Harness != h || rec.Self != selfRef() {
+			t.Fatalf("source %s: record = %+v", src, rec)
+		}
+		release()
+	}
+}
+
+func TestAcquireWaitLockRejectsUnknownSource(t *testing.T) {
+	for _, src := range []string{"", "AS", "env", "as session"} {
+		dir := t.TempDir()
+		if release, err := acquireWaitLock(dir, "Pat", selfRef(), procs.Ref{}, src); err == nil {
+			release()
+			t.Fatalf("source %q must be rejected", src)
+		}
+		if _, err := os.Stat(waitPidfile(dir, "Pat")); !os.IsNotExist(err) {
+			t.Fatalf("source %q: a pidfile was written, stat err = %v", src, err)
+		}
+	}
+}
+
+func TestWaitRejectsUnknownIdentitySource(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	var out bytes.Buffer
+	if err := Wait(context.Background(), WaitOptions{Config: cfg, As: "Pat"}, &out); err == nil {
+		t.Fatal("Wait without a known IdentitySource must fail")
+	}
+}
+
+// Two acquires from one harness in sequence: only the newest survives, and the
+// terminated one's release leaves the newer pidfile alone.
+func TestAcquireWaitLockNewestWinsAndReleaseKeepsNewer(t *testing.T) {
+	dir := t.TempDir()
+	first, done := startSleeper(t)
+	h := harnessRef(4242)
+	rel1, err := acquireWaitLock(dir, "agentbus2", first, h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel2, err := acquireWaitLock(dir, "agentbus", selfRef(), h, SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel2()
+	if !exited(done, 5*time.Second) {
+		t.Fatal("the older wait was not terminated")
+	}
+	rel1() // what the terminated wait's deferred release does
+	if rec, ok := readPidfile(waitPidfile(dir, "agentbus")); !ok || rec.Self != selfRef() {
+		t.Fatalf("newer pidfile lost: %+v", rec)
+	}
+	// The older wait's own file is left for it to remove only if it names it.
+	if rec, ok := readPidfile(waitPidfile(dir, "agentbus2")); ok {
+		t.Fatalf("older release should remove its own pidfile, got %+v", rec)
 	}
 }

@@ -124,7 +124,7 @@ func run(cmd string, args []string) int {
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep waiting after the harness that started this wait exits (default: exit 4, silently)")
-		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity replaced this one, exit 4 that the harness that started it is gone")
+		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity (or from the same harness) replaced this one, exit 4 that the harness that started it is gone")
 		if err := fs.Parse(args); err != nil {
 			return parseExit(err)
 		}
@@ -134,18 +134,19 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		o.Config = cfg
+		o.IdentitySource = cli.SourceAs
 		if o.As == "" {
 			cwd, err := os.Getwd()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "agentbus:", err)
 				return 2
 			}
-			if o.As = cli.WaitIdentity(cfg, cwd, os.Stderr); o.As == "" {
+			if o.As, o.IdentitySource = cli.WaitIdentitySource(cfg, cwd, os.Stderr); o.As == "" {
 				fmt.Fprintln(os.Stderr, "agentbus: this session has not registered, and another session holds this repository's name; register first or pass -as")
 				return 2
 			}
 		}
-		// Installed before Wait acquires the per-identity lock, so the
+		// Installed before Wait acquires the wait locks, so the
 		// SIGTERM a replacing wait sends is always handled, never fatal.
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 		defer stop()

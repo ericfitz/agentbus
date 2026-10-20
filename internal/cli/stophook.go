@@ -23,7 +23,8 @@ type stopHookInput struct {
 	StopHookActiveGrok bool   `json:"stopHookActive"`
 }
 
-// claudeCodeClient is the MCP clientInfo name Claude Code reports (ADR 0015).
+// claudeCodeClient is the MCP clientInfo name Claude Code reports (ADR 0015),
+// observed as "claude-code" with Claude Code 2.1.304.
 const claudeCodeClient = "claude-code"
 
 // StopHook is the Stop hook `agentbus init --global` installs in every

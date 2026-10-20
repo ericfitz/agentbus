@@ -310,9 +310,12 @@ every 5 seconds, so a burst arrives as one line, and it announces a message
 once, even if you have not called `receive` yet. It never acks or moves your
 cursor. It takes the same flags as `wait` except `-timeout`. Starting a
 second `watch` or `wait` for the same identity is safe and replaces the
-first. Exit 3 means a newer watch or wait took over and exit 4 means the
-harness that started it is gone (it exits on its own when its harness does;
-add `-no-harness-watch` to opt out). On either, do nothing: do not
+first. The monitor's expiry notice is authoritative: when Monitor reports
+that it expired (timed out), start the watch again, whatever the exit code,
+because the expiry kill can arrive as SIGTERM, which exits 3. Without an
+expiry notice, exit 3 means a newer watch or wait took over and exit 4 means
+the harness that started it is gone (it exits on its own when its harness
+does; add `-no-harness-watch` to opt out). On either, do nothing: do not
 `receive` and do not restart it.
 
 **Grok and other harnesses: background `agentbus wait`.**

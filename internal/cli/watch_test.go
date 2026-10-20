@@ -265,6 +265,7 @@ func TestWatchBurstWithinGapIsOneLine(t *testing.T) {
 	if err := e.b.Subscribe("Pat", "ops", "now"); err != nil {
 		t.Fatal(err)
 	}
+	watchMinGap = 500 * time.Millisecond // wide enough that the sends below cannot span two lines
 	e.start(WatchOptions{})
 	e.send("a")
 	e.waitLines(1) // gap starts
@@ -278,6 +279,27 @@ func TestWatchBurstWithinGapIsOneLine(t *testing.T) {
 		t.Fatalf("burst line = %q", lines[1])
 	}
 	e.quiet(2, 100*time.Millisecond)
+}
+
+// A tag-subscription match on a channel the watcher is not subscribed to
+// wakes it despite -filter, once.
+func TestWatchTagMatchWakesOnceDespiteFilter(t *testing.T) {
+	e := newWatchEnv(t, nil)
+	if _, err := e.b.CreateChannel("Sam", "ops", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.b.SubscribeTags("Pat", []string{"release"}); err != nil {
+		t.Fatal(err)
+	}
+	e.start(WatchOptions{Filter: "@nobody"})
+	if _, err := e.b.Send("Sam", bus.SendInput{Channel: "ops", Content: "shipped", Tags: []string{"release"}}); err != nil {
+		t.Fatal(err)
+	}
+	lines := e.waitLines(1)
+	if lines[0] != "agentbus: 1 new message(s) for Pat on ops; call receive" {
+		t.Fatalf("line = %q", lines[0])
+	}
+	e.quiet(1, 3*watchMinGap)
 }
 
 func TestWatchGapSpacesLines(t *testing.T) {
@@ -335,9 +357,11 @@ func (w errWriter) Write([]byte) (int, error) { return 0, w.err }
 func TestWatchRejectsUnknownIdentitySource(t *testing.T) {
 	e := newWatchEnv(t, nil)
 	var out bytes.Buffer
-	err := Watch(context.Background(), WatchOptions{Config: e.cfg, As: "Pat", NoHarnessWatch: true}, &out)
-	if err == nil || out.Len() != 0 {
-		t.Fatalf("err = %v, out = %q; want an error", err, out.String())
+	for _, src := range []string{"", "bogus"} {
+		err := Watch(context.Background(), WatchOptions{Config: e.cfg, As: "Pat", IdentitySource: src, NoHarnessWatch: true}, &out)
+		if err == nil || out.Len() != 0 {
+			t.Fatalf("source %q: err = %v, out = %q; want an error", src, err, out.String())
+		}
 	}
 }
 

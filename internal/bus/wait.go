@@ -59,7 +59,11 @@ func (b *Bus) Wait(ctx context.Context, as string, channels []string, includeOwn
 // the highest seq examined, rejected messages included, so none is looked at
 // again. A peek truncated at receive_max_count raises the floor only to the
 // last seq it returned, so the messages past the cut are found next call.
-// Wake rules and read-only behavior are Wait's. Canceling ctx returns
+// The single global floor relies on seq being assigned in commit order: a
+// transaction that commits later never holds a lower seq than one already
+// examined. That holds because the DSN sets _txlock=immediate, so every write
+// transaction holds the write lock from BEGIN (SQLiteDSN;
+// TestWriteTransactionsStartSerialized). Wake rules and read-only behavior are Wait's. Canceling ctx returns
 // ctx.Err().
 func (b *Bus) WaitAbove(ctx context.Context, as string, channels []string, includeOwn bool, match func(Message) bool, floor int64) ([]Message, int64, error) {
 	if as == "" {

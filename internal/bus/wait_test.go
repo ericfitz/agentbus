@@ -140,3 +140,72 @@ func TestWaitAboveRequiresIdentity(t *testing.T) {
 		t.Fatal("empty as must error")
 	}
 }
+
+// A tag-subscription match on a channel kim has no subscription to wakes
+// WaitAbove, and is not announced twice.
+func TestWaitAboveTagMatchWakesOnce(t *testing.T) {
+	old := WaitPollInterval
+	WaitPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { WaitPollInterval = old })
+	b, sam, kim := setupTwo(t)
+	if _, err := b.CreateChannel(sam, "ops", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SubscribeTags(kim, []string{"release"}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := b.Send(sam, SendInput{Channel: "ops", Content: "shipped", Tags: []string{"release"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, floor, err := b.WaitAbove(context.Background(), kim, nil, false, nil, 0)
+	if err != nil || len(got) != 1 || got[0].Channel != "ops" || len(got[0].MatchedTags) == 0 || floor != got[0].Seq {
+		t.Fatalf("tag match: %v floor %d err %v (sent %+v)", got, floor, err, sent)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	if got, _, err := b.WaitAbove(ctx, kim, nil, false, nil, floor); err != context.DeadlineExceeded || len(got) != 0 {
+		t.Fatalf("re-announced: %v %v", got, err)
+	}
+}
+
+// WaitAbove's single floor assumes seqs are assigned in commit order. That
+// holds because every write transaction takes the write lock at BEGIN
+// (_txlock=immediate): a second writer cannot start, so cannot draw a seq,
+// until the first has committed.
+func TestWriteTransactionsStartSerialized(t *testing.T) {
+	dsn, err := SQLiteDSN(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dsn, "_txlock=immediate") {
+		t.Fatalf("DSN must use immediate transactions: %s", dsn)
+	}
+	b := newTestBus(t)
+	tx1, err := b.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	go func() {
+		tx2, err := b.db.Begin()
+		if err == nil {
+			_ = tx2.Rollback()
+		}
+		close(started)
+	}()
+	select {
+	case <-started:
+		_ = tx1.Rollback()
+		t.Fatal("a second write transaction began while the first was open")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second transaction never began after the first committed")
+	}
+}

@@ -31,14 +31,18 @@ background `wait`; Codex has no idle wake.
 
 - **One line per wake.** The line is
   `agentbus: <n> new message(s) for <as> on <ch>, <ch>; call receive`,
-  channels sorted and de-duplicated, `<n>` followed by `+` when the batch hit
-  `receive_max_count`. No subject, sender or content: the line becomes a
-  model notification and may be logged.
+  channels sorted and de-duplicated, `<n>` followed by `+` when the matched
+  batch hit `receive_max_count` (rows `-filter` rejects do not count, and
+  nothing is lost: the rest is announced on the next line). No subject,
+  sender or content: the line becomes a model notification and may be
+  logged.
 - **Announced floor.** Message seqs are global and increase in commit order,
   so watch keeps one floor: the highest seq it has examined. Messages at or
   below it are never announced again, whether they were announced or
   rejected by `-filter`. A message the agent has not received yet is
-  therefore announced once; a later message wakes it again.
+  therefore announced once; a later message wakes it again. The floor lives
+  in one process: a re-armed or replacing watch starts at 0 and announces the
+  unreceived backlog once more.
 - **At most one line every 5 seconds.** Messages that arrive inside that gap
   are announced together on the next line, so a busy channel cannot trip
   Monitor's event limit. Nothing is dropped, only delayed.

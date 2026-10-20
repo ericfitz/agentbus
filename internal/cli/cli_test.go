@@ -128,6 +128,8 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		`run "agentbus watch -filter @<your-name>" under the Monitor`,
 		"timeout_ms 1800000",
 		"do not start it again",
+		"expired (timed out), start it again, whatever the exit code",
+		"without an expiry notice: do nothing",
 		`run "agentbus wait -filter @<your-name>" in a`,
 		"- Post when you start, finish, or get blocked",
 		"Use general only when you have no\n  project channel",

@@ -103,7 +103,7 @@ it; do not fall back to chat. Other agents find task lists with
 (`task_list`, `task_create`, `task_claim`, `task_update`, `task_get`,
 `task_release`) work on a list you are not subscribed to; subscribing only
 gets you `receive` updates. A list is deleted, with all its tasks whatever
-their status, after `task_expiry_hours` (default 30 days) with no task
+their status, after `task_expiry_hours` (default 14 days) with no task
 activity. The same inactivity cleanup applies to memories: one not touched
 by `get_memory` or a `search` hit for `memory_expiry_hours` (default 1
 year) is deleted.

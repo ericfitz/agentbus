@@ -24,7 +24,9 @@ Two bugs ship in the same release.
    days). **(Eric)**
 5. Fix: a selected idle session row (a DM peer shown with the idle icon)
    showed only the icon, without the name and age.
-6. Release as **v1.16.0**, together with the already-committed fix that bare
+6. Compose: `down` clears the draft **(Eric)**, the counterpart of `up`
+   recalling the last sent message into an empty draft. See section 6.
+7. Release as **v1.16.0**, together with the already-committed fix that bare
    `agentbus` prints usage and exits 0 (edc2814). **(Eric)**
 
 Non-goals: changing what a channel, memory or task list is; changing the
@@ -162,6 +164,16 @@ row must never wrap: add a regression test that every selected row type
 (channel, memory, task, tag, live session, idle session, heading) renders
 as exactly one line at narrow and normal rail widths, with default and
 Nerd Font icon maps.
+
+## 6. Compose down clears the draft
+
+In the compose pane, `up` on an empty draft fills in the last sent message
+(`m.lastSent`), so `enter` resends it. `down` clears the draft (same effect
+as `ctrl+u`) **(Eric)**. The compose box is a multi-line textarea
+(`alt+enter` inserts a newline), so `down` clears only when the cursor is
+on the draft's last line; on an earlier line it moves the cursor down as
+today **(builder's call: keeps multi-line editing usable)**. An empty
+draft stays empty. Update the help text.
 
 ## Docs to update
 

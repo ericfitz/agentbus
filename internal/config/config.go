@@ -68,7 +68,7 @@ func Default() Config {
 		CursorIdleHours:              72,
 		TombstoneMinHours:            72,
 		TaskIdleHours:                168,
-		TaskExpiryHours:              720,
+		TaskExpiryHours:              336,
 		MemoryExpiryHours:            8760,
 		ReceiptRetentionMinutes:      60,
 		MaxMessageKiB:                64,

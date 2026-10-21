@@ -1,6 +1,7 @@
 # ADR 0013: Per-effort task channels, inactivity expiry, memory expiry
 
 Status: Accepted 2026-09-27. Decided by the user.
+Default `task_expiry_hours` changed to 336 (14 days) by ADR 0024.
 
 ## Context
 

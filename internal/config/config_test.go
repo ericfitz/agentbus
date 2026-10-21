@@ -30,8 +30,17 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	}
 }
 
-// TestExpiryDefaults (ADR 0013): the three new settings default to 7 days,
-// 30 days, and 1 year in hours.
+// TestDefaultTaskExpiry14Days (ADR 0024): a task list expires after 14 days
+// (336 hours) of inactivity and is marked idle after 7 days (168 hours).
+func TestDefaultTaskExpiry14Days(t *testing.T) {
+	d := Default()
+	if d.TaskExpiryHours != 336 || d.TaskIdleHours != 168 {
+		t.Fatalf("task defaults wrong: expiry %d idle %d", d.TaskExpiryHours, d.TaskIdleHours)
+	}
+}
+
+// TestExpiryDefaults (ADR 0013, ADR 0024): the three settings default to
+// 7 days, 14 days, and 1 year in hours.
 func TestExpiryDefaults(t *testing.T) {
 	t.Setenv("AGENTBUS_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
 	t.Setenv("AGENTBUS_DATA_DIR", "")
@@ -39,7 +48,7 @@ func TestExpiryDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.TaskIdleHours != 168 || c.TaskExpiryHours != 720 || c.MemoryExpiryHours != 8760 {
+	if c.TaskIdleHours != 168 || c.TaskExpiryHours != 336 || c.MemoryExpiryHours != 8760 {
 		t.Fatalf("expiry defaults wrong: %+v", c)
 	}
 }

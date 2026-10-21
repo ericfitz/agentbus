@@ -262,8 +262,8 @@ only sees the variable if the harness was launched from a shell that had it).
 query embedding during a search; past it, `semantic` and `both` searches fall
 back to text results and set `semantic_unavailable`.
 
-`task_idle_hours` (default 168, 7 days), `task_expiry_hours` (default 720,
-30 days), and `memory_expiry_hours` (default 8760, 1 year) are the ADR 0013
+`task_idle_hours` (default 168, 7 days), `task_expiry_hours` (default 336,
+14 days), and `memory_expiry_hours` (default 8760, 1 year) are the ADR 0013
 inactivity periods: the TUI marks a task channel idle in its rail after
 `task_idle_hours` with no task activity; the maintenance tick deletes a
 task channel, with all its tasks, after `task_expiry_hours` with none; and

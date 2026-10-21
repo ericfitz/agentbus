@@ -1082,3 +1082,37 @@ func TestCollapseNotPersisted(t *testing.T) {
 		t.Fatalf("a new Model must start expanded with no heading: collapsed=%v headSel=%d", m.collapsed, m.headSel)
 	}
 }
+
+// Deleting the last row of a section whose successor is collapsed repoints
+// m.sel at a hidden row; the selection must land on the collapsed heading,
+// with exactly one rail row highlighted.
+func TestDeleteLastChannelBeforeCollapsedSection(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := sectionedFixture(t)
+	probe := sgrPrefix(lipgloss.NewStyle().Background(f.m.theme.SelBG(true)))
+	if probe == "" {
+		t.Skip("theme selection color has no escape under this profile")
+	}
+	f.m.toggleSection(secTags, true)
+	idx := slices.IndexFunc(f.m.channels, func(c bus.Channel) bool { return c.Name == "tasks/work" })
+	if idx < 0 || idx+1 >= len(f.m.channels) || channelSection(f.m.channels[idx+1]) != secTags {
+		t.Fatalf("fixture: tasks/work must be the last tasks row followed by tags, channels=%v", f.m.channels)
+	}
+	f.m.selectChannel(idx)
+	f.key("d")
+	f.key("y")
+	if f.m.headSel != secTags {
+		t.Fatalf("headSel = %d, want the collapsed tags heading %d", f.m.headSel, secTags)
+	}
+	var marked []string
+	for _, l := range strings.Split(f.m.renderRails(), "\n") {
+		if strings.Contains(l, probe) {
+			marked = append(marked, ansi.Strip(l))
+		}
+	}
+	if len(marked) != 1 || !strings.Contains(marked[0], "tags") {
+		t.Fatalf("want exactly the tags heading highlighted, got %q", marked)
+	}
+}

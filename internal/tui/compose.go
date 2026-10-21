@@ -154,6 +154,11 @@ func (m *Model) updateConfirmChannel(msg tea.Msg) tea.Cmd {
 	c.forget(name)
 	m.channels = slices.DeleteFunc(m.channels, func(x bus.Channel) bool { return x.Name == name })
 	m.sel = min(m.sel, len(m.channels)-1)
+	if m.sel >= 0 {
+		// The row now under m.sel may sit in a collapsed section; keep the
+		// single-highlight invariant without resetting the stream.
+		m.headSel = m.headingFor(channelSection(m.channels[m.sel]))
+	}
 	return m.showToast("deleted channel " + name)
 }
 

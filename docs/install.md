@@ -505,9 +505,19 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   ordinary bus participant, so agents see your messages like any other.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
   `shift+tab` move between the rail (channels and sessions), the message
-  list of the highlighted channel or session, and the compose line; `↓` past
-  the last channel moves into the sessions and `↑` from the first session
-  moves back; `home` returns to the channel list. Selecting a
+  list of the highlighted channel or session, and the compose line. The rail
+  has five sections, each under a heading: channels, memories, tasks, tags
+  and sessions. `↑` and `↓` walk the headings and their rows in turn; a
+  `general/`, `memory/` or `tasks/` prefix is left off a row's name in its
+  own section (rows whose short names collide keep their full names). With a
+  heading selected, `←` collapses its section, `→` expands it and `enter`
+  toggles it; a collapsed heading reads `▶ memories (19, 3 unread)` (the item
+  count, plus unread messages when there are any), and the stream keeps showing
+  the last channel or session you selected. `s` and `d` do nothing on a
+  heading. Collapsed sections are not saved: every start shows all of them
+  expanded. On a short terminal the rail drops the blank rows between
+  sections, then shows one row of each section with a combined `▲N ▼M more` row.
+  `home` selects the channels heading. Selecting a
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends
   that identity a direct message. Your own row is your inbox; agents reach
@@ -525,7 +535,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   in the config file (0 or absent is a fifth of the screen), stepping from the
   saved width; the width drawn is clamped to the terminal, keeping the rail at least 16 columns and the messages
   pane at least 40. `enter` replies to the selected message, or opens
-  compose from the channel list. Colors come from the `theme` and `themes`
+  compose from the rail. Colors come from the `theme` and `themes`
   config settings; see below. The first TUI launch after upgrading
   subscribes to every existing inbox from its oldest retained message, so
   retained direct messages show as unread once.

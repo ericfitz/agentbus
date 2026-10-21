@@ -28,13 +28,14 @@ func (m *Model) updateHelp(msg tea.Msg) tea.Cmd {
 // home, the compose editing keys) live only here.
 func (m Model) helpLines() []string {
 	rows := [][2]string{
-		{"tab / shift+tab", "next / previous pane (channel or session list, its messages, compose)"},
-		{"home", "channel list"},
+		{"tab / shift+tab", "next / previous pane (the rail, its messages, compose); from the stream, back to a selected rail heading"},
+		{"home", "rail: select the channels heading"},
 		{"esc", "leave compose; cancel a task draft; clear the message cursor"},
 		{"i", "compose (in the sessions pane, sends a direct message)"},
 		{"enter", "reply to the cursor message, else compose; in a task list, save the draft"},
-		{"↑ / ↓", "previous / next in the focused pane"},
-		{"→ / ←", "open the cursor message's body, then its replies / hide its replies, then its body"},
+		{"↑ / ↓", "previous / next in the focused pane (in the rail, section headings and their rows)"},
+		{"→ / ←", "open the cursor message's body, then its replies / hide its replies, then its body; on a rail heading, expand / collapse its section"},
+		{"enter (heading)", "on a rail heading, collapse or expand its section"},
 		{"pgup / pgdn", "scroll (pgup at the top loads older history)"},
 		{"g / G", "oldest / newest"},
 		{"space", "task list: cycle the cursor task's state (not started, in progress, completed) as a draft"},
@@ -42,11 +43,11 @@ func (m Model) helpLines() []string {
 		{"< / >", "narrow / widen the channel rail (saved as tui_rail_width in the config)"},
 		{"r", "reply to the cursor message (own inbox only, in the sessions pane)"},
 		{"c", "new channel: <name> [memory]"},
-		{"s", "subscribe / unsubscribe the channel (no-op in the sessions pane)"},
+		{"s", "subscribe / unsubscribe the channel (no-op in the sessions pane or on a heading)"},
 		{"t", "rail: follow a tag set: <tag>[,<tag>...] (AND); task list: take the unassigned cursor task"},
 		{"u", "task list: unassign your not-started cursor task"},
 		{"a", "task list: assign the cursor task to you or a live session (unassigned tasks or yours)"},
-		{"d", "delete the channel and all its messages (asks first); on a tag set, unfollow it (no confirmation); no-op in the sessions pane"},
+		{"d", "delete the channel and all its messages (asks first); on a tag set, unfollow it (no confirmation); no-op in the sessions pane or on a heading"},
 		{"/", "search (tab cycles text / semantic / both)"},
 		{"h", "health and config"},
 		{"?", "this help"},
@@ -60,6 +61,7 @@ func (m Model) helpLines() []string {
 		{"ctrl+u", "clear"},
 		{"", ""},
 		{"(task lists)", "tasks/ channels show the task tree: → opens a task's details, then its subtasks; ← hides its subtasks, then its details; only unassigned tasks or yours can be changed"},
+		{"(rail)", "sections: channels, memories, tasks, tags, sessions, each under a heading; general/, memory/ and tasks/ are left off a row's name; a collapsed heading shows (count[, N unread]); collapsing lasts until the TUI quits"},
 		{"(tags)", "the tags rail section shows chat messages carrying every tag of a set; read-only"},
 	}
 	key, dim := m.theme.Style(m.theme.Agent), m.theme.Style(m.theme.Dim)

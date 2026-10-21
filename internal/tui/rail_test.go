@@ -2,12 +2,18 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/muesli/termenv"
 )
 
 func TestRailWindowScrollsByOneWithArrows(t *testing.T) {
@@ -185,3 +191,223 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 }
 
 func spans(f *fixture) [railLists]railSpan { return f.m.railSpans() }
+
+// invisibleText returns the printable runs of line drawn in a foreground
+// equal to the background in effect, after SGR colors 30-37/90-97 against
+// 40-47/100-107 and 38;5;n against 48;5;n; nothing when every cell is
+// legible. Only the sixteen ANSI colors and the default are representable
+// in a theme, so those forms are the ones a rendered row can carry.
+func invisibleText(line string) []string {
+	var runs []string
+	var run strings.Builder
+	fg, bg := "", ""
+	state := byte(ansi.NormalState)
+	flush := func() {
+		if run.Len() > 0 {
+			runs = append(runs, run.String())
+			run.Reset()
+		}
+	}
+	for rest := line; rest != ""; {
+		seq, width, n, next := ansi.DecodeSequence(rest, state, nil)
+		state, rest = next, rest[n:]
+		if strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+			params := strings.Split(strings.TrimSuffix(strings.TrimPrefix(seq, "\x1b["), "m"), ";")
+			for i := 0; i < len(params); i++ {
+				p := params[i]
+				switch {
+				case p == "" || p == "0":
+					fg, bg = "", ""
+				case p == "38" || p == "48":
+					if i+2 < len(params) && params[i+1] == "5" {
+						if p == "38" {
+							fg = "256:" + params[i+2]
+						} else {
+							bg = "256:" + params[i+2]
+						}
+						i += 2
+					}
+				case p == "39":
+					fg = ""
+				case p == "49":
+					bg = ""
+				case len(p) == 2 && p[0] == '3':
+					fg = "ansi:" + string(p[1])
+				case len(p) == 2 && p[0] == '9':
+					fg = "ansi:" + string('8'+p[1]-'0')
+				case len(p) == 2 && p[0] == '4':
+					bg = "ansi:" + string(p[1])
+				case len(p) == 3 && strings.HasPrefix(p, "10"):
+					bg = "ansi:" + string('8'+p[2]-'0')
+				}
+			}
+			continue
+		}
+		if width > 0 && strings.TrimSpace(seq) != "" && fg != "" && fg == bg {
+			run.WriteString(seq)
+		} else if width > 0 {
+			flush()
+		}
+	}
+	flush()
+	return runs
+}
+
+// selectedRailRow is the rendered rail row holding text, with its escapes.
+func (f *fixture) selectedRailRow(t *testing.T, text string) string {
+	t.Helper()
+	for _, l := range strings.Split(f.m.renderRails(), "\n") {
+		if strings.Contains(ansi.Strip(l), text) {
+			return l
+		}
+	}
+	t.Fatalf("no rail row holds %q:\n%s", text, strings.Join(f.railLines(), "\n"))
+	return ""
+}
+
+// idleDMPeer registers cli-bot on the bus, has it DM the TUI, lets a
+// status report list it live, then ends its session and reports again: the
+// shape of a peer that only ever ran CLI commands, which the rail draws as
+// an idle session with a DM inbox.
+func (f *fixture) idleDMPeer(t *testing.T, cfg config.Config) {
+	t.Helper()
+	cb, bot := agent(t, cfg, "cli-bot")
+	if _, err := cb.Send(bot, bus.SendInput{Channel: bus.DMChannel(f.c.as), Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	if err := cb.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.receive(t)
+	f.m.sessionsSeen["cli-bot"] = time.Now().Add(-5 * time.Minute)
+	if slices.ContainsFunc(f.m.status.Sessions, func(s bus.Session) bool { return s.Sender == "cli-bot" }) {
+		t.Fatal("cli-bot is still live")
+	}
+}
+
+// selectSession walks the rail selection onto session name.
+func (f *fixture) selectSession(t *testing.T, name string) {
+	t.Helper()
+	f.key("esc")
+	f.key("home")
+	f.toSessions()
+	for f.m.sessionNames()[f.m.sessSel] != name {
+		f.key("down")
+	}
+	if f.m.pane() != paneSessions || f.m.selName() != bus.DMChannel(name) {
+		t.Fatalf("pane=%v sel=%q, want sessions/%s", f.m.pane(), f.m.selName(), bus.DMChannel(name))
+	}
+}
+
+// A DM peer that only ran CLI commands is an idle session with an inbox.
+// Its row is idle icon + dim "name age". Selected, the row must still show
+// the name in a legible color whether the rail has focus (Sel) or the
+// stream or compose has it (SelInactive), and take one row either way.
+func TestSelectedIdleSessionKeepsName(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev); setIcons(emojiIcons) })
+	for _, icons := range []string{"emoji", "nerdfont"} {
+		for _, rail := range []int{12, 16, 24} {
+			cfg := testConfig(t)
+			cfg.Icons = icons
+			cfg.TUIRailWidth = rail
+			LoadIcons(cfg, io.Discard)
+			f := newFixtureWith(t, cfg)
+			f.idleDMPeer(t, cfg)
+			f.key("esc")
+			rows := len(f.railLines())
+			f.selectSession(t, "cli-bot")
+			for _, focus := range []string{"rail", "stream", "compose"} {
+				switch focus {
+				case "stream":
+					f.key("tab")
+				case "compose":
+					f.key("i")
+				}
+				if got := f.m.pane(); got != map[string]pane{"rail": paneSessions, "stream": paneStream, "compose": paneCompose}[focus] {
+					t.Fatalf("%s/%d/%s: pane=%v", icons, rail, focus, got)
+				}
+				row := f.selectedRailRow(t, "cli-bot")
+				plain := ansi.Strip(row)
+				if !strings.HasPrefix(plain, markSel+iconIdle) || !strings.Contains(plain, "cli-bot 5m") {
+					t.Errorf("%s/%d/%s: row %q lacks the idle icon or the name", icons, rail, focus, plain)
+				}
+				if hidden := invisibleText(row); len(hidden) > 0 {
+					t.Errorf("%s/%d/%s: %q drawn in its background color: %q", icons, rail, focus, hidden, row)
+				}
+				if n := len(f.railLines()); n != rows {
+					t.Errorf("%s/%d/%s: rail has %d rows selected, %d unselected", icons, rail, focus, n, rows)
+				}
+			}
+		}
+	}
+}
+
+// Every selectable row type (chat, memory, task channel, tag set, live
+// session, idle session), under both icon sets, at the narrowest and a
+// normal rail width, with and without rail focus: the selected row renders
+// as exactly one row of exactly the rail's width, with no text drawn in
+// its background color. Spec 2026-10-21 section 5.
+func TestSelectedRowsStayOneLine(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev); setIcons(emojiIcons) })
+	for _, icons := range []string{"emoji", "nerdfont"} {
+		for _, rail := range []int{12, 24} {
+			cfg := testConfig(t)
+			cfg.Icons = icons
+			cfg.TUIRailWidth = rail
+			LoadIcons(cfg, io.Discard)
+			f := newFixtureWith(t, cfg)
+			if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+				t.Fatal(err)
+			}
+			f.followTags(t, []string{"docs"})
+			f.idleDMPeer(t, cfg) // runs statusCmd: Sam and eric are live sessions
+			f.key("esc")
+			f.key("home")
+			want := map[string]bool{"dev": false, "dev-notes": false, "tasks/work": false, tagPanePrefix + "docs": false, bus.DMChannel(f.sam): false, bus.DMChannel("cli-bot"): false}
+			width := f.m.railWidth()
+			for prevSel := ""; ; prevSel = f.m.selName() {
+				sel := f.m.selName()
+				want[sel] = true
+				for _, focused := range []bool{true, false} {
+					f.m.mode = modeNormal
+					if !focused {
+						f.m.mode = modeInsert
+					}
+					rows := strings.Split(f.m.renderRails(), "\n")
+					var selected []string
+					for _, r := range rows {
+						if strings.HasPrefix(ansi.Strip(r), markSel) {
+							selected = append(selected, r)
+						}
+					}
+					if len(selected) != 1 {
+						t.Fatalf("%s/%d/%q/focused=%v: %d selected rows:\n%s", icons, rail, sel, focused, len(selected), ansi.Strip(strings.Join(rows, "\n")))
+					}
+					row := selected[0]
+					if w := ansi.StringWidth(row); w != width {
+						t.Errorf("%s/%d/%q/focused=%v: selected row %q is %d wide, rail is %d", icons, rail, sel, focused, ansi.Strip(row), w, width)
+					}
+					if hidden := invisibleText(row); len(hidden) > 0 {
+						t.Errorf("%s/%d/%q/focused=%v: %q drawn in its background color: %q", icons, rail, sel, focused, hidden, row)
+					}
+				}
+				f.m.mode = modeNormal
+				f.key("down")
+				if f.m.selName() == prevSel || f.m.selName() == sel {
+					break
+				}
+			}
+			for name, seen := range want {
+				if !seen {
+					t.Errorf("%s/%d: never selected %q", icons, rail, name)
+				}
+			}
+		}
+	}
+}

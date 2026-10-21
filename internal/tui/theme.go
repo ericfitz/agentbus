@@ -117,13 +117,27 @@ func (t Theme) Style(c lipgloss.TerminalColor) lipgloss.Style {
 // the stream cursor, SelInactive for a rail selection without focus).
 // Styled segments inside the line end with a reset that would drop the
 // background for the rest of that line, so it is re-applied after every
-// reset.
+// reset. A segment whose foreground is bg itself would vanish into it (the
+// default theme's dim and selection_inactive are both brightblack, so an
+// idle session's dim "name age" disappeared from a selected row while the
+// stream or compose had focus), so that foreground is swapped for
+// chipText(bg), the text color that reads on bg; every other color stays.
 func (t Theme) Highlight(bg lipgloss.TerminalColor, line string, width int) string {
 	style := lipgloss.NewStyle().Background(bg)
-	if pre, _, ok := strings.Cut(style.Render("\x00"), "\x00"); ok && pre != "" {
+	if pre := sgrPrefix(style); pre != "" {
 		line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+pre)
 	}
+	if same := sgrPrefix(t.Style(bg)); same != "" {
+		line = strings.ReplaceAll(line, same, sgrPrefix(t.Style(chipText(bg))))
+	}
 	return style.Width(width).Render(line)
+}
+
+// sgrPrefix is the escape sequence style opens with, "" for no styling (a
+// NoColor role, or the Ascii profile tests render under).
+func sgrPrefix(style lipgloss.Style) string {
+	pre, _, _ := strings.Cut(style.Render("\x00"), "\x00")
+	return pre
 }
 
 // SelBG is a rail selection's background: Sel while that rail has focus,
@@ -140,10 +154,13 @@ func (t Theme) SelBG(focused bool) lipgloss.TerminalColor {
 // memory, yellow tasks) are unreadable on the Sel background, so the text
 // is stripped to plain and recolored in SelText before the background is
 // applied; glyphs and content are unchanged, only color. Without focus the
-// row keeps its original colors on SelInactive.
+// row keeps its original colors on SelInactive. The result is always one
+// row: the caller cuts line to width, so Highlight's word wrap has nothing
+// to break, and MaxHeight makes that structural (a wrapped second row would
+// be clipped from the rail's bottom or push the rows below it).
 func (t Theme) RailSel(focused bool, line string, width int) string {
 	if focused {
 		line = t.Style(t.SelText).Render(ansi.Strip(line))
 	}
-	return t.Highlight(t.SelBG(focused), line, width)
+	return lipgloss.NewStyle().MaxHeight(1).Render(t.Highlight(t.SelBG(focused), line, width))
 }

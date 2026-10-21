@@ -29,6 +29,14 @@ Passed 2026-10-20 (Eric, Windows 11 ARM VM).
 - [x] `install.ps1` from the published URL installs, and upgrades while an
       MCP server is running (the old `agentbus.exe` is renamed `.old-*`
       and removed by the next run).
+- [ ] `agentbus watch` under Claude Code's Monitor prints one line per wake
+      for the session's own messages, a newer `watch` for the identity ends
+      the older one with exit code 3, and closing the harness ends it.
+- [ ] Sleep and wake (ADR 0023; Windows wake detection is unit-tested
+      only): a Claude Code session claims a task, Windows itself sleeps
+      (Start, Power, Sleep; not a VM suspend) for over a minute, and after
+      the wake the task is still claimed and `agentbus status` shows the
+      same names.
 
 ## Shared database guard (needs WSL2 in the VM)
 

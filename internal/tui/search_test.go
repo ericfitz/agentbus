@@ -231,6 +231,9 @@ func TestSearchHitShowsBusForEmptySender(t *testing.T) {
 	}
 	future := func() time.Time { return now.Add(2 * time.Second) }
 	ab.Now, other.Now = future, future
+	for _, x := range []*bus.Bus{ab, other} {
+		x.Mono = func() time.Duration { return x.Now().Sub(time.Unix(0, 0)) } // not a sleep
+	}
 	ab.Tick(context.Background())
 
 	c, err := newClient(cfg, "eric", discardLog())

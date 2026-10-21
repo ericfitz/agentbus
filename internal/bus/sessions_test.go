@@ -23,7 +23,7 @@ func TestRegisterAllocatesSuffixesAcrossProcessesOnly(t *testing.T) {
 		t.Fatalf("re-register must refresh context, got %q %v", ctx, err)
 	}
 	// Another live process gets a suffix, and its own re-register keeps it.
-	other, _ := Open(b.cfg, b.log)
+	other, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = other.Close() }()
 	o1, _ := other.Register("Sam", "", "repo", true)
 	o2, _ := other.Register("Sam", "", "repo", true)
@@ -83,7 +83,7 @@ func TestStaleOwnerLosesName(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Another process, 31 seconds later, registers Sam.
-	other2, _ := Open(b.cfg, b.log)
+	other2, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = other2.Close() }()
 	later := b.Now().Add(31 * time.Second)
 	other2.Now = func() time.Time { return later }
@@ -117,7 +117,7 @@ func TestMutationsRejectAfterOwnerTakeover(t *testing.T) {
 	}
 
 	// Another process, 31 seconds later, reclaims the stale "Sam" name.
-	other, _ := Open(b.cfg, b.log)
+	other, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = other.Close() }()
 	later := b.Now().Add(31 * time.Second)
 	other.Now = func() time.Time { return later }
@@ -147,7 +147,7 @@ func TestRegisterReportsResumeAndPending(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	// Fresh registration drops subscriptions.
-	b2, _ := Open(b.cfg, b.log)
+	b2, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = b2.Close() }()
 	b2.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
 	r2, _ := b2.Register("Sam", "", "", false)
@@ -250,7 +250,7 @@ func TestEndSessionsFreesOwnNamesImmediately(t *testing.T) {
 	if err := b.Subscribe("Sam", "general", "now"); err != nil {
 		t.Fatal(err)
 	}
-	other, _ := Open(b.cfg, b.log)
+	other, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = other.Close() }()
 	if _, err := other.Register("Pat", "", "repo", true); err != nil {
 		t.Fatal(err)

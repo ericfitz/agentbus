@@ -859,6 +859,7 @@ func TestSearchAndGetMemoryToolsUpdateAccessedAt(t *testing.T) {
 	}
 	before := accessedAt()
 
+	b.Mono = func() time.Duration { return b.Now().Sub(time.Unix(0, 0)) } // a Now jump is not a sleep
 	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
 	call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
 	afterSearch := accessedAt()

@@ -101,7 +101,7 @@ func TestResumeFalseSkipsWholeBacklogIncludingInbox(t *testing.T) {
 	if _, err := b.Register("Pat", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Open(b.cfg, b.log)
+	other, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestDMDeliveryAndQueueWhileOffline(t *testing.T) {
 	if _, err := b.Register("Sam", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
-	other, _ := Open(b.cfg, b.log)
+	other, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = other.Close() }()
 	if _, err := other.Register("Pat", "", "repo", true); err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func twoAgents(t *testing.T) (b, other *Bus) {
 	if _, err := b.Register("Sam", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Open(b.cfg, b.log)
+	other, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestDMGuards(t *testing.T) {
 		t.Fatalf("sender must find its own sent DM by tag: %+v %v", res, err)
 	}
 	// A DM between two other agents stays invisible.
-	third, err := Open(b.cfg, b.log)
+	third, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestDeliveryHonorsDMReadableAfterObserverEndsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.SetObserver("human")
-	pat, err := Open(a.cfg, a.log)
+	pat, err := openSynced(a.cfg, a.log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestDeliveryHonorsDMReadableAfterObserverEndsSession(t *testing.T) {
 	}
 
 	// A third, non-observer process resumes the "human" identity.
-	c, err := Open(a.cfg, a.log)
+	c, err := openSynced(a.cfg, a.log)
 	if err != nil {
 		t.Fatal(err)
 	}

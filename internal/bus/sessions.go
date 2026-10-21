@@ -533,8 +533,9 @@ func (b *Bus) restoreOne(q execQuerier, name string) bool {
 // for them afterwards.
 func (b *Bus) Heartbeat() error {
 	// First, so a wake is recorded before this process's own rows look fresh.
+	// A failed write stays pending for the next call; the heartbeat goes on.
 	if err := b.noteClock(b.db); err != nil {
-		return err
+		b.log.Warn("record wake", "err", err)
 	}
 	if _, err := b.db.Exec("UPDATE sessions SET heartbeat=? WHERE owner=?", b.nowMs(), b.owner); err != nil {
 		return internal(err)

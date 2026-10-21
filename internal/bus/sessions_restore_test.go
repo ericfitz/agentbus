@@ -33,7 +33,7 @@ func sessionRowFor(t *testing.T, b *Bus, name string) (owner string, heartbeat, 
 
 func openOther(t *testing.T, b *Bus) *Bus {
 	t.Helper()
-	o, err := Open(b.cfg, b.log)
+	o, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestMetaMigrationIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		o, err := Open(cfg, b.log)
+		o, err := openSynced(cfg, b.log)
 		if err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}

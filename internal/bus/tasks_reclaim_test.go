@@ -376,12 +376,12 @@ func TestGetAndListReturnSnapshotWhenFixUpFails(t *testing.T) {
 	cfg.DataDirectory = t.TempDir()
 	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
 	var buf bytes.Buffer
-	b, err := Open(cfg, slog.New(slog.NewTextHandler(&buf, nil)))
+	b, err := openSynced(cfg, slog.New(slog.NewTextHandler(&buf, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
-	other, err := Open(b.cfg, b.log)
+	other, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}

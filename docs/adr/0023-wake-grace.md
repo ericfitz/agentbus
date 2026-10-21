@@ -39,7 +39,10 @@ Option A.
   its last clock sample, a wall reading and a monotonic reading. On every
   heartbeat and every liveness check it takes a new sample. If wall time
   advanced more than the monotonic clock by over 5 s, the machine slept.
-  The sleep started at the previous sample's wall time and ended now. A
+  The sleep lasted the difference between the two gaps and ended now, so it
+  started at the current wall time minus that difference, not at the
+  previous sample. Another process's sample of the same wake can give a
+  slightly different start; the merge keeps the earlier one. A
   forward jump of the wall clock looks the same, and the only effect is a
   grace period nobody needed.
 - **Recording it.** The detecting process writes `slept_at` and `woke_at`
@@ -66,6 +69,12 @@ Option A.
   reclaimed after the grace period unless the owner renews it first.
 - **Limits.** A wake that no long-running process notices before a
   short-lived process judges liveness still looks like expiry. That
-  happens only when no agentbus server or TUI was running across the
-  sleep. On a platform whose monotonic clock counts sleep, nothing is
-  detected and behavior is as before ADR 0023.
+  happens when no agentbus server or TUI was running across the sleep, and
+  also for short-lived processes (CLI commands, hooks) that run in the gap
+  between the wake and the first sample by a long-running process, up to
+  one heartbeat interval (10 s), even with servers running. On Windows, Go's
+  own monotonic clock counts sleep, so `Bus.Mono` reads the unbiased
+  interrupt time (`QueryUnbiasedInterruptTime`), which does not. A stored
+  pair that is not `0 < slept_at <= woke_at <= now` (for instance after the
+  wall clock stepped back) is ignored, and two sleeps less than the expiry
+  apart merge into one longer grace.

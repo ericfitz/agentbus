@@ -8,9 +8,29 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ericfitz/agentbus/internal/config"
 )
+
+// syncMono makes b's monotonic clock follow its Now, so a test that jumps
+// Now simulates time passing, not a sleep (ADR 0023), and drops b's last
+// clock sample. Wake tests opt out with hostClock.attach.
+func syncMono(b *Bus) {
+	b.Mono = func() time.Duration { return b.Now().Sub(time.Unix(0, 0)) }
+	b.clockMu.Lock()
+	b.clock = clockSample{}
+	b.clockMu.Unlock()
+}
+
+// openSynced is Open with syncMono applied: the default for tests.
+func openSynced(cfg config.Config, log *slog.Logger) (*Bus, error) {
+	b, err := Open(cfg, log)
+	if err == nil {
+		syncMono(b)
+	}
+	return b, err
+}
 
 // newTestBus opens a bus on a fresh temp directory with default config.
 func newTestBus(t *testing.T) *Bus {
@@ -18,7 +38,7 @@ func newTestBus(t *testing.T) *Bus {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
 	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
-	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b, err := openSynced(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +88,7 @@ func TestReopenKeepsData(t *testing.T) {
 	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
-	b2, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b2, err := openSynced(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +119,7 @@ func TestDataDirWithURIMetacharactersOpensAndStaysIsolated(t *testing.T) {
 		cfg := config.Default()
 		cfg.DataDirectory = dir
 		cfg.Path = filepath.Join(dir, "config.json")
-		b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		b, err := openSynced(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {
 			t.Fatalf("open %q: %v", dir, err)
 		}
@@ -160,7 +180,7 @@ func TestOpenRejectsNewerSchemaVersion(t *testing.T) {
 		return s
 	}
 	before := master()
-	if _, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+	if _, err := openSynced(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
 		t.Fatal("Open must reject a database with a newer schema version")
 	} else if !strings.Contains(err.Error(), "99") {
 		t.Fatalf("error must name the found schema version, got %v", err)

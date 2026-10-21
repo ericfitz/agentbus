@@ -45,10 +45,11 @@ func (b *Bus) Tick(ctx context.Context) {
 	tickCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	now := b.nowMs()
+	// On failure the cutoff is 0, so the session sweep deletes nothing and
+	// the other steps run; the wake stays pending for the next sample.
 	cutoff, err := b.liveCutoff(b.db)
 	if err != nil {
 		b.log.Warn("maintenance tick", "step", "wake grace", "err", err)
-		return
 	}
 	steps := []struct {
 		name string

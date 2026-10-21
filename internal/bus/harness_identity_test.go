@@ -16,7 +16,7 @@ func TestIdentityForHarness(t *testing.T) {
 	if _, err := b.Register("repo", "", "repo", true); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Open(b.cfg, b.log)
+	other, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}

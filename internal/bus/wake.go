@@ -2,18 +2,13 @@ package bus
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
 // A wake is noticed when the wall clock advanced this much more than the
 // monotonic clock between two samples (ADR 0023).
 const wakeSlackMs = 5_000
-
-var processStart = time.Now()
-
-// monotonicSinceStart is Bus.Mono's default: time.Since reads the
-// monotonic clock, which processStart carries.
-func monotonicSinceStart() time.Duration { return time.Since(processStart) }
 
 // dbOrTx is what a liveness check needs of b.db or a *sql.Tx.
 type dbOrTx interface {
@@ -32,7 +27,9 @@ type clockSample struct {
 
 // mergeWake folds the wake (slept, woke) into the one stored (storedSlept,
 // storedWoke): the same wake seen twice keeps the earlier slept_at and the
-// later woke_at, a separate wake replaces it (ADR 0023).
+// later woke_at, a separate wake replaces it (ADR 0023). Two distinct sleeps
+// less than the expiry apart therefore merge into one longer grace; that
+// only keeps sessions live longer, so leave it that way.
 func mergeWake(storedSlept, storedWoke, slept, woke int64) (int64, int64) {
 	if storedWoke == 0 {
 		return slept, woke
@@ -59,6 +56,9 @@ func readWake(q queryRower) (slept, woke int64, err error) {
 // recordWake merges a detected wake into meta in one transaction: read the
 // stored pair, merge, write. Given a *sql.Tx it joins the caller's.
 func recordWake(q execQuerier, slept, woke int64) error {
+	if slept <= 0 || slept > woke {
+		return internal(fmt.Errorf("invalid wake pair slept=%d woke=%d", slept, woke))
+	}
 	if db, ok := q.(*sql.DB); ok {
 		tx, err := db.Begin()
 		if err != nil {
@@ -83,27 +83,37 @@ func recordWake(q execQuerier, slept, woke int64) error {
 
 // noteClock takes a clock sample and, if the machine slept since the last
 // one, records the wake. A failed write keeps the wake to retry on the next
-// call. No lock is held across the database write: callers may hold a
-// transaction that another noteClock is waiting on.
+// call. Given a *sql.Tx the write may still roll back with the caller, so the
+// wake stays pending until a write on b.db commits; mergeWake makes the
+// repeat harmless. No lock is held across the database write: callers may
+// hold a transaction that another noteClock is waiting on.
 func (b *Bus) noteClock(q execQuerier) error {
 	b.clockMu.Lock()
 	wall, mono := b.nowMs(), b.Mono()
 	c := &b.clock
-	if c.taken && (wall-c.wall)-(mono-c.mono).Milliseconds() > wakeSlackMs {
-		c.pendSlept, c.pendWoke = mergeWake(c.pendSlept, c.pendWoke, c.wall, wall)
+	if gap := (wall - c.wall) - (mono - c.mono).Milliseconds(); c.taken && gap > wakeSlackMs {
+		// The sleep lasted gap ms and ended now, so it began at wall-gap.
+		c.pendSlept, c.pendWoke = mergeWake(c.pendSlept, c.pendWoke, max(wall-gap, 1), wall)
 	}
 	c.taken, c.wall, c.mono = true, wall, mono
+	if c.pendWoke != 0 && c.pendWoke+attachmentExpiryMs <= wall {
+		// Grace is over; writing it now could overwrite a newer wake.
+		c.pendSlept, c.pendWoke = 0, 0
+	}
 	slept, woke := c.pendSlept, c.pendWoke
-	c.pendSlept, c.pendWoke = 0, 0
 	b.clockMu.Unlock()
 	if woke == 0 {
 		return nil
 	}
 	if err := recordWake(q, slept, woke); err != nil {
-		b.clockMu.Lock()
-		c.pendSlept, c.pendWoke = mergeWake(c.pendSlept, c.pendWoke, slept, woke)
-		b.clockMu.Unlock()
 		return err
+	}
+	if _, ok := q.(*sql.DB); ok {
+		b.clockMu.Lock()
+		if c.pendSlept == slept && c.pendWoke == woke {
+			c.pendSlept, c.pendWoke = 0, 0
+		}
+		b.clockMu.Unlock()
 	}
 	return nil
 }
@@ -120,7 +130,9 @@ func (b *Bus) livenessCutoff(q dbOrTx, now int64) (cutoff int64, grace bool, err
 	if err != nil {
 		return 0, false, err
 	}
-	if woke != 0 && now < woke+attachmentExpiryMs {
+	// Only a sane pair is grace: a woke_at in the future (the wall clock
+	// stepped back) or an inverted pair is treated as no wake at all.
+	if slept > 0 && slept <= woke && woke <= now+wakeSlackMs && now < woke+attachmentExpiryMs {
 		return slept - attachmentExpiryMs, true, nil
 	}
 	return now - attachmentExpiryMs, false, nil

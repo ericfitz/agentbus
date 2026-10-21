@@ -230,22 +230,20 @@ func TestWakeGraceLeaseRenewedInGraceIsKept(t *testing.T) {
 	}
 }
 
-// 6. Two processes detecting one wake with different slept_at keep the
-// earliest slept_at and the latest woke_at; a later wake replaces the pair.
+// 6. Two processes detecting one wake keep the earliest slept_at and the latest woke_at; a later wake replaces the pair.
 func TestWakeRecordMergesSameWakeAndReplacesLaterOne(t *testing.T) {
 	e := newWakeEnv(t, 0)
-	s1 := e.hc.base.Add(e.hc.wall).UnixMilli() // b's last sample
 	e.hc.awake(3 * time.Second)
 	e.beat(t, e.pat)
-	s2 := e.hc.base.Add(e.hc.wall).UnixMilli() // pat's later sample
+	s2 := e.hc.base.Add(e.hc.wall).UnixMilli() // the sleep began here, for both
 	e.hc.sleep(5 * time.Minute)
 	e.beat(t, e.pat)
 	w1 := e.hc.base.Add(e.hc.wall).UnixMilli()
 	e.hc.awake(2 * time.Second)
 	e.beat(t, e.b)
 	w2 := e.hc.base.Add(e.hc.wall).UnixMilli()
-	if slept, woke := storedWake(t, e.b); slept != s1 || woke != w2 || s2 <= s1 || w2 <= w1 {
-		t.Fatalf("slept=%d woke=%d, want %d %d (s2=%d w1=%d)", slept, woke, s1, w2, s2, w1)
+	if slept, woke := storedWake(t, e.b); slept != s2 || woke != w2 || w2 <= w1 {
+		t.Fatalf("slept=%d woke=%d, want %d %d (w1=%d)", slept, woke, s2, w2, w1)
 	}
 
 	e.hc.awake(2 * time.Minute)
@@ -313,14 +311,64 @@ func TestResetKeepsWakeGrace(t *testing.T) {
 	}
 }
 
-func procsRef(pid int, start int64) procs.Ref { return procs.Ref{Pid: pid, Start: start} }
-
-// syncMono makes b's monotonic clock follow its Now, so a test that jumps
-// Now simulates time passing, not a sleep (ADR 0023), and drops b's last
-// clock sample, which came from the old clocks.
-func syncMono(b *Bus) {
-	b.Mono = func() time.Duration { return b.Now().Sub(time.Unix(0, 0)) }
-	b.clockMu.Lock()
-	b.clock = clockSample{}
-	b.clockMu.Unlock()
+// A wake detected inside a transaction that rolls back is not lost: the
+// competitor's refused task_claim during grace must not leave the next
+// task_list without the grace.
+func TestWakeDetectedInRolledBackTxIsKept(t *testing.T) {
+	e := newWakeEnv(t, 0)
+	e.hc.sleep(5 * time.Minute)
+	_, err := e.b.TaskClaim("Sam", e.id, 0, "")
+	wantCode(t, err, "conflict")
+	if _, woke := storedWake(t, e.b); woke != 0 {
+		t.Fatal("the rolled-back transaction left a wake record")
+	}
+	e.list(t)
+	e.wantOwner(t, "Pat")
+	if _, woke := storedWake(t, e.b); woke == 0 {
+		t.Fatal("the kept wake was never written")
+	}
 }
+
+// A backward wall-clock step of more than the expiry after a recorded wake
+// must not read every session as stale: a stored woke_at in the future is
+// no grace at all.
+func TestBackwardClockStepAfterWakeIsNotGrace(t *testing.T) {
+	e := newWakeEnv(t, 0)
+	e.hc.sleep(5 * time.Minute)
+	e.beat(t, e.b)
+	e.hc.wall -= 10 * time.Minute // stepped back before the sleep began
+	e.beat(t, e.pat, e.b)
+	if live, err := e.b.SessionLive("Pat"); err != nil || !live {
+		t.Fatalf("SessionLive=%v %v after a backward step", live, err)
+	}
+	e.list(t)
+	e.wantOwner(t, "Pat")
+	if _, err := e.b.Register("Zed", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, ok := sessionRowFor(t, e.b, "Pat"); !ok {
+		t.Fatal("the sweep deleted a live session after a backward clock step")
+	}
+}
+
+// A stored pair that is not 0 < slept <= woke is never grace, and
+// recordWake refuses to store one.
+func TestInvalidStoredWakeIsNoGrace(t *testing.T) {
+	e := newWakeEnv(t, 0)
+	now := e.b.nowMs()
+	for _, p := range [][2]int64{{0, now}, {now, now - 1000}, {-5, now}, {now, 0}} {
+		if _, err := e.b.db.Exec("INSERT INTO meta(key,value) VALUES('slept_at',?),('woke_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, grace, err := e.b.livenessCutoff(e.b.db, now); err != nil || grace {
+			t.Fatalf("pair %v: grace=%v err=%v", p, grace, err)
+		}
+	}
+	for _, p := range [][2]int64{{0, now}, {now, now - 1}, {-1, now}} {
+		if err := recordWake(e.b.db, p[0], p[1]); err == nil {
+			t.Fatalf("recordWake accepted %v", p)
+		}
+	}
+}
+
+func procsRef(pid int, start int64) procs.Ref { return procs.Ref{Pid: pid, Start: start} }

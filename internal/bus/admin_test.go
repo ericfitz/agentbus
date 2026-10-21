@@ -27,7 +27,7 @@ func TestResetWipesAndLiveProcessGetsNotRegistered(t *testing.T) {
 	if n := countRows(t, b, "SELECT count(*) FROM memory_access"); n == 0 {
 		t.Fatal("memory_access should be populated before reset")
 	}
-	admin, _ := Open(b.cfg, b.log)
+	admin, _ := openSynced(b.cfg, b.log)
 	defer func() { _ = admin.Close() }()
 	if n, _ := admin.LiveSessionCount(); n != 1 {
 		t.Fatal(n)
@@ -199,7 +199,7 @@ func TestResetDoesNotLetInFlightEmbeddingLandOnAReusedSeq(t *testing.T) {
 		t.Fatal("embedBatch's HTTP call never reached the handler")
 	}
 
-	admin, err := Open(b.cfg, b.log)
+	admin, err := openSynced(b.cfg, b.log)
 	if err != nil {
 		t.Fatal(err)
 	}

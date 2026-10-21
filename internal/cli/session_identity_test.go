@@ -172,6 +172,7 @@ func TestIdentityChangesAfterStaleSweepWhileHarnessSame(t *testing.T) {
 	}
 	defer func() { _ = sweeper.Close() }()
 	sweeper.Now = func() time.Time { return b.Now().Add(31 * time.Second) }
+	sweeper.Mono = func() time.Duration { return sweeper.Now().Sub(time.Unix(0, 0)) } // not a sleep
 	if _, err := sweeper.Register("Sam", "", "", false); err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +183,7 @@ func TestIdentityChangesAfterStaleSweepWhileHarnessSame(t *testing.T) {
 	}
 	defer func() { _ = again.Close() }()
 	again.Now = sweeper.Now
+	again.Mono = func() time.Duration { return again.Now().Sub(time.Unix(0, 0)) }
 	again.SetHarness(h2)
 	r, err := again.Register(filepath.Base(cwd), "", "", false)
 	if err != nil {

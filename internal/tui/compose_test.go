@@ -195,3 +195,54 @@ func TestDeleteChannelConfirm(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeDownClearsDraft(t *testing.T) {
+	f := newFixture(t)
+	f.key("hello")
+	f.key("down")
+	if f.m.compose.Value() != "" {
+		t.Fatalf("down clears the draft, got %q", f.m.compose.Value())
+	}
+}
+
+func TestComposeDownAfterRecallClears(t *testing.T) {
+	f := newFixture(t)
+	f.key("hi")
+	f.key("enter")
+	f.receive(t)
+	f.key("up")
+	if f.m.compose.Value() != "hi" {
+		t.Fatalf("recall: got %q", f.m.compose.Value())
+	}
+	f.key("down")
+	if f.m.compose.Value() != "" {
+		t.Fatalf("down clears the recalled draft, got %q", f.m.compose.Value())
+	}
+}
+
+func TestComposeDownMultilineMovesCursor(t *testing.T) {
+	f := newFixture(t)
+	f.key("a")
+	f.key("alt+enter")
+	f.key("b")
+	f.key("up")
+	if f.m.compose.Line() != 0 {
+		t.Fatalf("up moves to line 0, got %d", f.m.compose.Line())
+	}
+	f.key("down")
+	if f.m.compose.Value() != "a\nb" || f.m.compose.Line() != 1 {
+		t.Fatalf("down on an earlier line moves the cursor: %q line %d", f.m.compose.Value(), f.m.compose.Line())
+	}
+	f.key("down")
+	if f.m.compose.Value() != "" {
+		t.Fatalf("down on the last line clears, got %q", f.m.compose.Value())
+	}
+}
+
+func TestComposeDownEmptyStaysEmpty(t *testing.T) {
+	f := newFixture(t)
+	f.key("down")
+	if f.m.compose.Value() != "" {
+		t.Fatalf("got %q", f.m.compose.Value())
+	}
+}

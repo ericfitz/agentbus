@@ -417,6 +417,14 @@ func (m *Model) updateInsert(msg tea.Msg) tea.Cmd {
 			m.fitCompose()
 			return nil
 		}
+	case "down":
+		// On the draft's last line down clears it (like ctrl+u); on an
+		// earlier line it falls through so multi-line editing still works.
+		if m.compose.Line() == m.compose.LineCount()-1 {
+			m.compose.Reset()
+			m.fitCompose()
+			return nil
+		}
 	}
 	var cmd tea.Cmd
 	m.compose, cmd = m.compose.Update(msg)

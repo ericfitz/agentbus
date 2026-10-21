@@ -56,6 +56,7 @@ func (m Model) helpLines() []string {
 		{"enter", "send (a memory channel creates a memory)"},
 		{"alt+enter", "newline"},
 		{"↑", "recall the last sent message"},
+		{"↓", "clear the draft (on its last line)"},
 		{"ctrl+u", "clear"},
 		{"", ""},
 		{"(task lists)", "tasks/ channels show the task tree: → opens a task's details, then its subtasks; ← hides its subtasks, then its details; only unassigned tasks or yours can be changed"},

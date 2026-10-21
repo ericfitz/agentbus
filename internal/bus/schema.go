@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS leases (
   expires_at INTEGER NOT NULL
 );
 INSERT OR IGNORE INTO leases(name, owner, expires_at) VALUES ('maintenance', '', 0);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notices (
   kind TEXT PRIMARY KEY,
   message TEXT NOT NULL,

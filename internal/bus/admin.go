@@ -154,6 +154,11 @@ func (b *Bus) Reset() error {
 	if _, err := tx.Exec("UPDATE leases SET owner='', expires_at=0"); err != nil {
 		return internal(err)
 	}
+	// A live process must not restore the sessions this wipe removed
+	// (ADR 0022); the new generation makes it forget them.
+	if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES('reset_generation',1) ON CONFLICT(key) DO UPDATE SET value=value+1"); err != nil {
+		return internal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		return internal(err)
 	}

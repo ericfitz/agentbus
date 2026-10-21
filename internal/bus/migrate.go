@@ -30,6 +30,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	7:  addSessionHarness,                       // sessions.harness, sessions.harness_version (ADR 0015)
 	8:  addSessionHarnessProcess,                // sessions.harness_pid, sessions.harness_start (ADR 0017)
 	9:  addTagRanges,                            // tag_subscription_tags.lo, .hi (#20, ADR 0009 amendment 2026-10-06)
+	11: addTables,                               // meta (reset generation, ADR 0022)
 	10: foldRefs,                                // fold messages.refs into content and drop the column (ADR 0019)
 }
 

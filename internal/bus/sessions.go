@@ -219,6 +219,10 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 	if _, err := tx.Exec("DELETE FROM sessions WHERE heartbeat < ?", now-attachmentExpiryMs); err != nil {
 		return Registration{}, internal(err)
 	}
+	gen, err := resetGeneration(tx)
+	if err != nil {
+		return Registration{}, err
+	}
 	base, sep := name, ""
 	if parent != "" {
 		base, sep = parent+"/"+name, "-"
@@ -348,6 +352,8 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)
 	}
+	b.remember(sessionRow{sender: display, context: context, harness: harness, harnessVersion: harnessVersion,
+		harnessPid: b.harness.Pid, harnessStart: b.harness.Start, registeredAt: now, generation: gen})
 	// Pending is bounded by the number of subscriptions, not by anything a
 	// caller controls, but a session resuming thousands of subscriptions
 	// could still exceed the hard ceiling; trim it to the same whole-record
@@ -387,25 +393,156 @@ func (b *Bus) auth(q queryRower, as string) error {
 	if err := q.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND owner=?", as, b.owner).Scan(&n); err != nil {
 		return internal(err)
 	}
+	if n == 0 && b.restoreOne(q, as) {
+		// The row was swept while this process was alive (ADR 0022) and is back.
+		n = 1
+	}
 	if n == 0 {
 		return errf("not_registered", false, "%q is not registered in this process; call register", as)
 	}
 	return nil
 }
 
-// Heartbeat refreshes every session this process owns. Rows lost to a newer
-// registration are simply not refreshed, so auth fails for them afterwards.
+// sessionRow is the row a process last wrote for one of its sessions: what
+// it needs to put the row back after another process swept it (ADR 0022).
+type sessionRow struct {
+	sender, context, harness, harnessVersion string
+	harnessPid                               int
+	harnessStart, registeredAt               int64
+	// generation is the reset generation the row was registered under.
+	generation int64
+}
+
+// resetGeneration is the number Reset bumps; a missing row reads as 0.
+func resetGeneration(q queryRower) (int64, error) {
+	var g int64
+	err := q.QueryRow("SELECT value FROM meta WHERE key='reset_generation'").Scan(&g)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, internal(err)
+	}
+	return g, nil
+}
+
+// execQuerier is what a restore needs of b.db or a *sql.Tx.
+type execQuerier interface {
+	queryRower
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func (b *Bus) remember(r sessionRow) {
+	b.rememberedMu.Lock()
+	defer b.rememberedMu.Unlock()
+	if b.remembered == nil {
+		b.remembered = map[string]sessionRow{}
+	}
+	b.remembered[r.sender] = r
+}
+
+func (b *Bus) forget(name string) {
+	b.rememberedMu.Lock()
+	defer b.rememberedMu.Unlock()
+	delete(b.remembered, name)
+}
+
+func (b *Bus) rememberedRow(name string) (sessionRow, bool) {
+	b.rememberedMu.Lock()
+	defer b.rememberedMu.Unlock()
+	r, ok := b.remembered[name]
+	return r, ok
+}
+
+// restore puts r back if its name is free, with its original registered_at
+// and a fresh heartbeat. A name another owner holds is forgotten, never
+// overwritten (ADR 0022). It reports whether this process owns the row after.
+func (b *Bus) restore(q execQuerier, r sessionRow) (bool, error) {
+	gen, err := resetGeneration(q)
+	if err != nil {
+		return false, err
+	}
+	if gen != r.generation {
+		// A reset wiped the bus; it meant every live process to register again.
+		b.forget(r.sender)
+		return false, nil
+	}
+	res, err := q.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version,harness_pid,harness_start) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(sender) DO NOTHING",
+		r.sender, r.context, b.owner, b.nowMs(), r.registeredAt, r.harness, r.harnessVersion, r.harnessPid, r.harnessStart)
+	if err != nil {
+		return false, internal(err)
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		// EndSessions may have run since the caller read the entry; do not
+		// leave a row behind for a session it ended.
+		if _, ok := b.rememberedRow(r.sender); !ok {
+			_, err := q.Exec("DELETE FROM sessions WHERE sender=? AND owner=?", r.sender, b.owner)
+			return false, internal(err)
+		}
+		return true, nil
+	}
+	var owner string
+	if err := q.QueryRow("SELECT owner FROM sessions WHERE sender=?", r.sender).Scan(&owner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, internal(err)
+	}
+	if owner != b.owner {
+		b.forget(r.sender)
+		return false, nil
+	}
+	return true, nil
+}
+
+// restoreOne is auth's single restore attempt for name; any failure leaves
+// the caller to report not_registered.
+func (b *Bus) restoreOne(q queryRower, name string) bool {
+	e, ok := q.(execQuerier)
+	if !ok {
+		return false
+	}
+	r, ok := b.rememberedRow(name)
+	if !ok {
+		return false
+	}
+	ok, err := b.restore(e, r)
+	if err != nil {
+		b.log.Warn("restore session", "name", name, "err", err)
+	}
+	return ok
+}
+
+// Heartbeat refreshes every session this process owns, then puts back any
+// it remembers that a sweep removed while it was alive, e.g. across a sleep
+// (ADR 0022). Rows lost to a newer registration are forgotten, so auth fails
+// for them afterwards.
 func (b *Bus) Heartbeat() error {
 	if _, err := b.db.Exec("UPDATE sessions SET heartbeat=? WHERE owner=?", b.nowMs(), b.owner); err != nil {
 		return internal(err)
+	}
+	b.rememberedMu.Lock()
+	rows := make([]sessionRow, 0, len(b.remembered))
+	for _, r := range b.remembered {
+		rows = append(rows, r)
+	}
+	b.rememberedMu.Unlock()
+	for _, r := range rows {
+		if _, err := b.restore(b.db, r); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // EndSessions deletes every session this process owns, so a process that
 // shuts down cleanly frees its names at once instead of holding them until
-// the attachment expiry. Subscriptions stay: the identity resumes later.
+// the attachment expiry. Subscriptions stay: the identity resumes later. It
+// also forgets them, so a later Heartbeat does not restore them.
 func (b *Bus) EndSessions() error {
+	b.rememberedMu.Lock()
+	b.remembered = nil
+	b.rememberedMu.Unlock()
 	if _, err := b.db.Exec("DELETE FROM sessions WHERE owner=?", b.owner); err != nil {
 		return internal(err)
 	}

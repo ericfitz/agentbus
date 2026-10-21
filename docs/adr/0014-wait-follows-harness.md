@@ -94,4 +94,4 @@ for different sessions replace each other. A `-no-harness-watch` wait still
 records its harness and is replaced the same way.
 
 **Not fixed here.** The session row lost to the sweep while its MCP server
-lives on (the deeper cause) is a separate decision about session expiry.
+lives on (the deeper cause) was fixed separately: see ADR 0022.

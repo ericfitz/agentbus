@@ -39,6 +39,11 @@ type Bus struct {
 	// harness is the harness process SetHarness recorded, stamped on every
 	// session this process registers (ADR 0017); zero when unknown.
 	harness procs.Ref
+	// remembered is the row this process last wrote for each name it
+	// registered, so it can put a swept row back (ADR 0022). Guarded by
+	// rememberedMu: Heartbeat runs on a background goroutine.
+	rememberedMu sync.Mutex
+	remembered   map[string]sessionRow
 	// observer is the identity SetObserver granted DM-inbox read/subscribe
 	// access to everywhere, set once before use so no lock guards it.
 	observer string

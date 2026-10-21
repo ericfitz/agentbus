@@ -31,7 +31,7 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
     announces its own departure: the MCP server on shutdown (stdin close, or
     SIGTERM, SIGINT, SIGHUP) and the TUI on quit delete their session rows
     (`Bus.EndSessions`). The agent does nothing and waits on nothing. The
-    30-second attachment expiry remains the fallback for a killed process.
+    30-second attachment expiry remains the fallback for a killed process (a live server restores a swept row, ADR 0022).
     Subscriptions and cursors survive, so the identity resumes.
 11. `resume=false` means no backlog of any kind, inbox included: not from
     the cursor and not from the beginning; only messages that arrive after

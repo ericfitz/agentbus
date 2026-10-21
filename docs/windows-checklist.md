@@ -10,21 +10,23 @@ GoLang.Go -e` and `winget install --id Git.Git -e`); the rest is by hand.
 
 ## Harness integration
 
-- [ ] `agentbus init --global` writes the Claude Code, Codex and Grok
+Passed 2026-10-20 (Eric, Windows 11 ARM VM).
+
+- [x] `agentbus init --global` writes the Claude Code, Codex and Grok
       configuration under `%USERPROFILE%` (`.claude\settings.json`,
       `.codex\hooks.json`, `.grok\hooks\agentbus.json`) and each harness
       registers on the bus (visible in `agentbus status`).
-- [ ] Claude Code's Stop hook fires through Git Bash and reports the right
+- [x] Claude Code's Stop hook fires through Git Bash and reports the right
       identity: with two sessions in one repository the second one's hook
       wakes only for the second session's messages (`claude.exe` ->
       `bash.exe` -> `agentbus.exe` ancestry).
-- [ ] A background `agentbus wait` follows the harness: closing the harness
+- [x] A background `agentbus wait` follows the harness: closing the harness
       ends the wait with exit code 4; starting a newer wait for the same
       identity ends the older one with exit code 3.
-- [ ] The TUI renders and accepts input in Windows Terminal (`agentbus tui`,
+- [x] The TUI renders and accepts input in Windows Terminal (`agentbus tui`,
       keys `?`, `h`, `o`, `esc`); `o` opens the config in Notepad when
       neither `VISUAL` nor `EDITOR` is set.
-- [ ] `install.ps1` from the published URL installs, and upgrades while an
+- [x] `install.ps1` from the published URL installs, and upgrades while an
       MCP server is running (the old `agentbus.exe` is renamed `.old-*`
       and removed by the next run).
 

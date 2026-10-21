@@ -89,12 +89,12 @@ func TestStreamShowsNewDividerAndGap(t *testing.T) {
 	one := f.agentSend(t, "dev-notes", "one")
 	f.receive(t)
 	f.key("esc")
-	f.key("down") // visit dev-notes: "one" is now seen
-	f.key("up")   // back to dev
+	f.moveTo(t, "dev-notes") // visit it: "one" is now seen
+	f.moveTo(t, "dev")       // back to dev
 	f.agentSend(t, "dev-notes", "two")
 	f.send(batchMsg{res: bus.ReceiveResult{Gaps: []bus.Gap{{Channel: "dev-notes", From: one.Seq, To: one.Seq}}}})
 	f.receive(t)
-	f.key("down") // dev-notes again: divider sits after "one"
+	f.moveTo(t, "dev-notes") // again: divider sits after "one"
 	s := f.m.renderStream()
 	if !strings.Contains(s, "new") || !strings.Contains(s, "1 evicted") {
 		t.Fatalf("stream:\n%s", s)
@@ -115,7 +115,7 @@ func TestReplyBannerAndMemoryHint(t *testing.T) {
 	}
 	f.key("esc")
 	f.key("esc")
-	f.key("down")
+	f.moveTo(t, "dev-notes")
 	if v := f.m.View(); !strings.Contains(v, "new memory") {
 		t.Fatalf("memory channel hint missing:\n%s", v)
 	}

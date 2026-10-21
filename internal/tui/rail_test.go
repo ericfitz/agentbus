@@ -50,15 +50,15 @@ func TestRailWindowScrollsByOneWithArrows(t *testing.T) {
 
 func TestRailBudgetsKeepTwoItemsPerList(t *testing.T) {
 	// Plenty of room: every list gets all it needs.
-	if b := railBudgets(40, [railLists]int{5, 1, 3}); b != [railLists]int{5, 1, 3} {
+	if b := railBudgets(40, [railSections]int{5, 1, 3, 1, 3}); b != [railSections]int{5, 1, 3, 1, 3} {
 		t.Fatalf("budgets %v", b)
 	}
 	// Too little: each long list still gets four rows (two items plus both
 	// arrows), and the spare row goes round-robin.
-	if b := railBudgets(railFixedRows+9, [railLists]int{20, 0, 20}); b != [railLists]int{5, 0, 4} {
+	if b := railBudgets(railFixedRows+9, [railSections]int{20, 0, 0, 0, 20}); b != [railSections]int{5, 0, 0, 0, 4} {
 		t.Fatalf("budgets %v", b)
 	}
-	if b := railBudgets(railFixedRows+5, [railLists]int{20, 2, 20}); b != [railLists]int{4, 2, 4} {
+	if b := railBudgets(railFixedRows+10, [railSections]int{20, 0, 0, 2, 20}); b != [railSections]int{4, 0, 0, 2, 4} {
 		t.Fatalf("budgets %v", b)
 	}
 }
@@ -72,18 +72,26 @@ func (f *fixture) railLines() []string {
 	return lines
 }
 
-func TestRailShowsEveryListWithTagHint(t *testing.T) {
+func TestRailShowsEverySectionHeading(t *testing.T) {
 	f := newFixture(t)
 	lines := f.railLines()
-	tags := slices.Index(lines, "tags")
-	if tags < 0 || lines[tags+1] != railTagHint || slices.Index(lines, "sessions") < tags {
-		t.Fatalf("want a tags list holding only the hint, before sessions:\n%s", strings.Join(lines, "\n"))
+	prev := -1
+	for _, h := range railHeadings {
+		i := slices.Index(lines, h)
+		if i <= prev {
+			t.Fatalf("want heading %q after the previous one:\n%s", h, strings.Join(lines, "\n"))
+		}
+		prev = i
+	}
+	// An empty tags section is its heading alone, with no hint row.
+	if i := slices.Index(lines, "tags"); lines[i+1] != "" || strings.Contains(strings.Join(lines, "\n"), "press t") {
+		t.Fatalf("want the tags heading with no rows under it:\n%s", strings.Join(lines, "\n"))
 	}
 	f.followTags(t, []string{"docs"})
 	lines = f.railLines()
-	tags = slices.Index(lines, "tags")
-	if tags < 0 || !strings.Contains(lines[tags+1], "docs") || lines[tags+2] != railTagHint {
-		t.Fatalf("want the hint after the tag set:\n%s", strings.Join(lines, "\n"))
+	tags := slices.Index(lines, "tags")
+	if tags < 0 || !strings.Contains(lines[tags+1], "docs") || lines[tags+2] != "" {
+		t.Fatalf("want the tag set under its heading:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
@@ -131,7 +139,7 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	for f.m.sel > 0 {
 		f.key("up")
 	}
-	nc := spans(f)[listChannels]
+	nc := spans(f)[secChannels]
 	if nc.top != 0 || nc.end >= nc.n {
 		t.Fatalf("want the list cut from the top, got %+v", nc)
 	}
@@ -150,7 +158,7 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	if f.m.sel != nc.end {
 		t.Fatalf("sel=%d, want %d", f.m.sel, nc.end)
 	}
-	s := spans(f)[listChannels]
+	s := spans(f)[secChannels]
 	if s.top == 0 || f.m.sel >= s.end || s.end-s.top < 2 {
 		t.Fatalf("selection not scrolled into view: %+v sel=%d", s, f.m.sel)
 	}
@@ -158,39 +166,40 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▲") }) {
 		t.Fatalf("want an up arrow once scrolled:\n%s", strings.Join(lines, "\n"))
 	}
-	// Down through the rest reaches the last channel, then leaves the list.
+	// Down through the rest reaches the last channel, then leaves the section
+	// for the first memory channel.
 	for f.m.sel < s.n-1 {
 		f.key("down")
 	}
-	if s = spans(f)[listChannels]; s.end != s.n {
+	if s = spans(f)[secChannels]; s.end != s.n {
 		t.Fatalf("last channel not shown: %+v", s)
 	}
 	if lines = f.railLines(); slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▼") }) {
 		t.Fatalf("no down arrow at the end:\n%s", strings.Join(lines, "\n"))
 	}
 	f.key("down")
-	if f.m.pane() != paneSessions {
-		t.Fatalf("down from the last channel should enter sessions, pane=%v", f.m.pane())
+	if f.m.selName() != "dev-notes" || f.m.pane() != paneChannels {
+		t.Fatalf("down from the last channel should enter memories, sel=%q pane=%v", f.m.selName(), f.m.pane())
 	}
-	// Up from the first session returns to the last channel, still shown.
+	// Up returns to the last channel, still shown.
 	f.key("up")
-	if s = spans(f)[listChannels]; f.m.sel != s.n-1 || s.end != s.n {
+	if s = spans(f)[secChannels]; f.m.sel != s.n-1 || s.end != s.n {
 		t.Fatalf("sel=%d span=%+v", f.m.sel, s)
 	}
 	// Up scrolls back one at a time to the top.
 	for f.m.sel > 0 {
-		top := spans(f)[listChannels].top
+		top := spans(f)[secChannels].top
 		f.key("up")
-		if s = spans(f)[listChannels]; f.m.sel < s.top || top-s.top > 1 {
+		if s = spans(f)[secChannels]; f.m.sel < s.top || top-s.top > 1 {
 			t.Fatalf("sel=%d span=%+v (was top %d)", f.m.sel, s, top)
 		}
 	}
-	if s = spans(f)[listChannels]; s.top != 0 {
+	if s = spans(f)[secChannels]; s.top != 0 {
 		t.Fatalf("back at the first channel, want top 0: %+v", s)
 	}
 }
 
-func spans(f *fixture) [railLists]railSpan { return f.m.railSpans() }
+func spans(f *fixture) [railSections]railSpan { return f.m.railSpans() }
 
 // invisibleText returns the printable runs of line drawn in a foreground
 // equal to the background in effect, after SGR colors 30-37/90-97 against
@@ -409,5 +418,110 @@ func TestSelectedRowsStayOneLine(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestChannelSection(t *testing.T) {
+	for _, c := range []struct {
+		name, kind string
+		want       int
+	}{
+		{"general", "ordinary", secChannels},
+		{"general/x", "ordinary", secChannels},
+		{"ops/x", "ordinary", secChannels},
+		{"memory", "memory", secMemories},
+		{"memory/tmi", "memory", secMemories},
+		{"tasks/aws", "memory", secTasks},
+		{"tasks", "memory", secTasks},
+		{tagPanePrefix + "a,b", "tags", secTags},
+	} {
+		if got := channelSection(bus.Channel{Name: c.name, Kind: c.kind}); got != c.want {
+			t.Errorf("channelSection(%q, %s) = %d, want %d", c.name, c.kind, got, c.want)
+		}
+	}
+}
+
+func TestShortName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sec  int
+		want string
+	}{
+		{"general/agentbus", secChannels, "agentbus"},
+		{"general", secChannels, "general"},
+		{"ops/deploys", secChannels, "ops/deploys"},
+		{"memory/tmi", secMemories, "tmi"},
+		{"memory", secMemories, "memory"},
+		{"tasks/aws-eip-logging", secTasks, "aws-eip-logging"},
+		{"tasks", secTasks, "tasks"},
+		{"memory/x", secChannels, "memory/x"},
+	} {
+		if got := shortName(c.name, c.sec); got != c.want {
+			t.Errorf("shortName(%q, %d) = %q, want %q", c.name, c.sec, got, c.want)
+		}
+	}
+}
+
+// setRailChannels replaces the rail's channels with chans (name, kind).
+func (f *fixture) setRailChannels(chans ...bus.Channel) {
+	f.m.setChannels(chans, nil, "")
+}
+
+func TestShortNameCollision(t *testing.T) {
+	f := newFixture(t)
+	f.setRailChannels(
+		bus.Channel{Name: "agentbus", Kind: "ordinary"},
+		bus.Channel{Name: "general/agentbus", Kind: "ordinary"},
+		bus.Channel{Name: "tmi", Kind: "memory"},
+		bus.Channel{Name: "memory/tmi", Kind: "memory"},
+		bus.Channel{Name: "memory/solo", Kind: "memory"},
+	)
+	got := f.m.railLabels()
+	for name, want := range map[string]string{
+		"agentbus": "agentbus", "general/agentbus": "general/agentbus",
+		"tmi": "tmi", "memory/tmi": "memory/tmi", "memory/solo": "solo",
+	} {
+		if got[name] != want {
+			t.Errorf("label(%q) = %q, want %q", name, got[name], want)
+		}
+	}
+}
+
+func TestRailSectionsOrder(t *testing.T) {
+	f := newFixture(t)
+	f.setRailChannels(
+		bus.Channel{Name: "tasks/aws-eip-logging", Kind: "memory"},
+		bus.Channel{Name: "memory/tmi", Kind: "memory"},
+		bus.Channel{Name: "general/agentbus", Kind: "ordinary"},
+		bus.Channel{Name: "memory", Kind: "memory"},
+		bus.Channel{Name: "general", Kind: "ordinary"},
+	)
+	var lines []string
+	for _, l := range f.railLines() {
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+	want := []string{"channels", "general", "agentbus", "memories", "memory", "tmi", "tasks", "aws-eip-logging", "tags", "sessions"}
+	if len(lines) < len(want) {
+		t.Fatalf("rail too short:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, w := range want {
+		heading := slices.Contains(railHeadings[:], w)
+		if (heading && lines[i] != w) || (!heading && !strings.Contains(lines[i], w)) {
+			t.Fatalf("rail line %d = %q, want %q:\n%s", i, lines[i], w, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+func TestEmptySectionHeadingOnly(t *testing.T) {
+	f := newFixture(t)
+	lines := f.railLines()
+	i := slices.Index(lines, "tags")
+	if i < 0 || i+2 >= len(lines) || lines[i+1] != "" || lines[i+2] != "sessions" {
+		t.Fatalf("want the tags heading, a blank, then sessions:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "press t to create") {
+		t.Fatalf("the tag hint is gone:\n%s", strings.Join(lines, "\n"))
 	}
 }

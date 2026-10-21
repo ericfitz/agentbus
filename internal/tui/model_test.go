@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,24 @@ func (f *fixture) send(msg tea.Msg) {
 }
 
 // toSessions walks down the rail from the channel list into the sessions.
+// moveTo presses down or up until the channel pane selects name (channels
+// are grouped by section, so "the next channel" depends on the fixture's mix).
+func (f *fixture) moveTo(t *testing.T, name string) {
+	t.Helper()
+	for range len(f.m.channels) {
+		i := slices.IndexFunc(f.m.channels, func(c bus.Channel) bool { return c.Name == name })
+		switch {
+		case f.m.selName() == name:
+			return
+		case i < f.m.sel:
+			f.key("up")
+		default:
+			f.key("down")
+		}
+	}
+	t.Fatalf("never reached %q, at %q", name, f.m.selName())
+}
+
 func (f *fixture) toSessions() {
 	for range len(f.m.channels) + 1 {
 		if f.m.pane() == paneSessions {
@@ -201,8 +220,8 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	if f.m.unread("dev-notes") != 1 || f.m.unread("dev") != 0 {
 		t.Fatalf("unread dev-notes=%d dev=%d", f.m.unread("dev-notes"), f.m.unread("dev"))
 	}
-	f.key("esc")  // normal mode
-	f.key("down") // select dev-notes
+	f.key("esc") // normal mode
+	f.moveTo(t, "dev-notes")
 	if f.m.selected().Name != "dev-notes" {
 		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
 	}
@@ -212,9 +231,9 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	if f.m.divider < 0 {
 		t.Fatal("divider must mark where new messages start")
 	}
-	f.key("up")
+	f.moveTo(t, "dev")
 	if f.m.selected().Name != "dev" {
-		t.Fatal("up did not go back to dev")
+		t.Fatal("did not go back to dev")
 	}
 }
 
@@ -405,9 +424,9 @@ func TestArrowsFollowTheFocusedPane(t *testing.T) {
 	f.agentSend(t, "dev", "two")
 	f.m = New(f.c, f.m.theme) // re-init after the messages exist
 	f.run(f.m.Init())
-	f.key("esc") // normal mode, channel pane
-	f.key("down")
-	if f.m.selected().Name != "dev-notes" || f.m.cursor >= 0 {
+	f.key("esc")  // normal mode, channel pane
+	f.key("down") // channels section: dev, then general
+	if f.m.selected().Name != "general" || f.m.cursor >= 0 {
 		t.Fatalf("down in the channel pane selects the next channel, got %v cursor=%d", f.m.selected(), f.m.cursor)
 	}
 	f.key("right")
@@ -464,9 +483,9 @@ func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
 	old := f.agentSend(t, "dev-notes", "old")
 	f.drainAndAck(t) // "old" is ack'd unseen: only History will ever surface it
 	live := f.agentSend(t, "dev-notes", "live")
-	f.receive(t)  // dev-notes now has "live" loaded but not the pre-existing "old" history
-	f.key("esc")  // normal mode
-	f.key("down") // dev -> dev-notes, triggering the first-ever history load
+	f.receive(t)             // dev-notes now has "live" loaded but not the pre-existing "old" history
+	f.key("esc")             // normal mode
+	f.moveTo(t, "dev-notes") // triggers the first-ever history load
 	if f.m.selected().Name != "dev-notes" {
 		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
 	}
@@ -553,10 +572,12 @@ func TestSetChannelsKeepsSelectionByNameWhileASessionIsSelected(t *testing.T) {
 	if _, err := f.ab.CreateChannel(f.sam, "alpha", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.ab.CreateChannel(f.sam, "zulu", "ordinary"); err != nil {
+	// zulu is a memory channel so it sorts last: the sessions pane is
+	// reached by walking down from it, which leaves m.sel on it.
+	if _, err := f.ab.CreateChannel(f.sam, "zulu", "memory"); err != nil {
 		t.Fatal(err)
 	}
-	f.run(f.m.statusCmd()) // channels sorted: alpha, dev, dev-notes, zulu
+	f.run(f.m.statusCmd()) // channels sorted: alpha, dev, general, then memories dev-notes, memory, zulu
 	f.key("esc")
 	for f.m.selected() == nil || f.m.selected().Name != "zulu" {
 		f.key("down")

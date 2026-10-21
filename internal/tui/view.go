@@ -338,31 +338,106 @@ func (m Model) renderHeader() string {
 	return cut(s, m.stream.Width, "")
 }
 
-// Rail lists, top to bottom. railTop holds each one's scroll offset.
+// Rail sections, top to bottom. railTop holds each one's scroll offset.
+// m.channels holds sections secChannels..secTags contiguously, in this
+// order (setChannels sorts them so); sessions are not in m.channels.
 const (
-	listChannels = iota
-	listTags
-	listSessions
-	railLists
+	secChannels = iota
+	secMemories
+	secTasks
+	secTags
+	secSessions
+	railSections
 )
 
-// railFixedRows are the rail rows outside the three lists' items: the
-// "channels", "tags" and "sessions" labels, the blank row before each of
-// the last two, and the "press t to create" hint closing the tags list.
-const railFixedRows = 6
+// railFixedRows are the rail rows outside the sections' items: one heading
+// per section and the blank row before each heading after the first.
+const railFixedRows = 9
 
-// railTagHint closes the tags list, and is all of it while no tag set is
-// followed. It is a hint, not a row the arrow keys select.
-const railTagHint = "press t to create"
+// railHeadings are the section headings, indexed by section.
+var railHeadings = [railSections]string{"channels", "memories", "tasks", "tags", "sessions"}
 
-// railBudgets splits rows (the whole rail's height) among the lists of n
+// channelSection is the rail section a channel row belongs to. Task lists
+// are memory-kind on the bus, so they are classified before memories.
+func channelSection(c bus.Channel) int {
+	switch {
+	case isTagPane(c.Name):
+		return secTags
+	case bus.IsTaskChannel(c.Name):
+		return secTasks
+	case c.Kind == "memory":
+		return secMemories
+	}
+	return secChannels
+}
+
+// shortName is name as a rail row shows it: without the section's kind
+// prefix (general/, memory/, tasks/). The bare names and every other
+// section's names are shown in full.
+func shortName(name string, sec int) string {
+	prefix := ""
+	switch sec {
+	case secChannels:
+		prefix = "general/"
+	case secMemories:
+		prefix = "memory/"
+	case secTasks:
+		prefix = bus.TaskPrefix
+	}
+	if s, ok := strings.CutPrefix(name, prefix); ok && prefix != "" && s != "" {
+		return s
+	}
+	return name
+}
+
+// railLabels maps each channel name to the label its rail row shows: the
+// short name, unless another row in the same section would show the same
+// one (ordinary "agentbus" next to "general/agentbus"), in which case both
+// show their full names.
+func (m Model) railLabels() map[string]string {
+	type key struct {
+		sec   int
+		short string
+	}
+	count := map[key]int{}
+	for _, c := range m.channels {
+		sec := channelSection(c)
+		count[key{sec, shortName(c.Name, sec)}]++
+	}
+	labels := make(map[string]string, len(m.channels))
+	for _, c := range m.channels {
+		sec := channelSection(c)
+		if s := shortName(c.Name, sec); count[key{sec, s}] == 1 {
+			labels[c.Name] = s
+		} else {
+			labels[c.Name] = c.Name
+		}
+	}
+	return labels
+}
+
+// sectionRange is the slice [lo, hi) of m.channels that section sec
+// (secChannels..secTags) occupies.
+func (m Model) sectionRange(sec int) (lo, hi int) {
+	lo = slices.IndexFunc(m.channels, func(c bus.Channel) bool { return channelSection(c) >= sec })
+	if lo < 0 {
+		return len(m.channels), len(m.channels)
+	}
+	hi = lo
+	for hi < len(m.channels) && channelSection(m.channels[hi]) == sec {
+		hi++
+	}
+	return lo, hi
+}
+
+// railBudgets splits rows (the whole rail's height) among the sections of n
 // items each. A list gets every row it needs when they all fit; otherwise
 // each gets room for at least two items -- four rows, so both scroll
-// arrows fit too -- and what is left goes round-robin to the lists still
+// arrows fit too -- and what is left goes round-robin to the sections still
 // short. On a screen too short even for that, the rail's own MaxHeight
 // clips the bottom.
-func railBudgets(rows int, n [railLists]int) [railLists]int {
-	var b [railLists]int
+func railBudgets(rows int, n [railSections]int) [railSections]int {
+	var b [railSections]int
 	left := rows - railFixedRows
 	for i := range n {
 		b[i] = min(n[i], 4)
@@ -423,26 +498,19 @@ func railWindow(n, budget, top, sel int) (int, int) {
 // railWindow picked.
 type railSpan struct{ n, sel, top, end int }
 
-// railSpans lays the three lists out for the current height and selection,
-// scrolling each from its saved offset (railTop). Tag sets come after every
-// real channel in m.channels, so the split is the first tag pane.
-func (m Model) railSpans() [railLists]railSpan {
-	nc := slices.IndexFunc(m.channels, func(c bus.Channel) bool { return isTagPane(c.Name) })
-	if nc < 0 {
-		nc = len(m.channels)
-	}
-	var s [railLists]railSpan
-	s[listChannels] = railSpan{n: nc, sel: -1}
-	s[listTags] = railSpan{n: len(m.channels) - nc, sel: -1}
-	s[listSessions] = railSpan{n: len(m.sessionNames()), sel: m.sessSel}
-	if m.sessSel < 0 && m.sel >= 0 {
-		if m.sel < nc {
-			s[listChannels].sel = m.sel
-		} else {
-			s[listTags].sel = m.sel - nc
+// railSpans lays the five sections out for the current height and
+// selection, scrolling each from its saved offset (railTop).
+func (m Model) railSpans() [railSections]railSpan {
+	var s [railSections]railSpan
+	var n [railSections]int
+	for sec := secChannels; sec <= secTags; sec++ {
+		lo, hi := m.sectionRange(sec)
+		s[sec] = railSpan{n: hi - lo, sel: -1}
+		if m.sessSel < 0 && m.sel >= lo && m.sel < hi {
+			s[sec].sel = m.sel - lo
 		}
 	}
-	var n [railLists]int
+	s[secSessions] = railSpan{n: len(m.sessionNames()), sel: m.sessSel}
 	for i := range s {
 		n[i] = s[i].n
 	}
@@ -461,16 +529,17 @@ func (m *Model) scrollRail() {
 	}
 }
 
-// renderRails draws the left column: the channel list, the followed tag
-// sets, and the session list, each under its label and always shown, even
-// empty. A list longer than its share of the stream's height scrolls (see
-// railBudgets and railWindow), with a dim arrow row above or below for the
-// items out of view. Every row is one line, cut with a trailing ellipsis to
-// the rail's width -- the selected one too, since the header over the
-// stream names it in full. Never Style.Width alone: it word-wraps overlong
-// content instead of clipping it, which would grow the rail past the
-// stream's height and push the rows below it (the compose line, the status
-// bar) off the bottom of the screen.
+// renderRails draws the left column: the channels, memories and tasks, the
+// followed tag sets, and the session list, each under its heading and always
+// shown; an empty section is only its heading. A section longer than its
+// share of the stream's height scrolls (see railBudgets and railWindow),
+// with a dim arrow row above or below for the items out of view. Every row
+// is one line, cut with a trailing ellipsis to the rail's width -- the
+// selected one too, since the header over the stream names it in full.
+// Never Style.Width alone: it word-wraps overlong content instead of
+// clipping it, which would grow the rail past the stream's height and push
+// the rows below it (the compose line, the status bar) off the bottom of
+// the screen.
 func (m Model) renderRails() string {
 	th := m.theme
 	dim := th.Style(th.Dim)
@@ -480,9 +549,16 @@ func (m Model) renderRails() string {
 	// row on screen is the one the arrow keys move.
 	focus := m.pane()
 	spans := m.railSpans()
+	labels := m.railLabels()
 	var b strings.Builder
-	// list writes one list's window of rows; row(i) draws item i unselected.
-	list := func(s railSpan, focused bool, row func(i int) string) {
+	// list writes one section's heading and window of rows; row(i) draws
+	// item i unselected.
+	list := func(sec int, focused bool, row func(i int) string) {
+		s := spans[sec]
+		if sec > secChannels {
+			b.WriteString("\n")
+		}
+		b.WriteString(dim.Render(railHeadings[sec]) + "\n")
 		if s.top > 0 {
 			b.WriteString(cut(dim.Render(fmt.Sprintf(" ▲ %d more", s.top)), rail, "…") + "\n")
 		}
@@ -500,17 +576,18 @@ func (m Model) renderRails() string {
 		}
 	}
 
-	b.WriteString(dim.Render("channels") + "\n")
-	list(spans[listChannels], focus == paneChannels, func(i int) string {
+	// chanRow draws the channel at index i of m.channels: its glyph, short
+	// name, unread count and markers.
+	chanRow := func(i int) string {
 		c := m.channels[i]
 		mark := iconChat
-		switch {
-		case bus.IsTaskChannel(c.Name):
+		switch channelSection(c) {
+		case secTasks:
 			mark = iconTasks
-		case c.Kind == "memory":
+		case secMemories:
 			mark = iconMem
 		}
-		line := m.chanStyle(c).Render(mark + c.Name)
+		line := m.chanStyle(c).Render(mark + labels[c.Name])
 		if n := m.unread(c.Name); n > 0 {
 			line += " " + th.Style(th.Agent).Render(strconv.Itoa(n))
 		}
@@ -521,22 +598,22 @@ func (m Model) renderRails() string {
 			line += dim.Render(" (off)")
 		}
 		return line
+	}
+	for _, sec := range []int{secChannels, secMemories, secTasks} {
+		lo, _ := m.sectionRange(sec)
+		list(sec, focus == paneChannels, func(i int) string { return chanRow(lo + i) })
+	}
+	tagLo, _ := m.sectionRange(secTags)
+	list(secTags, focus == paneChannels, func(i int) string {
+		return m.tagChips(tagPaneSet(m.channels[tagLo+i].Name))
 	})
 
-	b.WriteString("\n" + dim.Render("tags") + "\n")
-	nc := spans[listChannels].n
-	list(spans[listTags], focus == paneChannels, func(i int) string {
-		return m.tagChips(tagPaneSet(m.channels[nc+i].Name))
-	})
-	b.WriteString(cut(" "+dim.Render(railTagHint), rail, "…") + "\n")
-
-	b.WriteString("\n" + dim.Render("sessions") + "\n")
 	live := map[string]bus.Session{}
 	for _, s := range m.status.Sessions {
 		live[s.Sender] = s
 	}
 	names := m.sessionNames()
-	list(spans[listSessions], focus == paneSessions, func(i int) string {
+	list(secSessions, focus == paneSessions, func(i int) string {
 		n := names[i]
 		var row string
 		if s, ok := live[n]; ok {

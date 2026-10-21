@@ -69,8 +69,8 @@ type Model struct {
 	channels     []bus.Channel
 	dms          []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
 	sel          int
-	sessSel      int            // index into sessionNames(); -1 unless the sessions pane is the selection source
-	railTop      [railLists]int // each rail list's scroll offset: its first item drawn (see railWindow)
+	sessSel      int               // index into sessionNames(); -1 unless the sessions pane is the selection source
+	railTop      [railSections]int // each rail section's scroll offset: its first item drawn (see railWindow)
 	msgs         map[string][]bus.Message
 	tasks        map[string][]bus.TaskSummary // task channel name -> its current tree
 	taskOpen     map[int64]bool               // task id -> its detail block is expanded
@@ -172,7 +172,7 @@ func keyString(msg tea.Msg) string {
 	return ""
 }
 
-// Update is update followed by saving the rail lists' scroll offsets, so
+// Update is update followed by saving the rail sections' scroll offsets, so
 // every path that moves the selection, resizes the screen, or changes a
 // list scrolls the rail the same way.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1164,7 +1164,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// setChannels replaces the channel list (sorted by name), keeps the current
+// setChannels replaces the channel list (sorted by section, then name), keeps the current
 // selection by name, and subscribes to any channel not yet subscribed. DM
 // inboxes (dm/*) are split out into m.dms: they show in the sessions rail,
 // never the channel list, and are never selectable.
@@ -1180,7 +1180,15 @@ func (m *Model) setChannels(chans []bus.Channel, tags [][]string, from string) t
 		cur = m.channels[m.sel].Name
 	}
 	chans = slices.Clone(chans) // don't sort the caller's slice (bus.Status.Channels) in place
-	sort.Slice(chans, func(i, j int) bool { return chans[i].Name < chans[j].Name })
+	// Sections are contiguous in m.channels (sectionRange relies on it), each
+	// sorted by name; tag sets are appended last, after the sort.
+	sort.Slice(chans, func(i, j int) bool {
+		si, sj := channelSection(chans[i]), channelSection(chans[j])
+		if si != sj {
+			return si < sj
+		}
+		return chans[i].Name < chans[j].Name
+	})
 	// chans (all of them, DM and ordinary) is still needed below to subscribe
 	// to everything, so the split below builds two new slices rather than
 	// filtering chans in place.

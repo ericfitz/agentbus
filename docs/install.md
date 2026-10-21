@@ -504,7 +504,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the config (default: your OS user name; `--as <name>` overrides) and is an
   ordinary bus participant, so agents see your messages like any other.
   Press `esc` for the command keys and `?` for the full keymap. `tab` and
-  `shift+tab` move between the rail (channels and sessions), the message
+  `shift+tab` move between the rail (its five sections), the message
   list of the highlighted channel or session, and the compose line. The rail
   has five sections, each under a heading: channels, memories, tasks, tags
   and sessions. `↑` and `↓` walk the headings and their rows in turn; a
@@ -516,7 +516,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the last channel or session you selected. `s` and `d` do nothing on a
   heading. Collapsed sections are not saved: every start shows all of them
   expanded. On a short terminal the rail drops the blank rows between
-  sections, then shows one row of each section with a combined `▲N ▼M more` row.
+  sections, then shows at least one item of each section with a combined `▲N ▼M more` row.
   `home` selects the channels heading. Selecting a
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends

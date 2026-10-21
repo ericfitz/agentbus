@@ -15,8 +15,7 @@ repeated on every row. Stale task lists also lingered for 30 days.
 
 ## Decisions (human)
 
-- **Five sections**, top to bottom: channels, memories, tasks, tags,
-  sessions. Task channels (`bus.IsTaskChannel`) go in tasks, other memory
+- **Five sections**: channels, memories, tasks, tags, sessions. Task channels (`bus.IsTaskChannel`) go in tasks, other memory
   channels in memories, everything else in channels. Each has a heading.
 - **Collapsing.** Every section collapses to its heading. Collapse state
   lives only in the running TUI; every start shows all sections expanded.
@@ -24,8 +23,7 @@ repeated on every row. Stale task lists also lingered for 30 days.
   `memory/` or `tasks/` prefix. The bare names `general`, `memory` and
   `tasks` show in full. Only rail rows change; the stream title, compose
   target, search results, help and the CLI/MCP surfaces keep full names.
-- **Empty section** shows only its heading (the "press t to create" hint
-  is gone).
+- **Empty section** shows only its heading.
 - **Short screens (option A).** When the per-section floor does not fit
   (an 80x24 terminal gives the rail 21 rows), first drop the blank
   separator rows, then lower each section's floor to one item plus one
@@ -58,7 +56,10 @@ repeated on every row. Stale task lists also lingered for 30 days.
   `general/agentbus`) both show their full names.
 - `down` clears the draft only on the draft's last line, so multi-line
   editing still moves the cursor.
-- Section order, the blank-row rule and the data structures are
+- Removing the tags section's "press t to create" hint follows from the
+  empty-section rule; `?` help still documents `t`.
+- Section order (top to bottom: channels, memories, tasks, tags,
+  sessions), the blank-row rule and the data structures are
   implementation choices; Eric did not object to the order.
 
 ## Consequences

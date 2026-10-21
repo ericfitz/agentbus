@@ -161,8 +161,9 @@ follow, with a worked example.
 
 - `agentbus tui` — the live dashboard. `?` shows the keymap; `tab` moves
   between rail, messages, and compose; the rail's channels, memories, tasks,
-  tags, and sessions sections fold with `←`/`→` on their headings; `→`/`←` open and close a message body,
-  its replies, or a task's details and subtasks; `/` searches. The full key
+  tags, and sessions sections fold with `←`/`→` on their headings; `→`/`←`
+  open and close a message body, its replies, or a task's details and
+  subtasks; `/` searches. The full key
   reference is in the [install guide](docs/install.md#operating).
 - `agentbus stop-hook` — the Stop hook `init --global` installs: at the end
   of a turn, keeps the agent working to `receive` when new messages are

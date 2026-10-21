@@ -97,13 +97,19 @@ func envelopeBytes(m Message) int {
 }
 
 // validateSendShape checks in without touching mutable state: the required
-// fields. It runs before the idempotency receipt lookup (R2) so a keyed
+// fields, and that a DM is not addressed to the sender's own inbox (receive
+// and wait skip your own messages, so it would never be delivered). The
+// owner match is exact: "Sam/impl" may message dm/Sam and the reverse. It
+// runs before the idempotency receipt lookup (R2) so a keyed
 // retry is judged by its own payload, not by a downstream lookup that can
 // fail for reasons unrelated to whether this exact payload was already
 // accepted (e.g. its channel or reply_to target being evicted since).
-func validateSendShape(in SendInput) error {
+func validateSendShape(as string, in SendInput) error {
 	if in.Channel == "" || in.Content == "" {
 		return errf("validation", false, "channel and content are required")
+	}
+	if owner, ok := dmOwner(in.Channel); ok && owner == as {
+		return errf("validation", false, "cannot send a direct message to yourself; %s is your own inbox", in.Channel)
 	}
 	return nil
 }
@@ -293,7 +299,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return SendResult{}, err
 	}
-	if err := validateSendShape(in); err != nil {
+	if err := validateSendShape(as, in); err != nil {
 		return SendResult{}, err
 	}
 	if IsTaskChannel(in.Channel) {

@@ -343,7 +343,7 @@ func TestTagSourceExcludesDirectDMTaskAndMemory(t *testing.T) {
 	}
 	sendTagged(t, b, sam, "dev", "direct", "t")
 	sendTagged(t, b, sam, "dm/Kim", "dm", "t")
-	sendTagged(t, b, sam, "dm/Sam", "other dm", "t")
+	sendTagged(t, b, reg(t, b, "Pat"), "dm/Sam", "other dm", "t")
 	sendTagged(t, b, sam, "memory", "mem", "t")
 	sendTagged(t, b, sam, "memory/x", "mem2", "t")
 	sendTagged(t, b, sam, "general", "via tag", "t")

@@ -82,7 +82,7 @@ func TestAuthRestoresSweptSessionBeforeHeartbeat(t *testing.T) {
 	}
 	// The transaction path restores too.
 	sleepSweep(t, b)
-	if _, err := b.Send("repo", SendInput{Channel: "dm/repo", Content: "hi"}); err != nil {
+	if _, err := b.Send("repo", SendInput{Channel: "general", Content: "hi"}); err != nil {
 		t.Fatalf("Send after sweep: %v", err)
 	}
 }

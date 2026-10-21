@@ -667,7 +667,7 @@ func TestAckRejectsUnreadableSubscription(t *testing.T) {
 // channel with a now-unreadable inbox advances the former and leaves the
 // latter untouched.
 func TestAckOfMixedBatchAdvancesOnlyReadableRows(t *testing.T) {
-	b, other := twoAgents(t)
+	b, _ := twoAgents(t)
 	b.SetObserver("Sam")
 	if err := b.Subscribe("Sam", "dm/Pat", "oldest"); err != nil {
 		t.Fatal(err)
@@ -675,8 +675,9 @@ func TestAckOfMixedBatchAdvancesOnlyReadableRows(t *testing.T) {
 	if err := b.Subscribe("Sam", "general", "oldest"); err != nil {
 		t.Fatal(err)
 	}
+	reg(t, b, "Kim")
 	for _, ch := range []string{"dm/Pat", "general"} {
-		if _, err := other.Send("Pat", SendInput{Channel: ch, Content: "hello " + ch}); err != nil {
+		if _, err := b.Send("Kim", SendInput{Channel: ch, Content: "hello " + ch}); err != nil {
 			t.Fatal(err)
 		}
 	}

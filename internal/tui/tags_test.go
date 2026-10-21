@@ -40,9 +40,7 @@ func TestTagRailSectionListsSetsAndPaneShowsMatches(t *testing.T) {
 	if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: "dev-notes", Content: "memory", Tags: []string{"agentbus", "bug"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: "dm/Sam", Content: "direct", Tags: []string{"agentbus", "bug"}}); err != nil {
-		t.Fatal(err)
-	}
+	f.patSend(t, "dm/Sam", "direct", "agentbus", "bug")
 	f.receive(t)
 	f.selectTagPane(t, tagPanePrefix+"agentbus,bug")
 	s := ansi.Strip(f.m.renderStream())

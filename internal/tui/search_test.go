@@ -92,7 +92,7 @@ func TestSearchJumpFromSessionsPaneLeavesSessions(t *testing.T) {
 func TestSearchJumpToADMHitSelectsTheSession(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd()) // populates m.dms and sessionNames()
-	r := f.agentSend(t, "dm/Sam", "note about the release")
+	r := f.patSend(t, "dm/Sam", "note about the release")
 	f.receive(t)
 	f.key("esc")
 	f.key("/")

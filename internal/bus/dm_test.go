@@ -388,7 +388,8 @@ func TestDeliveryHonorsDMReadableAfterObserverEndsSession(t *testing.T) {
 	if err := a.Subscribe("human", "dm/Pat", "oldest"); err != nil {
 		t.Fatalf("observer subscribe: %v", err)
 	}
-	if _, err := pat.Send("Pat", SendInput{Channel: "dm/Pat", Content: "secret for Pat"}); err != nil {
+	reg(t, a, "Kim")
+	if _, err := a.Send("Kim", SendInput{Channel: "dm/Pat", Content: "secret for Pat"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.EndSessions(); err != nil {

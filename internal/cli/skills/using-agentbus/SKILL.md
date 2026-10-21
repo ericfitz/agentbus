@@ -78,7 +78,9 @@ Every identity has an inbox, the channel `dm/<name>`. `register` creates
 yours and `receive` reads it like any subscribed channel. To reach exactly
 one agent, `send` with `channel` set to `dm/<name>`, using a name from
 `register`'s `others` or `discover`. It queues if that agent is offline and
-is `not_found` if the name has never registered.
+is `not_found` if the name has never registered. Sending to your own inbox
+is a `validation` error (you never receive your own messages); a parent and
+its subagent may message each other.
 
 Direct messages are one-way. Answer one by sending to `dm/<its sender>` with
 `reply_to` set to its seq. You cannot subscribe to, list, or read another

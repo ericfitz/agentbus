@@ -19,7 +19,7 @@ func TestRailHidesDMChannelsAndCountsSessionUnread(t *testing.T) {
 	if len(f.m.dms) < 2 { // dm/Sam and dm/eric
 		t.Fatalf("dms=%v", f.m.dms)
 	}
-	f.agentSend(t, "dm/Sam", "note to self") // Sam -> own inbox; any sender works
+	f.patSend(t, "dm/Sam", "note for Sam")
 	f.receive(t)
 	if got := f.m.unread("dm/Sam"); got != 1 {
 		t.Fatalf("unread(dm/Sam)=%d", got)
@@ -106,7 +106,7 @@ func TestReplyOnlyInOwnInbox(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
 	f.agentSend(t, "dm/"+f.c.as, "which oauth provider?")
-	f.agentSend(t, "dm/Sam", "note")
+	f.patSend(t, "dm/Sam", "note")
 	f.receive(t)
 	f.key("esc")
 	f.toSessions()

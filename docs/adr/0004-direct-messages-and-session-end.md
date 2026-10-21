@@ -22,6 +22,9 @@ spec or earlier ADRs, this ADR supersedes; the v2 spec is not edited. Design:
    identity is `not_found`.
 7. Only the owning identity may read its inbox (receive, history, search).
    The TUI human may read all of them. Senders cannot read back.
+   A send to the sender's own inbox (`dm/<as>`, exact match) is a
+   `validation` error, since receive and wait skip an identity's own messages
+   (#42); a parent and its subagent have different inboxes.
 8. Direct messages are one-way. A reply is a new direct message to the
    original sender, optionally carrying `reply_to`. No threading changes.
 9. TUI: inboxes do not appear in the channel list. The session list is

@@ -91,7 +91,6 @@ func (f *fixture) send(msg tea.Msg) {
 	f.run(cmd)
 }
 
-// toSessions walks down the rail from the channel list into the sessions.
 // moveTo presses down or up until the channel pane selects name (channels
 // are grouped by section, so "the next channel" depends on the fixture's mix).
 func (f *fixture) moveTo(t *testing.T, name string) {
@@ -110,6 +109,7 @@ func (f *fixture) moveTo(t *testing.T, name string) {
 	t.Fatalf("never reached %q, at %q", name, f.m.selName())
 }
 
+// toSessions walks down the rail from the channel list into the sessions.
 func (f *fixture) toSessions() {
 	for range len(f.m.channels) + 1 {
 		if f.m.pane() == paneSessions {
@@ -223,7 +223,7 @@ func TestBatchOnOtherChannelCountsUnreadAndSelectingClearsIt(t *testing.T) {
 	f.key("esc") // normal mode
 	f.moveTo(t, "dev-notes")
 	if f.m.selected().Name != "dev-notes" {
-		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
+		t.Fatalf("moveTo did not select dev-notes: %v", f.m.selected())
 	}
 	if f.m.unread("dev-notes") != 0 {
 		t.Fatalf("selecting must mark seen, unread=%d", f.m.unread("dev-notes"))
@@ -487,7 +487,7 @@ func TestDividerLandsBeforeFirstUnreadOnFirstVisit(t *testing.T) {
 	f.key("esc")             // normal mode
 	f.moveTo(t, "dev-notes") // triggers the first-ever history load
 	if f.m.selected().Name != "dev-notes" {
-		t.Fatalf("down did not select dev-notes: %v", f.m.selected())
+		t.Fatalf("moveTo did not select dev-notes: %v", f.m.selected())
 	}
 	if want := live.Seq - 1; f.m.divider != want {
 		t.Fatalf("divider = %d, want %d (== old.Seq %d)", f.m.divider, want, old.Seq)

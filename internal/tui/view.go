@@ -350,8 +350,9 @@ const (
 	railSections
 )
 
-// railFixedRows are the rail rows outside the sections' items: one heading
-// per section and the blank row before each heading after the first.
+// railFixedRows are the rail rows outside the sections' items when the
+// blank separators are drawn: one heading per section and the blank row
+// before each heading after the first.
 const railFixedRows = 9
 
 // railHeadings are the section headings, indexed by section.
@@ -430,47 +431,75 @@ func (m Model) sectionRange(sec int) (lo, hi int) {
 	return lo, hi
 }
 
-// railBudgets splits rows (the whole rail's height) among the sections of n
-// items each. A list gets every row it needs when they all fit; otherwise
-// each gets room for at least two items -- four rows, so both scroll
-// arrows fit too -- and what is left goes round-robin to the sections still
-// short. On a screen too short even for that, the rail's own MaxHeight
-// clips the bottom.
-func railBudgets(rows int, n [railSections]int) [railSections]int {
-	var b [railSections]int
-	left := rows - railFixedRows
-	for i := range n {
-		b[i] = min(n[i], 4)
-		left -= b[i]
-	}
-	for left > 0 {
-		grew := false
+// railLayout splits rows (the whole rail's height) among the sections of n
+// items each. A section gets every row it needs when they all fit; otherwise
+// each gets room for at least two items -- four rows, so both scroll arrows
+// fit too -- and what is left goes round-robin to the sections still short.
+// When those floors do not fit, it degrades in order: first the blank rows
+// between sections go (blanks false; the headings still separate them), then
+// the floor shrinks to one item plus one combined scroll row (compact true,
+// two rows). A collapsed section or an empty one has budget 0 and keeps
+// only its heading. On a screen too short even for that, the rail's own
+// MaxHeight clips the bottom.
+func railLayout(rows int, n [railSections]int, collapsed [railSections]bool) (b [railSections]int, blanks, compact bool) {
+	floors := func(per int) (f [railSections]int, sum int) {
 		for i := range n {
-			if left > 0 && b[i] < n[i] {
-				b[i]++
-				left--
-				grew = true
+			if !collapsed[i] {
+				f[i] = min(n[i], per)
+				sum += f[i]
 			}
 		}
-		if !grew {
-			break
+		return f, sum
+	}
+	headings := railSections
+	for _, try := range []struct {
+		blanks, compact bool
+		per             int
+	}{{true, false, 4}, {false, false, 4}, {false, true, 2}} {
+		fixed := headings
+		if try.blanks {
+			fixed += railSections - 1
+		}
+		f, sum := floors(try.per)
+		b, blanks, compact = f, try.blanks, try.compact
+		if rows-fixed >= sum {
+			left := rows - fixed - sum
+			for left > 0 {
+				grew := false
+				for i := range n {
+					if left > 0 && !collapsed[i] && b[i] < n[i] {
+						b[i]++
+						left--
+						grew = true
+					}
+				}
+				if !grew {
+					break
+				}
+			}
+			return b, blanks, compact
 		}
 	}
-	return b
+	return b, blanks, compact
 }
 
 // railWindow is the slice [top, end) of n items drawn in budget rows. When
 // they do not all fit, an arrow row above (items hidden before top) and one
-// below (items hidden from end) each take a row of the budget. top starts
-// from the list's previous offset and moves as little as it takes to show
-// sel (-1 when the selection is in another list), so stepping past the
+// below (items hidden from end) each take a row of the budget; in compact
+// mode one row carries both arrows, so any hidden items cost a single row.
+// top starts
+// from the section's previous offset and moves as little as it takes to show
+// sel (-1 when the selection is in another section), so stepping past the
 // last shown item scrolls the list by one; it never leaves empty rows
 // under the last item.
-func railWindow(n, budget, top, sel int) (int, int) {
+func railWindow(n, budget, top, sel int, compact bool) (int, int) {
 	if n <= budget {
 		return 0, n
 	}
 	end := func(t int) int {
+		if compact {
+			return min(t+max(budget-1, 1), n)
+		}
 		k := budget
 		if t > 0 {
 			k-- // the up arrow
@@ -493,15 +522,16 @@ func railWindow(n, budget, top, sel int) (int, int) {
 	return top, end(top)
 }
 
-// railSpan is one list's place in the rail: its item count, the selected
+// railSpan is one section's place in the rail: its item count, the selected
 // item's index in it (-1 if the selection is elsewhere), and the window
 // railWindow picked.
 type railSpan struct{ n, sel, top, end int }
 
 // railSpans lays the five sections out for the current height and
-// selection, scrolling each from its saved offset (railTop).
-func (m Model) railSpans() [railSections]railSpan {
-	var s [railSections]railSpan
+// selection, scrolling each from its saved offset (railTop). blanks and
+// compact are railLayout's: whether separator rows are drawn and whether
+// scroll arrows share one row.
+func (m Model) railSpans() (s [railSections]railSpan, blanks, compact bool) {
 	var n [railSections]int
 	for sec := secChannels; sec <= secTags; sec++ {
 		lo, hi := m.sectionRange(sec)
@@ -514,17 +544,18 @@ func (m Model) railSpans() [railSections]railSpan {
 	for i := range s {
 		n[i] = s[i].n
 	}
-	b := railBudgets(m.stream.Height+1, n)
+	b, blanks, compact := railLayout(m.stream.Height+1, n, [railSections]bool{})
 	for i := range s {
-		s[i].top, s[i].end = railWindow(s[i].n, b[i], m.railTop[i], s[i].sel)
+		s[i].top, s[i].end = railWindow(s[i].n, b[i], m.railTop[i], s[i].sel, compact)
 	}
-	return s
+	return s, blanks, compact
 }
 
-// scrollRail saves each list's scroll offset after an update, so the next
+// scrollRail saves each section's scroll offset after an update, so the next
 // selection move scrolls from where the list is drawn now.
 func (m *Model) scrollRail() {
-	for i, s := range m.railSpans() {
+	spans, _, _ := m.railSpans()
+	for i, s := range spans {
 		m.railTop[i] = s.top
 	}
 }
@@ -532,7 +563,7 @@ func (m *Model) scrollRail() {
 // renderRails draws the left column: the channels, memories and tasks, the
 // followed tag sets, and the session list, each under its heading and always
 // shown; an empty section is only its heading. A section longer than its
-// share of the stream's height scrolls (see railBudgets and railWindow),
+// share of the stream's height scrolls (see railLayout and railWindow),
 // with a dim arrow row above or below for the items out of view. Every row
 // is one line, cut with a trailing ellipsis to the rail's width -- the
 // selected one too, since the header over the stream names it in full.
@@ -548,18 +579,18 @@ func (m Model) renderRails() string {
 	// compose has focus takes the inactive selection color, so the one blue
 	// row on screen is the one the arrow keys move.
 	focus := m.pane()
-	spans := m.railSpans()
+	spans, blanks, compact := m.railSpans()
 	labels := m.railLabels()
 	var b strings.Builder
 	// list writes one section's heading and window of rows; row(i) draws
 	// item i unselected.
 	list := func(sec int, focused bool, row func(i int) string) {
 		s := spans[sec]
-		if sec > secChannels {
+		if sec > secChannels && blanks {
 			b.WriteString("\n")
 		}
 		b.WriteString(dim.Render(railHeadings[sec]) + "\n")
-		if s.top > 0 {
+		if !compact && s.top > 0 {
 			b.WriteString(cut(dim.Render(fmt.Sprintf(" ▲ %d more", s.top)), rail, "…") + "\n")
 		}
 		for i := s.top; i < s.end; i++ {
@@ -571,7 +602,18 @@ func (m Model) renderRails() string {
 			}
 			b.WriteString(line + "\n")
 		}
-		if s.end < s.n {
+		switch {
+		case compact && (s.top > 0 || s.end < s.n):
+			// One row under the items carries both arrows.
+			var parts []string
+			if s.top > 0 {
+				parts = append(parts, fmt.Sprintf("▲%d", s.top))
+			}
+			if s.end < s.n {
+				parts = append(parts, fmt.Sprintf("▼%d", s.n-s.end))
+			}
+			b.WriteString(cut(dim.Render(" "+strings.Join(parts, " ")+" more"), rail, "…") + "\n")
+		case s.end < s.n:
 			b.WriteString(cut(dim.Render(fmt.Sprintf(" ▼ %d more", s.n-s.end)), rail, "…") + "\n")
 		}
 	}

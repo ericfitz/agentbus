@@ -18,48 +18,202 @@ import (
 
 func TestRailWindowScrollsByOneWithArrows(t *testing.T) {
 	// 10 items in 5 rows: from the top, 4 items and the down arrow.
-	if top, end := railWindow(10, 5, 0, 0); top != 0 || end != 4 {
+	if top, end := railWindow(10, 5, 0, 0, false); top != 0 || end != 4 {
 		t.Fatalf("top=%d end=%d, want 0 4", top, end)
 	}
 	// Stepping past the last shown item scrolls just far enough to show
 	// it; the up arrow now takes a row too.
-	top, end := railWindow(10, 5, 0, 4)
+	top, end := railWindow(10, 5, 0, 4, false)
 	if top != 2 || end != 5 {
 		t.Fatalf("top=%d end=%d, want 2 5", top, end)
 	}
-	if top, end = railWindow(10, 5, top, 5); top != 3 || end != 6 {
+	if top, end = railWindow(10, 5, top, 5, false); top != 3 || end != 6 {
 		t.Fatalf("top=%d end=%d, want 3 6", top, end)
 	}
 	// The last item: no down arrow, and no empty rows under it.
-	if top, end = railWindow(10, 5, top, 9); top != 6 || end != 10 {
+	if top, end = railWindow(10, 5, top, 9, false); top != 6 || end != 10 {
 		t.Fatalf("top=%d end=%d, want 6 10", top, end)
 	}
 	// Back up: stepping above the first shown item scrolls by one.
-	if top, end = railWindow(10, 5, 6, 5); top != 5 || end != 8 {
+	if top, end = railWindow(10, 5, 6, 5, false); top != 5 || end != 8 {
 		t.Fatalf("top=%d end=%d, want 5 8", top, end)
 	}
 	// Everything fits: no scrolling at all.
-	if top, end = railWindow(3, 5, 2, 2); top != 0 || end != 3 {
+	if top, end = railWindow(3, 5, 2, 2, false); top != 0 || end != 3 {
 		t.Fatalf("top=%d end=%d, want 0 3", top, end)
 	}
 	// A selection elsewhere keeps the offset.
-	if top, _ = railWindow(10, 5, 3, -1); top != 3 {
+	if top, _ = railWindow(10, 5, 3, -1, false); top != 3 {
 		t.Fatalf("top=%d, want 3", top)
 	}
 }
 
-func TestRailBudgetsKeepTwoItemsPerList(t *testing.T) {
-	// Plenty of room: every list gets all it needs.
-	if b := railBudgets(40, [railSections]int{5, 1, 3, 1, 3}); b != [railSections]int{5, 1, 3, 1, 3} {
-		t.Fatalf("budgets %v", b)
+func TestRailLayoutFitsAll(t *testing.T) {
+	n := [railSections]int{5, 1, 3, 1, 3}
+	b, blanks, compact := railLayout(40, n, [railSections]bool{})
+	if b != n || !blanks || compact {
+		t.Fatalf("b=%v blanks=%v compact=%v, want every item, blanks, not compact", b, blanks, compact)
 	}
-	// Too little: each long list still gets four rows (two items plus both
-	// arrows), and the spare row goes round-robin.
-	if b := railBudgets(railFixedRows+9, [railSections]int{20, 0, 0, 0, 20}); b != [railSections]int{5, 0, 0, 0, 4} {
-		t.Fatalf("budgets %v", b)
+}
+
+func TestRailLayoutKeepsFourRowsPerSection(t *testing.T) {
+	// Blanks fit, the floors fit: each long section keeps four rows (two
+	// items plus both arrows) and the spare row goes round-robin.
+	b, blanks, compact := railLayout(railFixedRows+9, [railSections]int{20, 0, 0, 0, 20}, [railSections]bool{})
+	if b != [railSections]int{5, 0, 0, 0, 4} || !blanks || compact {
+		t.Fatalf("b=%v blanks=%v compact=%v", b, blanks, compact)
 	}
-	if b := railBudgets(railFixedRows+10, [railSections]int{20, 0, 0, 2, 20}); b != [railSections]int{4, 0, 0, 2, 4} {
-		t.Fatalf("budgets %v", b)
+	// A section that fits in fewer rows takes only what it needs.
+	b, _, _ = railLayout(railFixedRows+10, [railSections]int{20, 0, 0, 2, 20}, [railSections]bool{})
+	if b != [railSections]int{4, 0, 0, 2, 4} {
+		t.Fatalf("b=%v", b)
+	}
+}
+
+func TestRailLayoutDropsBlanksFirst(t *testing.T) {
+	n := [railSections]int{6, 19, 4, 0, 4}
+	b, blanks, compact := railLayout(21, n, [railSections]bool{})
+	if blanks || compact {
+		t.Fatalf("blanks=%v compact=%v, want neither (headings only, four-row floors)", blanks, compact)
+	}
+	sum := 0
+	for i, v := range b {
+		if v < min(n[i], 4) {
+			t.Fatalf("section %d budget %d, want at least %d", i, v, min(n[i], 4))
+		}
+		sum += v
+	}
+	if sum+len(railHeadings) > 21 {
+		t.Fatalf("budgets %v need %d rows, have 21", b, sum+len(railHeadings))
+	}
+}
+
+func TestRailLayoutCompact(t *testing.T) {
+	n := [railSections]int{6, 19, 4, 0, 4}
+	b, blanks, compact := railLayout(16, n, [railSections]bool{})
+	if blanks || !compact {
+		t.Fatalf("blanks=%v compact=%v, want compact without blanks", blanks, compact)
+	}
+	sum := 0
+	for i, v := range b {
+		if v < min(n[i], 2) {
+			t.Fatalf("section %d budget %d, want at least %d", i, v, min(n[i], 2))
+		}
+		sum += v
+	}
+	if sum+len(railHeadings) > 16 {
+		t.Fatalf("budgets %v need %d rows, have 16", b, sum+len(railHeadings))
+	}
+}
+
+func TestRailLayoutTooShortStillFloors(t *testing.T) {
+	// Below the compact floors the layout cannot fit; the rail's MaxHeight
+	// clips. The floors are still what is asked for, never less.
+	b, blanks, compact := railLayout(8, [railSections]int{20, 0, 0, 0, 20}, [railSections]bool{})
+	if b != [railSections]int{2, 0, 0, 0, 2} || blanks || !compact {
+		t.Fatalf("b=%v blanks=%v compact=%v", b, blanks, compact)
+	}
+}
+
+func TestRailLayoutCollapsedGetsNothing(t *testing.T) {
+	n := [railSections]int{3, 3, 3, 3, 3}
+	b, _, _ := railLayout(40, n, [railSections]bool{secMemories: true})
+	if b != [railSections]int{3, 0, 3, 3, 3} {
+		t.Fatalf("b=%v", b)
+	}
+}
+
+func TestRailWindowCompactCombinedArrow(t *testing.T) {
+	// Budget 2: one item row and one row for both arrows.
+	top, end := railWindow(19, 2, 0, 10, true)
+	if top != 10 || end != 11 {
+		t.Fatalf("top=%d end=%d, want 10 11", top, end)
+	}
+	// From the top: one item and a down-only arrow row.
+	if top, end = railWindow(19, 2, 0, 0, true); top != 0 || end != 1 {
+		t.Fatalf("top=%d end=%d, want 0 1", top, end)
+	}
+	// The last item: still one item and one (up-only) arrow row.
+	if top, end = railWindow(19, 2, 0, 18, true); top != 18 || end != 19 {
+		t.Fatalf("top=%d end=%d, want 18 19", top, end)
+	}
+}
+
+func TestRailCompactArrowRow(t *testing.T) {
+	f := newFixture(t)
+	f.send(tea.WindowSizeMsg{Width: 80, Height: 24})
+	var chans []bus.Channel
+	for i := range 19 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("memory/m%02d", i), Kind: "memory"})
+	}
+	f.setRailChannels(chans...)
+	f.key("esc")
+	f.key("home")
+	for range 10 {
+		f.key("down")
+	}
+	// Too short for four-row floors: compact arrows are forced.
+	f.send(tea.WindowSizeMsg{Width: 80, Height: 12})
+	lines := f.railLines()
+	want := "▲" + fmt.Sprint(spans(f)[secMemories].top) + " ▼" + fmt.Sprint(19-spans(f)[secMemories].end) + " more"
+	if !slices.Contains(lines, want) {
+		t.Fatalf("want a combined arrow row %q:\n%s", want, strings.Join(lines, "\n"))
+	}
+}
+
+func TestRail24LinesShowsEverySection(t *testing.T) {
+	f := newFixture(t)
+	var chans []bus.Channel
+	for i := range 6 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("general/c%d", i), Kind: "ordinary"})
+	}
+	for i := range 19 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("memory/m%02d", i), Kind: "memory"})
+	}
+	for i := range 4 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("tasks/t%d", i), Kind: "memory"})
+	}
+	f.setRailChannels(chans...)
+	sessions := []string{"s1", "s2", "s3", "s4", "s5"}
+	for _, n := range sessions {
+		f.m.sessionsSeen[n] = time.Now()
+	}
+	f.send(tea.WindowSizeMsg{Width: 80, Height: 24})
+	lines := f.railLines()
+	if len(lines) > f.m.stream.Height+1 {
+		t.Fatalf("rail is %d rows, stream+1 is %d", len(lines), f.m.stream.Height+1)
+	}
+	all := strings.Join(lines, "\n")
+	// Items under each non-empty section: the row after its heading is not
+	// another heading or blank.
+	for sec, h := range railHeadings {
+		i := slices.Index(lines, h)
+		if i < 0 {
+			t.Fatalf("heading %q missing:\n%s", h, all)
+		}
+		if sec == secTags {
+			continue
+		}
+		if i+1 >= len(lines) || lines[i+1] == "" || slices.Contains(railHeadings[:], lines[i+1]) {
+			t.Fatalf("no item under %q:\n%s", h, all)
+		}
+	}
+	// The last session is reachable with down, selected and visible.
+	f.key("esc")
+	f.key("home")
+	last := f.m.sessionNames()[len(f.m.sessionNames())-1]
+	for range len(chans) + len(sessions) + 2 {
+		if f.m.pane() == paneSessions && f.m.sessSel == len(f.m.sessionNames())-1 {
+			break
+		}
+		f.key("down")
+	}
+	if f.m.pane() != paneSessions || f.m.sessionNames()[f.m.sessSel] != last {
+		t.Fatalf("down did not reach %q: pane=%v sessSel=%d", last, f.m.pane(), f.m.sessSel)
+	}
+	lines = f.railLines()
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, last) }) {
+		t.Fatalf("selected last session %q not visible:\n%s", last, strings.Join(lines, "\n"))
 	}
 }
 
@@ -199,7 +353,10 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	}
 }
 
-func spans(f *fixture) [railSections]railSpan { return f.m.railSpans() }
+func spans(f *fixture) [railSections]railSpan {
+	s, _, _ := f.m.railSpans()
+	return s
+}
 
 // invisibleText returns the printable runs of line drawn in a foreground
 // equal to the background in effect, after SGR colors 30-37/90-97 against
@@ -510,6 +667,10 @@ func TestRailSectionsOrder(t *testing.T) {
 		heading := slices.Contains(railHeadings[:], w)
 		if (heading && lines[i] != w) || (!heading && !strings.Contains(lines[i], w)) {
 			t.Fatalf("rail line %d = %q, want %q:\n%s", i, lines[i], w, strings.Join(lines, "\n"))
+		}
+		// Item rows show short names: a "/" would be a kind prefix left on.
+		if !heading && strings.Contains(lines[i], "/") {
+			t.Fatalf("rail line %d = %q still shows a prefix:\n%s", i, lines[i], strings.Join(lines, "\n"))
 		}
 	}
 }

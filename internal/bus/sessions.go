@@ -385,7 +385,7 @@ func sessionBytes(s Session) int {
 // mutating transaction can re-verify ownership immediately after opening:
 // a process that stalls past the 30s heartbeat window may have lost its
 // name to a newer registration between a preflight check and the write.
-func (b *Bus) auth(q queryRower, as string) error {
+func (b *Bus) auth(q execQuerier, as string) error {
 	if as == "" {
 		return errf("validation", false, "as is required: pass the display name returned by register")
 	}
@@ -458,17 +458,10 @@ func (b *Bus) rememberedRow(name string) (sessionRow, bool) {
 // and a fresh heartbeat. A name another owner holds is forgotten, never
 // overwritten (ADR 0022). It reports whether this process owns the row after.
 func (b *Bus) restore(q execQuerier, r sessionRow) (bool, error) {
-	gen, err := resetGeneration(q)
-	if err != nil {
-		return false, err
-	}
-	if gen != r.generation {
-		// A reset wiped the bus; it meant every live process to register again.
-		b.forget(r.sender)
-		return false, nil
-	}
-	res, err := q.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version,harness_pid,harness_start) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(sender) DO NOTHING",
-		r.sender, r.context, b.owner, b.nowMs(), r.registeredAt, r.harness, r.harnessVersion, r.harnessPid, r.harnessStart)
+	// The generation check is part of the INSERT, so a Reset cannot commit
+	// between the check and the write and leave a row that outlives it.
+	res, err := q.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at,harness,harness_version,harness_pid,harness_start) SELECT ?,?,?,?,?,?,?,?,? WHERE coalesce((SELECT value FROM meta WHERE key='reset_generation'),0)=? ON CONFLICT(sender) DO NOTHING",
+		r.sender, r.context, b.owner, b.nowMs(), r.registeredAt, r.harness, r.harnessVersion, r.harnessPid, r.harnessStart, r.generation)
 	if err != nil {
 		return false, internal(err)
 	}
@@ -480,6 +473,15 @@ func (b *Bus) restore(q execQuerier, r sessionRow) (bool, error) {
 			return false, internal(err)
 		}
 		return true, nil
+	}
+	gen, err := resetGeneration(q)
+	if err != nil {
+		return false, err
+	}
+	if gen != r.generation {
+		// A reset wiped the bus; it meant every live process to register again.
+		b.forget(r.sender)
+		return false, nil
 	}
 	var owner string
 	if err := q.QueryRow("SELECT owner FROM sessions WHERE sender=?", r.sender).Scan(&owner); err != nil {
@@ -497,16 +499,12 @@ func (b *Bus) restore(q execQuerier, r sessionRow) (bool, error) {
 
 // restoreOne is auth's single restore attempt for name; any failure leaves
 // the caller to report not_registered.
-func (b *Bus) restoreOne(q queryRower, name string) bool {
-	e, ok := q.(execQuerier)
-	if !ok {
-		return false
-	}
+func (b *Bus) restoreOne(q execQuerier, name string) bool {
 	r, ok := b.rememberedRow(name)
 	if !ok {
 		return false
 	}
-	ok, err := b.restore(e, r)
+	ok, err := b.restore(q, r)
 	if err != nil {
 		b.log.Warn("restore session", "name", name, "err", err)
 	}
@@ -527,12 +525,14 @@ func (b *Bus) Heartbeat() error {
 		rows = append(rows, r)
 	}
 	b.rememberedMu.Unlock()
+	// Try every name: one failure must not leave the others swept.
+	var errs []error
 	for _, r := range rows {
 		if _, err := b.restore(b.db, r); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // EndSessions deletes every session this process owns, so a process that

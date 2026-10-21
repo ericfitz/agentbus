@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -243,20 +244,116 @@ func TestReRegisterAfterResetRestoresAfterSweep(t *testing.T) {
 	}
 }
 
+// TestMetaMigrationIdempotent opens a v11 file (no meta table) twice: the
+// first open creates meta and stamps 12, the second changes nothing.
 func TestMetaMigrationIdempotent(t *testing.T) {
 	b := newTestBus(t)
-	if err := openOther(t, b).Reset(); err != nil {
+	cfg := b.cfg
+	if err := b.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.db.Exec("PRAGMA user_version = 11"); err != nil {
+	dsn, err := SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DROP TABLE meta"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 11"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := migrate(b.db, 11); err != nil {
+		o, err := Open(cfg, b.log)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		var uv, has int
+		if err := o.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 12 {
+			t.Fatalf("open %d: user_version=%d err=%v", i, uv, err)
+		}
+		if err := o.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='meta'").Scan(&has); err != nil || has != 1 {
+			t.Fatalf("open %d: meta tables=%d err=%v", i, has, err)
+		}
+		if g, err := resetGeneration(o.db); err != nil || g != 0 {
+			t.Fatalf("open %d: generation=%d err=%v", i, g, err)
+		}
+		if err := o.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if g, err := resetGeneration(b.db); err != nil || g != 1 {
-		t.Fatalf("generation=%d err=%v", g, err)
+}
+
+// A reset that commits after the process remembered its row (here: the
+// generation bumped directly) must stop the restore in the INSERT itself,
+// leaving no row and no entry. The interleaving between a separate read and
+// write cannot be driven without a hook; this checks the single statement.
+func TestRestoreInsertCarriesGenerationCheck(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("repo", "", "ctx", true); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := b.rememberedRow("repo")
+	if !ok {
+		t.Fatal("not remembered")
+	}
+	sleepSweep(t, b)
+	if _, err := b.db.Exec("INSERT INTO meta(key,value) VALUES('reset_generation',1) ON CONFLICT(key) DO UPDATE SET value=value+1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.restore(b.db, r); err != nil || got {
+		t.Fatalf("restore = %v, %v; want false, nil", got, err)
+	}
+	if _, _, _, found := sessionRowFor(t, b, "repo"); found {
+		t.Fatal("row restored across a reset")
+	}
+	if _, ok := b.rememberedRow("repo"); ok {
+		t.Fatal("entry not forgotten")
+	}
+}
+
+// Heartbeat snapshots the entries, then EndSessions clears them; a restore
+// that runs after must not leave a row for the ended session.
+func TestRestoreAfterEndSessionsLeavesNoRow(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("repo", "", "ctx", true); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := b.rememberedRow("repo")
+	if err := b.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.restore(b.db, r); err != nil || got {
+		t.Fatalf("restore = %v, %v; want false, nil", got, err)
+	}
+	if _, _, _, found := sessionRowFor(t, b, "repo"); found {
+		t.Fatal("restore left a row for an ended session")
+	}
+}
+
+// One name failing to restore must not keep Heartbeat from restoring the
+// others, and the error is still reported.
+func TestHeartbeatRestoresOthersAfterAFailure(t *testing.T) {
+	b := newTestBus(t)
+	for _, n := range []string{"bad", "good"} {
+		if _, err := b.Register(n, "", "ctx", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sleepSweep(t, b)
+	if _, err := b.db.Exec("CREATE TRIGGER fail_bad BEFORE INSERT ON sessions WHEN NEW.sender='bad' BEGIN SELECT RAISE(ABORT,'boom'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Heartbeat(); err == nil {
+		t.Fatal("Heartbeat swallowed the restore error")
+	}
+	if _, _, _, ok := sessionRowFor(t, b, "good"); !ok {
+		t.Fatal("good was not restored after bad failed")
 	}
 }

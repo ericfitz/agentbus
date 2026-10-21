@@ -150,6 +150,10 @@ func TestUnregisteredSessionDoesNotBorrowAnotherHarnessName(t *testing.T) {
 // it did not have before, while its harness is unchanged. Its identity
 // changed under a live harness, so its old wait (under the suffixed name)
 // is the one a new wait must replace.
+//
+// It models a new MCP process (a new owner) re-registering after a sweep,
+// which ADR 0022 deliberately leaves alone. A live server restores its own
+// row instead (internal/bus/sessions_restore_test.go).
 func TestIdentityChangesAfterStaleSweepWhileHarnessSame(t *testing.T) {
 	cfg, cwd, first, second, b := twoSessions(t)
 	if second != first+"2" {

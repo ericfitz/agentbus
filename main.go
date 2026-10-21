@@ -28,16 +28,18 @@ func splitTags(v string) []string {
 	return parts
 }
 
-// usage is the top-level usage line, printed to stdout for help and to
-// stderr when no command is given.
+// usage is the top-level usage line, printed to stdout for help and when no
+// command is given.
 const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, usage)
-		os.Exit(2)
+	// Bare agentbus is help: winget validation runs the executable with no
+	// arguments and needs exit 0.
+	cmd := "help"
+	if len(os.Args) >= 2 {
+		cmd = os.Args[1]
 	}
-	code := run(os.Args[1], os.Args[2:])
+	code := run(cmd, os.Args[min(2, len(os.Args)):])
 	os.Exit(code)
 }
 

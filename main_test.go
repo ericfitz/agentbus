@@ -101,13 +101,15 @@ func TestVersionFlags(t *testing.T) {
 	}
 }
 
-func TestNoArgsUsageExit2(t *testing.T) {
+// TestNoArgsUsageExit0: bare agentbus prints usage like help and exits 0;
+// winget validation runs the executable with no arguments and needs 0.
+func TestNoArgsUsageExit0(t *testing.T) {
 	r := execBin(t)
-	if r.code != 2 {
-		t.Errorf("exit %d, want 2", r.code)
+	if r.code != 0 {
+		t.Errorf("exit %d, want 0", r.code)
 	}
-	if strings.TrimSpace(r.stderr) != strings.TrimSpace(usage) || r.stdout != "" {
-		t.Errorf("stdout %q stderr %q, want usage on stderr only", r.stdout, r.stderr)
+	if strings.TrimSpace(r.stdout) != strings.TrimSpace(usage) || r.stderr != "" {
+		t.Errorf("stdout %q stderr %q, want usage on stdout only", r.stdout, r.stderr)
 	}
 }
 

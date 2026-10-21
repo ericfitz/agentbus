@@ -78,6 +78,7 @@ func TestDeleteChannelIgnoresStaleSubscribers(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	syncMono(b)
 	if _, err := b.DeleteChannel("dev", ""); err != nil {
 		t.Fatalf("stale subscriber should not block: %v", err)
 	}
@@ -102,6 +103,7 @@ func TestTickReapsEmptyUnsubscribedChannels(t *testing.T) {
 	// A channel whose only subscriber went stale is reaped once the
 	// session expires, even though its subscription row lingers.
 	b.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	syncMono(b)
 	b.Tick(context.Background())
 	if n := countRows(t, b, "SELECT count(*) FROM channels WHERE name='subscribed'"); n != 0 {
 		t.Fatal("stale-subscribed empty channel not reaped")

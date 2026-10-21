@@ -149,9 +149,13 @@ func (b *Bus) IdentityForHarness(h procs.Ref) (string, error) {
 	if h.Pid <= 0 {
 		return "", nil
 	}
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return "", err
+	}
 	var name string
-	err := b.db.QueryRow("SELECT sender FROM sessions WHERE harness_pid=? AND harness_start=? AND instr(sender,'/')=0 AND heartbeat >= ? ORDER BY registered_at DESC, sender LIMIT 1",
-		h.Pid, h.Start, b.nowMs()-attachmentExpiryMs).Scan(&name)
+	err = b.db.QueryRow("SELECT sender FROM sessions WHERE harness_pid=? AND harness_start=? AND instr(sender,'/')=0 AND heartbeat >= ? ORDER BY registered_at DESC, sender LIMIT 1",
+		h.Pid, h.Start, cutoff).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -165,8 +169,12 @@ func (b *Bus) IdentityForHarness(h procs.Ref) (string, error) {
 // (zero for one registered before ADR 0017 or where the platform cannot
 // tell); live is false when name has no live session.
 func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return procs.Ref{}, false, err
+	}
 	err = b.db.QueryRow("SELECT harness_pid, harness_start FROM sessions WHERE sender=? AND heartbeat >= ?",
-		name, b.nowMs()-attachmentExpiryMs).Scan(&h.Pid, &h.Start)
+		name, cutoff).Scan(&h.Pid, &h.Start)
 	if errors.Is(err, sql.ErrNoRows) {
 		return procs.Ref{}, false, nil
 	}
@@ -179,9 +187,13 @@ func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
 // SessionClient is the MCP clientInfo name recorded on name's live session
 // (ADR 0015): "" when none was recorded or name has no live session.
 func (b *Bus) SessionClient(name string) (string, error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return "", err
+	}
 	var h string
-	err := b.db.QueryRow("SELECT harness FROM sessions WHERE sender=? AND heartbeat >= ?",
-		name, b.nowMs()-attachmentExpiryMs).Scan(&h)
+	err = b.db.QueryRow("SELECT harness FROM sessions WHERE sender=? AND heartbeat >= ?",
+		name, cutoff).Scan(&h)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -216,7 +228,11 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		return Registration{}, internal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec("DELETE FROM sessions WHERE heartbeat < ?", now-attachmentExpiryMs); err != nil {
+	cutoff, err := b.liveCutoff(tx)
+	if err != nil {
+		return Registration{}, err
+	}
+	if _, err := tx.Exec("DELETE FROM sessions WHERE heartbeat < ?", cutoff); err != nil {
 		return Registration{}, internal(err)
 	}
 	gen, err := resetGeneration(tx)
@@ -516,6 +532,10 @@ func (b *Bus) restoreOne(q execQuerier, name string) bool {
 // (ADR 0022). Rows lost to a newer registration are forgotten, so auth fails
 // for them afterwards.
 func (b *Bus) Heartbeat() error {
+	// First, so a wake is recorded before this process's own rows look fresh.
+	if err := b.noteClock(b.db); err != nil {
+		return err
+	}
 	if _, err := b.db.Exec("UPDATE sessions SET heartbeat=? WHERE owner=?", b.nowMs(), b.owner); err != nil {
 		return internal(err)
 	}

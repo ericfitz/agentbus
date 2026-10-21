@@ -86,3 +86,7 @@ hoping the other identity takes it before anyone else does. Prompted by
   `in_progress` stays `in_progress` under its new owner, and the new owner
   renews the lease with `task_claim` as usual.
 - A handoff is an ordinary revision, not a `forced` one.
+
+Amended by ADR 0023: after the machine wakes from sleep, an owner's liveness
+is judged from before the sleep for 30 s, and no lease expiry reclaims a task
+during that time.

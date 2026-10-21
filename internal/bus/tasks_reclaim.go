@@ -7,18 +7,24 @@ import (
 )
 
 // abandoned reports whether t is in_progress with an expired lease or an
-// owner that has no live session. An in_progress task with an empty owner
+// owner that has no live session. During the grace period after a wake
+// nothing is abandoned because of a lease, and the owner's liveness is judged
+// from before the sleep (ADR 0023). An in_progress task with an empty owner
 // (only possible from a corrupt or old-binary write) matches the second
 // condition: an empty sender never has a session row.
-func (b *Bus) abandoned(q queryRower, t Task, now int64) (bool, error) {
+func (b *Bus) abandoned(q dbOrTx, t Task, now int64) (bool, error) {
 	if t.Status != "in_progress" {
 		return false, nil
 	}
-	if t.LeasedUntil != 0 && t.LeasedUntil <= now {
+	cutoff, grace, err := b.livenessCutoff(q, now)
+	if err != nil {
+		return false, err
+	}
+	if !grace && t.LeasedUntil != 0 && t.LeasedUntil <= now {
 		return true, nil
 	}
 	var exists int
-	err := q.QueryRow("SELECT 1 FROM sessions WHERE sender=? AND heartbeat>=?", t.Owner, now-attachmentExpiryMs).Scan(&exists)
+	err = q.QueryRow("SELECT 1 FROM sessions WHERE sender=? AND heartbeat>=?", t.Owner, cutoff).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
@@ -31,15 +37,30 @@ func (b *Bus) abandoned(q queryRower, t Task, now int64) (bool, error) {
 // abandonedSet reports which of ts are abandoned, with the same rule as
 // abandoned but one sessions query for the whole list instead of one per
 // task. The query is skipped when no task needs it (none in_progress, or
-// every in_progress one already has an expired lease).
-func (b *Bus) abandonedSet(q querier, ts []Task, now int64) (map[int64]bool, error) {
+// every in_progress one already has an expired lease). A lease counts only
+// outside the grace period after a wake (ADR 0023).
+func (b *Bus) abandonedSet(q dbOrTx, ts []Task, now int64) (map[int64]bool, error) {
 	out := map[int64]bool{}
+	anyActive := false
+	for _, t := range ts {
+		if t.Status == "in_progress" {
+			anyActive = true
+			break
+		}
+	}
+	if !anyActive {
+		return out, nil
+	}
+	cutoff, grace, err := b.livenessCutoff(q, now)
+	if err != nil {
+		return nil, err
+	}
 	needLive := false
 	for _, t := range ts {
 		if t.Status != "in_progress" {
 			continue
 		}
-		if t.LeasedUntil != 0 && t.LeasedUntil <= now {
+		if !grace && t.LeasedUntil != 0 && t.LeasedUntil <= now {
 			out[t.ID] = true
 			continue
 		}
@@ -48,7 +69,7 @@ func (b *Bus) abandonedSet(q querier, ts []Task, now int64) (map[int64]bool, err
 	if !needLive {
 		return out, nil
 	}
-	rows, err := q.Query("SELECT sender FROM sessions WHERE heartbeat>=?", now-attachmentExpiryMs)
+	rows, err := q.Query("SELECT sender FROM sessions WHERE heartbeat>=?", cutoff)
 	if err != nil {
 		return nil, internal(err)
 	}

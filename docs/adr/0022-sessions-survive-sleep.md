@@ -58,3 +58,6 @@ back.
   generation and forgets the rest.
 - **A dead server.** Nothing restores its rows, so they expire as before
   (ADR 0004).
+- **Sweeps just after a wake.** Amended by ADR 0023: for 30 s after a wake
+  the sweeps keep rows that were live when the machine slept, so a sleeping
+  owner's row and tasks are not removed before its next heartbeat.

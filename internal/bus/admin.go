@@ -30,8 +30,12 @@ type Status struct {
 }
 
 // liveSessions is the shared query behind Discover and StatusReport.
-func (b *Bus) liveSessions(db querier) ([]Session, error) {
-	rows, err := db.Query("SELECT sender, context, registered_at, harness, harness_version FROM sessions WHERE heartbeat >= ? ORDER BY sender", b.nowMs()-attachmentExpiryMs)
+func (b *Bus) liveSessions(db dbOrTx) ([]Session, error) {
+	cutoff, err := b.liveCutoff(db)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query("SELECT sender, context, registered_at, harness, harness_version FROM sessions WHERE heartbeat >= ? ORDER BY sender", cutoff)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -84,8 +88,12 @@ func (b *Bus) listChannels(db *sql.DB) ([]Channel, error) {
 // usable without a registration (unlike Discover, which requires auth and
 // discovery_enabled).
 func (b *Bus) LiveSessionCount() (int, error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE heartbeat >= ?", b.nowMs()-attachmentExpiryMs).Scan(&n)
+	err = b.db.QueryRow("SELECT count(*) FROM sessions WHERE heartbeat >= ?", cutoff).Scan(&n)
 	if err != nil {
 		return 0, internal(err)
 	}
@@ -169,8 +177,12 @@ func (b *Bus) Reset() error {
 // Like LiveSessionCount it needs no registration, so a hook can ask it
 // before the hook's own process has an identity.
 func (b *Bus) SessionLive(name string) (bool, error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return false, err
+	}
 	var n int
-	err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND heartbeat >= ?", name, b.nowMs()-attachmentExpiryMs).Scan(&n)
+	err = b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND heartbeat >= ?", name, cutoff).Scan(&n)
 	if err != nil {
 		return false, internal(err)
 	}

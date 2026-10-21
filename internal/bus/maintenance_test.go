@@ -77,6 +77,7 @@ func TestTombstonePurgeAndStaleSessions(t *testing.T) {
 		t.Fatal("young tombstone purged")
 	}
 	b.Now = func() time.Time { return time.Now().Add(73 * time.Hour) }
+	syncMono(b)
 	b.Tick(context.Background())
 	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=?", *c.MemoryID).Scan(&n); err != nil {
 		t.Fatal(err)

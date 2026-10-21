@@ -265,8 +265,12 @@ func (b *Bus) deleteChannel(name, except string, expiryCutoff int64) (Channel, b
 			return Channel{}, false, nil
 		}
 	} else {
+		cutoff, err := b.liveCutoff(tx)
+		if err != nil {
+			return Channel{}, false, err
+		}
 		rows, err := tx.Query("SELECT s.sender FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=? AND x.heartbeat>=? AND s.sender<>? ORDER BY s.sender",
-			name, b.nowMs()-attachmentExpiryMs, except)
+			name, cutoff, except)
 		if err != nil {
 			return Channel{}, false, internal(err)
 		}
@@ -313,11 +317,15 @@ func (b *Bus) reapEmptyChannels() error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	cutoff, err := b.liveCutoff(tx)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM channels WHERE name NOT IN (`+strings.Repeat("?,", len(names)-1)+`?)
 	  AND name NOT LIKE 'dm/%'
 	  AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.channel=channels.name)
 	  AND NOT EXISTS (SELECT 1 FROM subscriptions s JOIN sessions x ON x.sender=s.sender WHERE s.channel=channels.name AND x.heartbeat>=?)`,
-		append(names, b.nowMs()-attachmentExpiryMs)...); err != nil {
+		append(names, cutoff)...); err != nil {
 		return err
 	}
 	// The tags/ pseudo row (tag subscriptions) has no channel behind it on purpose.

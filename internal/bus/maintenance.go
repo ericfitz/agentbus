@@ -45,13 +45,18 @@ func (b *Bus) Tick(ctx context.Context) {
 	tickCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	now := b.nowMs()
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		b.log.Warn("maintenance tick", "step", "wake grace", "err", err)
+		return
+	}
 	steps := []struct {
 		name string
 		fn   func() error
 	}{
 		{"stale sessions", func() error {
 			return b.loopChunks(tickCtx, func() (int, error) {
-				return b.deleteChunk("sessions", "heartbeat < ?", []any{now - attachmentExpiryMs})
+				return b.deleteChunk("sessions", "heartbeat < ?", []any{cutoff})
 			})
 		}},
 		// After "stale sessions" so an owner whose session just expired

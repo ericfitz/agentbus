@@ -49,6 +49,14 @@ type Bus struct {
 	observer string
 	// Now is the clock; tests override it.
 	Now func() time.Time
+	// Mono is the monotonic clock, as time since an arbitrary start. It stops
+	// while the machine sleeps where Now does not, which is how a wake is
+	// noticed (ADR 0023). Tests override it to advance the two separately.
+	Mono func() time.Duration
+	// clock is the last sample noteClock took, guarded by clockMu: the
+	// heartbeat goroutine and tool calls sample concurrently.
+	clockMu sync.Mutex
+	clock   clockSample
 
 	limits   *limiter
 	embedder *embedder
@@ -202,7 +210,7 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	b := &Bus{db: db, cfg: cfg, log: log, owner: owner, Now: time.Now}
+	b := &Bus{db: db, cfg: cfg, log: log, owner: owner, Now: time.Now, Mono: monotonicSinceStart}
 	b.limits = newLimiter(cfg)
 	if cfg.EmbeddingEndpoint != "" {
 		e, err := newEmbedder(cfg)

@@ -128,27 +128,29 @@ func TestTagKeyOpensThePromptOnlyFromTheRail(t *testing.T) {
 
 // TestRailBlankLineBeforeTagsIsNotSelectable: a blank row separates the
 // last channel from the "tags" label, like the one before "sessions", and
-// the down key steps over it (it is not a row of m.channels).
+// the down key steps over it (it is not a rail position).
 func TestRailBlankLineBeforeTagsIsNotSelectable(t *testing.T) {
 	f := newFixture(t)
 	f.followTags(t, []string{"docs"})
 	lines := strings.Split(ansi.Strip(f.m.renderRails()), "\n")
 	// JoinVertical pads every rail line to the column width, so match trimmed.
-	i := slices.IndexFunc(lines, func(l string) bool { return strings.TrimSpace(l) == "tags" })
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.TrimSpace(l) == headLine("tags") })
 	if i < 2 || strings.TrimSpace(lines[i-1]) != "" || strings.TrimSpace(lines[i-2]) == "" {
 		t.Fatalf("want exactly one blank line before tags:\n%s", strings.Join(lines, "\n"))
 	}
 	f.key("esc")
 	downs := 0
 	for !isTagPane(f.m.selName()) {
-		if downs > len(f.m.channels) {
+		if downs > len(f.m.railPositions()) {
 			t.Fatalf("down never reached the tag set, at %q", f.m.selName())
 		}
 		f.key("down")
 		downs++
 	}
-	if downs != len(f.m.channels)-1 {
-		t.Fatalf("the blank line must take no key: %d downs for %d rail entries", downs, len(f.m.channels))
+	// From the first channel: the other channels, the memories, tasks and
+	// tags headings (three), then the tag set. The blank rows take no key.
+	if want := len(f.m.channels) - 1 + 3; downs != want {
+		t.Fatalf("the blank line must take no key: %d downs, want %d", downs, want)
 	}
 }
 

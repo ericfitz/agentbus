@@ -103,6 +103,7 @@ func (m *Model) jumpTo(hit bus.Message) tea.Cmd {
 	if owner, ok := strings.CutPrefix(hit.Channel, bus.DMPrefix); ok {
 		if i := slices.Index(m.sessionNames(), owner); i >= 0 {
 			m.sessSel = i
+			m.headSel = m.headingFor(secSessions)
 			cmds = append(cmds, m.showSelected())
 		}
 	} else {

@@ -59,12 +59,12 @@ func TestRailLayoutFitsAll(t *testing.T) {
 func TestRailLayoutKeepsFourRowsPerSection(t *testing.T) {
 	// Blanks fit, the floors fit: each long section keeps four rows (two
 	// items plus both arrows) and the spare row goes round-robin.
-	b, blanks, compact := railLayout(railFixedRows+9, [railSections]int{20, 0, 0, 0, 20}, [railSections]bool{})
+	b, blanks, compact := railLayout(railFixed(true)+9, [railSections]int{20, 0, 0, 0, 20}, [railSections]bool{})
 	if b != [railSections]int{5, 0, 0, 0, 4} || !blanks || compact {
 		t.Fatalf("b=%v blanks=%v compact=%v", b, blanks, compact)
 	}
 	// A section that fits in fewer rows takes only what it needs.
-	b, _, _ = railLayout(railFixedRows+10, [railSections]int{20, 0, 0, 2, 20}, [railSections]bool{})
+	b, _, _ = railLayout(railFixed(true)+10, [railSections]int{20, 0, 0, 2, 20}, [railSections]bool{})
 	if b != [railSections]int{4, 0, 0, 2, 4} {
 		t.Fatalf("b=%v", b)
 	}
@@ -94,15 +94,11 @@ func TestRailLayoutCompact(t *testing.T) {
 	if blanks || !compact {
 		t.Fatalf("blanks=%v compact=%v, want compact without blanks", blanks, compact)
 	}
-	sum := 0
-	for i, v := range b {
-		if v < min(n[i], 2) {
-			t.Fatalf("section %d budget %d, want at least %d", i, v, min(n[i], 2))
-		}
-		sum += v
-	}
-	if sum+len(railHeadings) > 16 {
-		t.Fatalf("budgets %v need %d rows, have 16", b, sum+len(railHeadings))
+	// Two-item floors {2,2,2,0,2} fit (8 + 5 headings <= 16); the three spare
+	// rows go round-robin to the sections still short: channels, memories,
+	// tasks. Tags is empty and sessions is already full at its floor.
+	if want := [railSections]int{3, 3, 3, 0, 2}; b != want {
+		t.Fatalf("budgets %v, want %v", b, want)
 	}
 }
 
@@ -150,13 +146,20 @@ func TestRailCompactArrowRow(t *testing.T) {
 	f.key("esc")
 	f.key("home")
 	for range 10 {
-		f.key("down")
+		f.key("down") // the channels section is empty: memories heading, then m00..m08
+	}
+	if got := f.m.selName(); got != "memory/m08" {
+		t.Fatalf("setup: selected %q, want memory/m08", got)
 	}
 	// Too short for four-row floors: compact arrows are forced.
 	f.send(tea.WindowSizeMsg{Width: 80, Height: 12})
+	if _, blanks, compact := f.m.railSpans(); blanks || !compact {
+		t.Fatalf("blanks=%v compact=%v, want compact without blanks", blanks, compact)
+	}
+	// Literal counts: m08 is the only item shown, so 8 are hidden above it
+	// and 10 below.
 	lines := f.railLines()
-	want := "▲" + fmt.Sprint(spans(f)[secMemories].top) + " ▼" + fmt.Sprint(19-spans(f)[secMemories].end) + " more"
-	if !slices.Contains(lines, want) {
+	if want := "▲8 ▼10 more"; !slices.Contains(lines, want) {
 		t.Fatalf("want a combined arrow row %q:\n%s", want, strings.Join(lines, "\n"))
 	}
 }
@@ -187,14 +190,14 @@ func TestRail24LinesShowsEverySection(t *testing.T) {
 	// Items under each non-empty section: the row after its heading is not
 	// another heading or blank.
 	for sec, h := range railHeadings {
-		i := slices.Index(lines, h)
+		i := slices.Index(lines, headLine(h))
 		if i < 0 {
 			t.Fatalf("heading %q missing:\n%s", h, all)
 		}
 		if sec == secTags {
 			continue
 		}
-		if i+1 >= len(lines) || lines[i+1] == "" || slices.Contains(railHeadings[:], lines[i+1]) {
+		if i+1 >= len(lines) || lines[i+1] == "" || slices.ContainsFunc(railHeadings[:], func(h string) bool { return lines[i+1] == headLine(h) }) {
 			t.Fatalf("no item under %q:\n%s", h, all)
 		}
 	}
@@ -202,7 +205,7 @@ func TestRail24LinesShowsEverySection(t *testing.T) {
 	f.key("esc")
 	f.key("home")
 	last := f.m.sessionNames()[len(f.m.sessionNames())-1]
-	for range len(chans) + len(sessions) + 2 {
+	for range len(f.m.railPositions()) + 1 {
 		if f.m.pane() == paneSessions && f.m.sessSel == len(f.m.sessionNames())-1 {
 			break
 		}
@@ -216,6 +219,15 @@ func TestRail24LinesShowsEverySection(t *testing.T) {
 		t.Fatalf("selected last session %q not visible:\n%s", last, strings.Join(lines, "\n"))
 	}
 }
+
+// isArrowRow reports whether the trimmed rail row l is a scroll arrow row
+// ("▼ 3 more"), not a section heading, which starts with the same glyph.
+func isArrowRow(l, arrow string) bool {
+	return strings.HasPrefix(l, arrow) && strings.HasSuffix(l, "more")
+}
+
+// headLine is the rail row of the expanded, unselected section heading h.
+func headLine(h string) string { return markOpen + " " + h }
 
 // railLines is the rendered rail, stripped and trimmed, one entry per row.
 func (f *fixture) railLines() []string {
@@ -231,19 +243,19 @@ func TestRailShowsEverySectionHeading(t *testing.T) {
 	lines := f.railLines()
 	prev := -1
 	for _, h := range railHeadings {
-		i := slices.Index(lines, h)
+		i := slices.Index(lines, headLine(h))
 		if i <= prev {
 			t.Fatalf("want heading %q after the previous one:\n%s", h, strings.Join(lines, "\n"))
 		}
 		prev = i
 	}
 	// An empty tags section is its heading alone, with no hint row.
-	if i := slices.Index(lines, "tags"); lines[i+1] != "" || strings.Contains(strings.Join(lines, "\n"), "press t") {
+	if i := slices.Index(lines, headLine("tags")); lines[i+1] != "" || strings.Contains(strings.Join(lines, "\n"), "press t") {
 		t.Fatalf("want the tags heading with no rows under it:\n%s", strings.Join(lines, "\n"))
 	}
 	f.followTags(t, []string{"docs"})
 	lines = f.railLines()
-	tags := slices.Index(lines, "tags")
+	tags := slices.Index(lines, headLine("tags"))
 	if tags < 0 || !strings.Contains(lines[tags+1], "docs") || lines[tags+2] != "" {
 		t.Fatalf("want the tag set under its heading:\n%s", strings.Join(lines, "\n"))
 	}
@@ -290,7 +302,11 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	f.send(tea.WindowSizeMsg{Width: 100, Height: 20})
 	f.key("esc")
 	f.key("home")
-	for f.m.sel > 0 {
+	f.key("down") // off the channels heading onto the first channel
+	for range len(f.m.channels) {
+		if f.m.sel <= 0 {
+			break
+		}
 		f.key("up")
 	}
 	nc := spans(f)[secChannels]
@@ -298,10 +314,10 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 		t.Fatalf("want the list cut from the top, got %+v", nc)
 	}
 	lines := f.railLines()
-	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▼") }) {
+	if !slices.ContainsFunc(lines, func(l string) bool { return isArrowRow(l, "▼") }) {
 		t.Fatalf("want a down arrow:\n%s", strings.Join(lines, "\n"))
 	}
-	if slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▲") }) {
+	if slices.ContainsFunc(lines, func(l string) bool { return isArrowRow(l, "▲") }) {
 		t.Fatalf("no up arrow at the top:\n%s", strings.Join(lines, "\n"))
 	}
 	// Down from the last shown channel scrolls and selects the next one.
@@ -317,7 +333,7 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 		t.Fatalf("selection not scrolled into view: %+v sel=%d", s, f.m.sel)
 	}
 	lines = f.railLines()
-	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▲") }) {
+	if !slices.ContainsFunc(lines, func(l string) bool { return isArrowRow(l, "▲") }) {
 		t.Fatalf("want an up arrow once scrolled:\n%s", strings.Join(lines, "\n"))
 	}
 	// Down through the rest reaches the last channel, then leaves the section
@@ -328,14 +344,19 @@ func TestRailScrollsLongChannelList(t *testing.T) {
 	if s = spans(f)[secChannels]; s.end != s.n {
 		t.Fatalf("last channel not shown: %+v", s)
 	}
-	if lines = f.railLines(); slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "▼") }) {
+	if lines = f.railLines(); slices.ContainsFunc(lines, func(l string) bool { return isArrowRow(l, "▼") }) {
 		t.Fatalf("no down arrow at the end:\n%s", strings.Join(lines, "\n"))
 	}
 	f.key("down")
-	if f.m.selName() != "dev-notes" || f.m.pane() != paneChannels {
-		t.Fatalf("down from the last channel should enter memories, sel=%q pane=%v", f.m.selName(), f.m.pane())
+	if f.m.headSel != secMemories || f.m.sel != s.n-1 {
+		t.Fatalf("down from the last channel should select the memories heading, headSel=%d sel=%d", f.m.headSel, f.m.sel)
 	}
-	// Up returns to the last channel, still shown.
+	f.key("down")
+	if f.m.selName() != "dev-notes" || f.m.pane() != paneChannels {
+		t.Fatalf("down from the memories heading should enter memories, sel=%q pane=%v", f.m.selName(), f.m.pane())
+	}
+	// Up returns through the heading to the last channel, still shown.
+	f.key("up")
 	f.key("up")
 	if s = spans(f)[secChannels]; f.m.sel != s.n-1 || s.end != s.n {
 		t.Fatalf("sel=%d span=%+v", f.m.sel, s)
@@ -459,8 +480,14 @@ func (f *fixture) selectSession(t *testing.T, name string) {
 	f.key("esc")
 	f.key("home")
 	f.toSessions()
-	for f.m.sessionNames()[f.m.sessSel] != name {
+	for range len(f.m.sessionNames()) {
+		if f.m.pane() == paneSessions && f.m.sessionNames()[f.m.sessSel] == name {
+			break
+		}
 		f.key("down")
+	}
+	if f.m.pane() == paneSessions && f.m.sessionNames()[f.m.sessSel] != name {
+		t.Fatalf("down never reached session %q, at %q", name, f.m.sessionNames()[f.m.sessSel])
 	}
 	if f.m.pane() != paneSessions || f.m.selName() != bus.DMChannel(name) {
 		t.Fatalf("pane=%v sel=%q, want sessions/%s", f.m.pane(), f.m.selName(), bus.DMChannel(name))
@@ -512,66 +539,122 @@ func TestSelectedIdleSessionKeepsName(t *testing.T) {
 	}
 }
 
+// isHeadingRow reports whether the stripped rail row is a section heading
+// (collapsed or expanded). A collapsed heading starts with markSel like a
+// selected item row does, so the two are told apart by the heading name.
+func isHeadingRow(plain string) bool {
+	return slices.ContainsFunc(railHeadings[:], func(h string) bool {
+		return strings.HasPrefix(plain, markSel+" "+h) || strings.HasPrefix(plain, markOpen+" "+h)
+	})
+}
+
 // Every selectable row type (chat, memory, task channel, tag set, live
-// session, idle session), under both icon sets, at the narrowest and a
-// normal rail width, with and without rail focus: the selected row renders
-// as exactly one row of exactly the rail's width, with no text drawn in
-// its background color. Spec 2026-10-21 section 5.
+// session, idle session, and each section heading, expanded and collapsed),
+// under both icon sets, at the narrowest and a normal rail width, with and
+// without rail focus: the selected row renders as exactly one row of exactly
+// the rail's width, with no text drawn in its background color, and reads as
+// its unselected row with markSel in place of the leading space. Spec
+// 2026-10-21 section 5.
 func TestSelectedRowsStayOneLine(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev); setIcons(emojiIcons) })
 	for _, icons := range []string{"emoji", "nerdfont"} {
 		for _, rail := range []int{12, 24} {
-			cfg := testConfig(t)
-			cfg.Icons = icons
-			cfg.TUIRailWidth = rail
-			LoadIcons(cfg, io.Discard)
-			f := newFixtureWith(t, cfg)
-			if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
-				t.Fatal(err)
-			}
-			f.followTags(t, []string{"docs"})
-			f.idleDMPeer(t, cfg) // runs statusCmd: Sam and eric are live sessions
-			f.key("esc")
-			f.key("home")
-			want := map[string]bool{"dev": false, "dev-notes": false, "tasks/work": false, tagPanePrefix + "docs": false, bus.DMChannel(f.sam): false, bus.DMChannel("cli-bot"): false}
-			width := f.m.railWidth()
-			for prevSel := ""; ; prevSel = f.m.selName() {
-				sel := f.m.selName()
-				want[sel] = true
-				for _, focused := range []bool{true, false} {
-					f.m.mode = modeNormal
-					if !focused {
-						f.m.mode = modeInsert
+			for _, collapsed := range [][]int{nil, {secMemories, secTasks}} {
+				name := fmt.Sprintf("%s/%d/collapsed=%v", icons, rail, collapsed)
+				cfg := testConfig(t)
+				cfg.Icons = icons
+				cfg.TUIRailWidth = rail
+				LoadIcons(cfg, io.Discard)
+				f := newFixtureWith(t, cfg)
+				if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+					t.Fatal(err)
+				}
+				f.followTags(t, []string{"docs"})
+				f.idleDMPeer(t, cfg) // runs statusCmd: Sam and eric are live sessions
+				for _, sec := range collapsed {
+					f.m.toggleSection(sec, true)
+				}
+				f.key("esc")
+				f.key("home")
+				width := f.m.railWidth()
+				plainRows := func(m Model) []string {
+					rows := strings.Split(m.renderRails(), "\n")
+					for i := range rows {
+						rows[i] = ansi.Strip(rows[i])
 					}
-					rows := strings.Split(f.m.renderRails(), "\n")
-					var selected []string
-					for _, r := range rows {
-						if strings.HasPrefix(ansi.Strip(r), markSel) {
-							selected = append(selected, r)
+					return rows
+				}
+				wantRows := len(plainRows(f.m))
+				wantNames := map[railPos]bool{}
+				for _, p := range f.m.railPositions() {
+					wantNames[p] = false
+				}
+				for step := 0; ; step++ {
+					if step > len(wantNames)+1 {
+						t.Fatalf("%s: down never stopped", name)
+					}
+					pos := f.m.railPos()
+					sel := f.m.selName()
+					wantNames[pos] = true
+					for _, focused := range []bool{true, false} {
+						f.m.mode = modeNormal
+						if !focused {
+							f.m.mode = modeInsert
+						}
+						raw := strings.Split(f.m.renderRails(), "\n")
+						rows := plainRows(f.m)
+						if len(rows) != wantRows {
+							t.Fatalf("%s/%v/%+v: rail has %d rows selected, %d at the start", name, focused, pos, len(rows), wantRows)
+						}
+						idx := -1
+						n := 0
+						for i, r := range rows {
+							switch {
+							case pos.item < 0 && isHeadingRow(r) && strings.Contains(r, railHeadings[pos.sec]):
+								idx, n = i, n+1
+							case pos.item >= 0 && strings.HasPrefix(r, markSel) && !isHeadingRow(r):
+								idx, n = i, n+1
+							}
+						}
+						if n != 1 {
+							t.Fatalf("%s/%+v/%q/focused=%v: %d selected rows:\n%s", name, pos, sel, focused, n, strings.Join(rows, "\n"))
+						}
+						row := raw[idx]
+						if w := ansi.StringWidth(row); w != width {
+							t.Errorf("%s/%+v/focused=%v: selected row %q is %d wide, rail is %d", name, pos, focused, rows[idx], w, width)
+						}
+						if hidden := invisibleText(row); len(hidden) > 0 {
+							t.Errorf("%s/%+v/focused=%v: %q drawn in its background color: %q", name, pos, focused, hidden, row)
+						}
+						// The same row unselected: select the first heading
+						// (or, when that is the row, none).
+						other := f.m
+						other.headSel = secSessions
+						if pos.item < 0 && pos.sec == secSessions {
+							other.headSel = secChannels
+						}
+						base := plainRows(other)[idx]
+						got := strings.TrimRight(rows[idx], " ")
+						want := strings.TrimRight(base, " ")
+						if pos.item >= 0 {
+							want = markSel + strings.TrimPrefix(want, " ")
+						}
+						if got != want {
+							t.Errorf("%s/%+v/focused=%v: selected row %q, want the unselected row %q with the mark", name, pos, focused, got, want)
 						}
 					}
-					if len(selected) != 1 {
-						t.Fatalf("%s/%d/%q/focused=%v: %d selected rows:\n%s", icons, rail, sel, focused, len(selected), ansi.Strip(strings.Join(rows, "\n")))
-					}
-					row := selected[0]
-					if w := ansi.StringWidth(row); w != width {
-						t.Errorf("%s/%d/%q/focused=%v: selected row %q is %d wide, rail is %d", icons, rail, sel, focused, ansi.Strip(row), w, width)
-					}
-					if hidden := invisibleText(row); len(hidden) > 0 {
-						t.Errorf("%s/%d/%q/focused=%v: %q drawn in its background color: %q", icons, rail, sel, focused, hidden, row)
+					f.m.mode = modeNormal
+					f.key("down")
+					if f.m.railPos() == pos {
+						break
 					}
 				}
-				f.m.mode = modeNormal
-				f.key("down")
-				if f.m.selName() == prevSel || f.m.selName() == sel {
-					break
-				}
-			}
-			for name, seen := range want {
-				if !seen {
-					t.Errorf("%s/%d: never selected %q", icons, rail, name)
+				for p, seen := range wantNames {
+					if !seen {
+						t.Errorf("%s: never selected %+v", name, p)
+					}
 				}
 			}
 		}
@@ -665,7 +748,7 @@ func TestRailSectionsOrder(t *testing.T) {
 	}
 	for i, w := range want {
 		heading := slices.Contains(railHeadings[:], w)
-		if (heading && lines[i] != w) || (!heading && !strings.Contains(lines[i], w)) {
+		if (heading && lines[i] != headLine(w)) || (!heading && !strings.Contains(lines[i], w)) {
 			t.Fatalf("rail line %d = %q, want %q:\n%s", i, lines[i], w, strings.Join(lines, "\n"))
 		}
 		// Item rows show short names: a "/" would be a kind prefix left on.
@@ -678,11 +761,324 @@ func TestRailSectionsOrder(t *testing.T) {
 func TestEmptySectionHeadingOnly(t *testing.T) {
 	f := newFixture(t)
 	lines := f.railLines()
-	i := slices.Index(lines, "tags")
-	if i < 0 || i+2 >= len(lines) || lines[i+1] != "" || lines[i+2] != "sessions" {
+	i := slices.Index(lines, headLine("tags"))
+	if i < 0 || i+2 >= len(lines) || lines[i+1] != "" || lines[i+2] != headLine("sessions") {
 		t.Fatalf("want the tags heading, a blank, then sessions:\n%s", strings.Join(lines, "\n"))
 	}
 	if strings.Contains(strings.Join(lines, "\n"), "press t to create") {
 		t.Fatalf("the tag hint is gone:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// toHeading walks the rail selection onto section sec's heading from the top.
+func (f *fixture) toHeading(t *testing.T, sec int) {
+	t.Helper()
+	f.key("esc")
+	f.key("home")
+	for range len(f.m.railPositions()) {
+		if f.m.headSel == sec {
+			return
+		}
+		f.key("down")
+	}
+	t.Fatalf("down never reached the %s heading, at %+v", railHeadings[sec], f.m.railPos())
+}
+
+// sectionedFixture has an item in every section and live sessions, rail
+// focused with the channels heading selected.
+func sectionedFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	f.followTags(t, []string{"docs"})
+	f.key("esc")
+	f.key("home")
+	return f
+}
+
+func TestRailDownWalksHeadings(t *testing.T) {
+	f := sectionedFixture(t)
+	want := f.m.railPositions()
+	// Five headings, every channel (tags included), every session.
+	if n := 5 + len(f.m.channels) + len(f.m.sessionNames()); len(want) != n {
+		t.Fatalf("railPositions has %d stops, want %d: %v", len(want), n, want)
+	}
+	var got []railPos
+	for range len(want) + 2 {
+		pos := f.m.railPos()
+		if len(got) == 0 || got[len(got)-1] != pos {
+			got = append(got, pos)
+		}
+		shown := f.m.selName()
+		f.key("down")
+		if pos.item < 0 && f.m.railPos().item < 0 && f.m.selName() != shown {
+			t.Fatalf("moving between headings changed the stream: %q -> %q", shown, f.m.selName())
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("down visited %v, want %v", got, want)
+	}
+	if last := got[len(got)-1]; last.sec != secSessions || last.item != len(f.m.sessionNames())-1 || f.m.pane() != paneSessions {
+		t.Fatalf("down ended on %+v pane=%v, want the last session", last, f.m.pane())
+	}
+	// A heading is selected without the stream following it: up from the
+	// first item of a section lands on that heading with the stream unchanged.
+	f.key("esc")
+	f.moveTo(t, "general")
+	f.key("down")
+	if f.m.headSel != secMemories || f.m.selName() != "general" {
+		t.Fatalf("down from the last channel: headSel=%d sel=%q, want the memories heading with the stream on general", f.m.headSel, f.m.selName())
+	}
+}
+
+func TestHeadingLeftCollapsesRightExpands(t *testing.T) {
+	f := sectionedFixture(t)
+	f.toHeading(t, secMemories)
+	f.key("left")
+	if !f.m.collapsed[secMemories] || f.m.headSel != secMemories || f.m.pane() != paneChannels {
+		t.Fatalf("left on a heading collapses it: collapsed=%v headSel=%d pane=%v", f.m.collapsed, f.m.headSel, f.m.pane())
+	}
+	f.key("left")
+	if !f.m.collapsed[secMemories] {
+		t.Fatal("left on a collapsed heading stays collapsed")
+	}
+	f.key("right")
+	if f.m.collapsed[secMemories] {
+		t.Fatalf("right on a heading expands it: %v", f.m.collapsed)
+	}
+	f.key("right")
+	if f.m.collapsed[secMemories] {
+		t.Fatal("right on an expanded heading stays expanded")
+	}
+	// On an item left keeps its stream meaning: it never collapses a section.
+	f.key("down")
+	f.key("left")
+	if f.m.headSel >= 0 || f.m.collapsed != [railSections]bool{} {
+		t.Fatalf("left on an item must not collapse: headSel=%d collapsed=%v", f.m.headSel, f.m.collapsed)
+	}
+}
+
+func TestHeadingEnterToggles(t *testing.T) {
+	f := sectionedFixture(t)
+	f.toHeading(t, secTasks)
+	f.key("enter")
+	if !f.m.collapsed[secTasks] || f.m.mode != modeNormal {
+		t.Fatalf("enter collapses an expanded heading and does not compose: collapsed=%v mode=%v", f.m.collapsed, f.m.mode)
+	}
+	f.key("enter")
+	if f.m.collapsed[secTasks] || f.m.mode != modeNormal {
+		t.Fatalf("enter expands a collapsed heading: collapsed=%v mode=%v", f.m.collapsed, f.m.mode)
+	}
+}
+
+func TestCollapsedHeadingSummary(t *testing.T) {
+	t.Cleanup(func() { setIcons(emojiIcons) })
+	cfg := testConfig(t)
+	cfg.TUIRailWidth = 30
+	f := newFixtureWith(t, cfg)
+	var chans []bus.Channel
+	for i := range 19 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("memory/m%02d", i), Kind: "memory"})
+	}
+	f.setRailChannels(chans...)
+	f.key("esc")
+	if !slices.Contains(f.railLines(), headLine("memories")) {
+		t.Fatalf("expanded heading is %q:\n%s", headLine("memories"), strings.Join(f.railLines(), "\n"))
+	}
+	f.m.toggleSection(secMemories, true)
+	if want := markSel + " memories (19)"; !slices.Contains(f.railLines(), want) {
+		t.Fatalf("want %q:\n%s", want, strings.Join(f.railLines(), "\n"))
+	}
+	for seq := int64(1); seq <= 3; seq++ {
+		f.msgAt("memory/m04", "Sam", seq, 0, "hi")
+	}
+	if want := markSel + " memories (19, 3 unread)"; !slices.Contains(f.railLines(), want) {
+		t.Fatalf("want %q:\n%s", want, strings.Join(f.railLines(), "\n"))
+	}
+	if slices.ContainsFunc(f.railLines(), func(l string) bool { return strings.Contains(l, "m04") }) {
+		t.Fatalf("a collapsed section draws no items:\n%s", strings.Join(f.railLines(), "\n"))
+	}
+	cfg.IconMap = map[string]string{"collapsed": "X"}
+	LoadIcons(cfg, io.Discard)
+	if want := "X memories (19, 3 unread)"; !slices.Contains(f.railLines(), want) {
+		t.Fatalf("icon_map override: want %q:\n%s", want, strings.Join(f.railLines(), "\n"))
+	}
+}
+
+func TestCollapsedSectionRowsGoElsewhere(t *testing.T) {
+	f := newFixture(t)
+	var chans []bus.Channel
+	for i := range 6 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("general/c%d", i), Kind: "ordinary"})
+	}
+	for i := range 19 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("memory/m%02d", i), Kind: "memory"})
+	}
+	for i := range 4 {
+		chans = append(chans, bus.Channel{Name: fmt.Sprintf("tasks/t%d", i), Kind: "memory"})
+	}
+	f.setRailChannels(chans...)
+	for _, n := range []string{"s1", "s2", "s3", "s4", "s5"} {
+		f.m.sessionsSeen[n] = time.Now()
+	}
+	shown := func() (n int) {
+		for sec, s := range spans(f) {
+			if sec != secMemories {
+				n += s.end - s.top
+			}
+		}
+		return n
+	}
+	// At 80x24 the four-row floors fill the rail exactly, so the freed
+	// memory rows come back as the blank separators, not as items.
+	f.send(tea.WindowSizeMsg{Width: 80, Height: 24})
+	before := shown()
+	if _, blanks, _ := f.m.railSpans(); blanks {
+		t.Fatal("setup: 80x24 with every section expanded has no room for blank rows")
+	}
+	f.m.toggleSection(secMemories, true)
+	if _, blanks, _ := f.m.railSpans(); !blanks || shown() < before {
+		t.Fatalf("collapsing memories at 80x24 must restore the blank rows without losing items (was %d, now %d)", before, shown())
+	}
+	// With a few spare rows they become items of the other sections.
+	f.m.toggleSection(secMemories, false)
+	f.send(tea.WindowSizeMsg{Width: 80, Height: 30})
+	before = shown()
+	f.m.toggleSection(secMemories, true)
+	if after := shown(); after <= before {
+		t.Fatalf("collapsing memories at 80x30 shows %d other items, was %d; want more", after, before)
+	}
+	if lines := f.railLines(); len(lines) > f.m.stream.Height+1 {
+		t.Fatalf("rail is %d rows, stream+1 is %d", len(lines), f.m.stream.Height+1)
+	}
+}
+
+func TestCollapseShownSectionMovesToHeading(t *testing.T) {
+	f := newFixture(t)
+	f.setRailChannels(
+		bus.Channel{Name: "general", Kind: "ordinary"},
+		bus.Channel{Name: "memory/tmi", Kind: "memory"},
+	)
+	f.key("esc")
+	f.moveTo(t, "memory/tmi")
+	f.m.toggleSection(secMemories, true)
+	if f.m.headSel != secMemories {
+		t.Fatalf("headSel=%d, want the memories heading", f.m.headSel)
+	}
+	if h := ansi.Strip(f.m.renderHeader()); !strings.Contains(h, "memory/tmi") {
+		t.Fatalf("header %q must still name memory/tmi", h)
+	}
+	if f.m.selName() != "memory/tmi" {
+		t.Fatalf("the stream must keep memory/tmi, got %q", f.m.selName())
+	}
+	// Collapsing a section that does not hold the shown item leaves the
+	// selection alone.
+	f.moveTo(t, "general")
+	f.m.toggleSection(secTasks, true)
+	if f.m.headSel >= 0 {
+		t.Fatalf("headSel=%d after collapsing an unrelated section", f.m.headSel)
+	}
+}
+
+func TestHeadingSelectedSingleHighlight(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := sectionedFixture(t)
+	f.toHeading(t, secMemories)
+	probe := sgrPrefix(lipgloss.NewStyle().Background(f.m.theme.SelBG(true)))
+	if probe == "" {
+		t.Skip("theme selection color has no escape under this profile")
+	}
+	var marked []string
+	for _, l := range strings.Split(f.m.renderRails(), "\n") {
+		if strings.Contains(l, probe) {
+			marked = append(marked, ansi.Strip(l))
+		}
+	}
+	if len(marked) != 1 || !strings.Contains(marked[0], "memories") {
+		t.Fatalf("want exactly the memories heading highlighted, got %q", marked)
+	}
+}
+
+func TestHeadingSurvivesRefresh(t *testing.T) {
+	f := newFixture(t)
+	chans := []bus.Channel{
+		{Name: "general", Kind: "ordinary"},
+		{Name: "memory/tmi", Kind: "memory"},
+		{Name: "tasks/a", Kind: "memory"},
+	}
+	f.setRailChannels(chans...)
+	f.toHeading(t, secTasks)
+	f.key("left")
+	f.toHeading(t, secMemories)
+	f.setRailChannels(append(chans, bus.Channel{Name: "tasks/b", Kind: "memory"})...)
+	if !f.m.collapsed[secTasks] || f.m.headSel != secMemories {
+		t.Fatalf("refresh must keep collapsed=%v and headSel=%d, got collapsed=%v headSel=%d", [railSections]bool{secTasks: true}, secMemories, f.m.collapsed, f.m.headSel)
+	}
+	if want := markSel + " tasks (2)"; !slices.Contains(f.railLines(), want) {
+		t.Fatalf("a new task list must not expand tasks, want %q:\n%s", want, strings.Join(f.railLines(), "\n"))
+	}
+}
+
+func TestHomeSelectsChannelsHeading(t *testing.T) {
+	f := sectionedFixture(t)
+	f.toHeading(t, secTags)
+	f.key("down")
+	f.key("home")
+	if f.m.headSel != secChannels || f.m.pane() != paneChannels {
+		t.Fatalf("home: headSel=%d pane=%v, want the channels heading", f.m.headSel, f.m.pane())
+	}
+	// From a session the stream stays on the session.
+	f.toSessions()
+	shown := f.m.selName()
+	f.key("home")
+	if f.m.headSel != secChannels || f.m.selName() != shown || f.m.sessSel < 0 {
+		t.Fatalf("home from a session: headSel=%d sel=%q (was %q) sessSel=%d", f.m.headSel, f.m.selName(), shown, f.m.sessSel)
+	}
+}
+
+func TestTabReturnsToHeading(t *testing.T) {
+	f := sectionedFixture(t)
+	f.toHeading(t, secMemories)
+	shown := f.m.selName() // the last channel the walk passed
+	f.agentSend(t, shown, "hello")
+	f.receive(t)
+	f.key("tab")
+	if f.m.pane() != paneStream || f.m.headSel != secMemories {
+		t.Fatalf("tab from a heading goes to the stream: pane=%v headSel=%d", f.m.pane(), f.m.headSel)
+	}
+	f.key("tab") // compose
+	f.key("tab") // rail
+	if f.m.pane() != paneChannels || f.m.headSel != secMemories || f.m.selName() != shown {
+		t.Fatalf("tab returns to the heading: pane=%v headSel=%d sel=%q, want %q", f.m.pane(), f.m.headSel, f.m.selName(), shown)
+	}
+	// With a session shown the heading lap must not drop the session.
+	f.toSessions()
+	f.key("up")
+	if f.m.headSel != secSessions {
+		t.Fatalf("setup: headSel=%d", f.m.headSel)
+	}
+	shown = f.m.selName()
+	f.key("tab")
+	f.key("shift+tab")
+	if f.m.pane() != paneChannels || f.m.headSel != secSessions || f.m.selName() != shown || f.m.sessSel < 0 {
+		t.Fatalf("lap from the sessions heading: pane=%v headSel=%d sel=%q (was %q) sessSel=%d", f.m.pane(), f.m.headSel, f.m.selName(), shown, f.m.sessSel)
+	}
+}
+
+func TestCollapseNotPersisted(t *testing.T) {
+	cfg := testConfig(t)
+	f := newFixtureWith(t, cfg)
+	f.toHeading(t, secMemories)
+	f.key("left")
+	if !f.m.collapsed[secMemories] {
+		t.Fatal("setup: memories not collapsed")
+	}
+	m := New(f.c, f.m.theme)
+	if m.collapsed != [railSections]bool{} || m.headSel != -1 {
+		t.Fatalf("a new Model must start expanded with no heading: collapsed=%v headSel=%d", m.collapsed, m.headSel)
 	}
 }

@@ -91,16 +91,23 @@ func (f *fixture) send(msg tea.Msg) {
 	f.run(cmd)
 }
 
-// moveTo presses down or up until the channel pane selects name (channels
-// are grouped by section, so "the next channel" depends on the fixture's mix).
+// moveTo presses down or up until the rail selects the channel name (the
+// rail is one list of headings and items, grouped by section, so "the next
+// channel" depends on the fixture's mix).
 func (f *fixture) moveTo(t *testing.T, name string) {
 	t.Helper()
-	for range len(f.m.channels) {
-		i := slices.IndexFunc(f.m.channels, func(c bus.Channel) bool { return c.Name == name })
+	i := slices.IndexFunc(f.m.channels, func(c bus.Channel) bool { return c.Name == name })
+	if i < 0 {
+		t.Fatalf("no channel %q", name)
+	}
+	target := railPos{channelSection(f.m.channels[i]), i}
+	for range len(f.m.railPositions()) {
+		ps := f.m.railPositions()
+		at, to := slices.Index(ps, f.m.railPos()), slices.Index(ps, target)
 		switch {
-		case f.m.selName() == name:
+		case at == to:
 			return
-		case i < f.m.sel:
+		case to < at:
 			f.key("up")
 		default:
 			f.key("down")
@@ -111,7 +118,7 @@ func (f *fixture) moveTo(t *testing.T, name string) {
 
 // toSessions walks down the rail from the channel list into the sessions.
 func (f *fixture) toSessions() {
-	for range len(f.m.channels) + 1 {
+	for range len(f.m.railPositions()) {
 		if f.m.pane() == paneSessions {
 			return
 		}
@@ -263,9 +270,19 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 		t.Fatalf("shift+tab from messages goes back to channels, got %v", f.m.pane())
 	}
 
-	// Down past the last channel crosses into the sessions; up from the
-	// first session crosses back to the last channel.
+	// Down past the last channel stops on the sessions heading, then enters
+	// the sessions; up from the first session crosses back through the
+	// heading to the last channel.
 	f.m.selectChannel(len(f.m.channels) - 1)
+	for f.m.headSel != secSessions {
+		f.key("down") // the empty tasks and tags headings come first
+		if f.m.headSel < 0 {
+			t.Fatalf("down from the last channel must reach the sessions heading, got sel=%q", f.m.selName())
+		}
+	}
+	if f.m.selName() != f.m.channels[len(f.m.channels)-1].Name {
+		t.Fatalf("a heading must leave the stream on the last channel, got sel=%q", f.m.selName())
+	}
 	f.key("down")
 	if f.m.pane() != paneSessions || f.m.sessSel != 0 {
 		t.Fatalf("down from the last channel focuses the first session, got pane=%v sessSel=%d", f.m.pane(), f.m.sessSel)
@@ -281,8 +298,12 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 		t.Fatalf("shift+tab from compose goes back to the session (skipping the same empty stream), got %v", f.m.pane())
 	}
 	f.key("up")
+	if f.m.headSel != secSessions || f.m.sessSel != 0 {
+		t.Fatalf("up from the first session selects the sessions heading, got headSel=%d sessSel=%d", f.m.headSel, f.m.sessSel)
+	}
+	f.key("up")
 	if f.m.pane() != paneChannels || f.m.sel != len(f.m.channels)-1 {
-		t.Fatalf("up from the first session focuses the last channel, got pane=%v sel=%d", f.m.pane(), f.m.sel)
+		t.Fatalf("up from the sessions heading focuses the last channel, got pane=%v sel=%d", f.m.pane(), f.m.sel)
 	}
 	f.m.selectChannel(0)
 
@@ -590,9 +611,13 @@ func TestSetChannelsKeepsSelectionByNameWhileASessionIsSelected(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd()) // alpha drops out from ahead of zulu in the sort order
+	if f.m.sel < 0 || f.m.channels[f.m.sel].Name != "zulu" {
+		t.Fatalf("must still be on zulu after a channel ahead of it was deleted, got sel=%d", f.m.sel)
+	}
 	f.key("home")
-	if f.m.selName() != "zulu" {
-		t.Fatalf("must still be on zulu after a channel ahead of it was deleted, got %q", f.m.selName())
+	f.key("down")
+	if f.m.sessSel != -1 || f.m.selName() != "dev" {
+		t.Fatalf("down from the channels heading must reach the first channel, got sessSel=%d sel=%q", f.m.sessSel, f.m.selName())
 	}
 }
 

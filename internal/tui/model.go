@@ -69,8 +69,10 @@ type Model struct {
 	channels     []bus.Channel
 	dms          []bus.Channel // DM inboxes (dm/*), shown in the sessions rail instead of the channel list
 	sel          int
-	sessSel      int               // index into sessionNames(); -1 unless the sessions pane is the selection source
-	railTop      [railSections]int // each rail section's scroll offset: its first item drawn (see railWindow)
+	sessSel      int                // index into sessionNames(); -1 unless the sessions pane is the selection source
+	railTop      [railSections]int  // each rail section's scroll offset: its first item drawn (see railWindow)
+	headSel      int                // the selected rail heading (a section index), -1 when an item is selected; the stream keeps showing the last item
+	collapsed    [railSections]bool // sections drawn as their heading alone; lives only in this running TUI
 	msgs         map[string][]bus.Message
 	tasks        map[string][]bus.TaskSummary // task channel name -> its current tree
 	taskOpen     map[int64]bool               // task id -> its detail block is expanded
@@ -138,6 +140,7 @@ func New(c *client, th Theme) Model {
 		mode:         modeNormal, // channel list focused; i or enter opens compose
 		sel:          -1,
 		sessSel:      -1,
+		headSel:      -1,
 		cursor:       -1,
 		cursorLine:   -1,
 		expanded:     map[int64]bool{},
@@ -457,6 +460,10 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	// reply to the cursor message in the stream, compose to the selected
 	// channel otherwise.
 	case "enter":
+		if m.headSel >= 0 && m.pane() == paneChannels {
+			m.toggleSection(m.headSel, !m.collapsed[m.headSel])
+			return nil
+		}
 		if bus.IsTaskChannel(m.selName()) {
 			if m.draft.id != 0 {
 				return m.saveDraft()
@@ -484,42 +491,37 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.replyTo = nil
 		m.cursor = -1
 		m.layout()
-	// up/down move within the focused pane. Channels and sessions are one
-	// rail: down past the last channel enters the sessions, up from the first
-	// session returns to the last channel. right opens the cursor message's
+	// up/down move within the focused pane. The rail is one list of headings
+	// and items (railPositions); the stream moves its cursor. With a heading
+	// selected, left collapses its section and right expands it; otherwise
+	// right opens the cursor message's
 	// body, then its direct replies; left hides its whole subtree, then its
 	// body. In a task list right opens the task's details, then its
 	// children; left hides its children (whole subtree), then its details.
 	case "down":
-		switch m.pane() {
-		case paneStream:
+		if m.pane() == paneStream {
 			return m.moveCursor(1)
-		case paneSessions:
-			return m.selectSession(m.sessSel + 1)
-		default:
-			if m.sel >= len(m.channels)-1 && len(m.sessionNames()) > 0 {
-				return m.selectSession(0)
-			}
-			return m.selectChannel(m.sel + 1)
 		}
+		return m.stepRail(1)
 	case "up":
-		switch m.pane() {
-		case paneStream:
+		if m.pane() == paneStream {
 			return m.moveCursor(-1)
-		case paneSessions:
-			if m.sessSel == 0 && len(m.channels) > 0 {
-				return m.selectChannel(len(m.channels) - 1)
-			}
-			return m.selectSession(m.sessSel - 1)
-		default:
-			return m.selectChannel(m.sel - 1)
 		}
+		return m.stepRail(-1)
 	case "right":
+		if m.headSel >= 0 && m.pane() == paneChannels {
+			m.toggleSection(m.headSel, false)
+			return nil
+		}
 		if bus.IsTaskChannel(m.selName()) {
 			return m.openTask()
 		}
 		m.openCursor()
 	case "left":
+		if m.headSel >= 0 && m.pane() == paneChannels {
+			m.toggleSection(m.headSel, true)
+			return nil
+		}
 		if bus.IsTaskChannel(m.selName()) {
 			m.closeTask()
 		} else {
@@ -565,7 +567,7 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "c":
 		return m.createChannelPrompt()
 	case "s":
-		if m.sessSel >= 0 {
+		if m.sessSel >= 0 || m.headSel >= 0 {
 			return nil
 		}
 		return m.toggleSubscribe()
@@ -588,7 +590,7 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return m.openAssign()
 		}
 	case "d":
-		if m.sessSel >= 0 || m.selected() == nil {
+		if m.sessSel >= 0 || m.headSel >= 0 || m.selected() == nil {
 			return nil
 		}
 		if isTagPane(m.selName()) {
@@ -650,6 +652,8 @@ func (m *Model) pane() pane {
 		return paneCompose
 	case m.cursor >= 0:
 		return paneStream
+	case m.headSel >= 0:
+		return paneChannels // a heading is selected; the sessions pane is a session item
 	case m.sessSel >= 0:
 		return paneSessions
 	default:
@@ -658,8 +662,8 @@ func (m *Model) pane() pane {
 }
 
 // paneKey handles tab (next pane), shift+tab (previous pane), and home
-// (channel list). The cycle is rail, messages, compose, where the rail is
-// whichever of channels or sessions holds the selection; tab never moves
+// (the channels heading). The cycle is rail, messages, compose, where the rail is
+// whichever of a heading, channels or sessions holds the selection; tab never moves
 // between those two (arrows do), so the messages of the highlighted channel
 // or session are always one tab away. Panes with nothing to focus are
 // skipped: the stream when it has no messages, compose when nothing is
@@ -670,10 +674,11 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 	case "shift+tab":
 		d = -1
 	case "home":
+		m.headSel = secChannels
 		return m.focusPane(paneChannels)
 	}
 	rail := paneChannels
-	if m.sessSel >= 0 {
+	if m.sessSel >= 0 && m.headSel < 0 {
 		rail = paneSessions
 	}
 	order := []pane{rail, paneStream, paneCompose}
@@ -718,6 +723,14 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 	}
 	m.mode = modeNormal
 	m.compose.Blur()
+	if m.headSel >= 0 {
+		// A heading holds the selection: the stream keeps showing its item,
+		// so there is nothing to switch to, only the cursor to drop.
+		m.follow = m.stream.AtBottom()
+		m.cursor = -1
+		m.refreshStream()
+		return nil
+	}
 	wasSessions := m.sessSel >= 0
 	switch p {
 	case paneSessions:
@@ -735,6 +748,124 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 		return nil
 	}
 	return m.showSelected()
+}
+
+// railPos is one stop of the rail's up/down order: a section heading
+// (item -1) or an item, which is an index into m.channels for the sections
+// secChannels..secTags and into sessionNames() for secSessions.
+type railPos struct{ sec, item int }
+
+// railPositions is the rail's up/down order: each section's heading, then
+// its items unless the section is collapsed.
+func (m Model) railPositions() []railPos {
+	var ps []railPos
+	for sec := range railSections {
+		ps = append(ps, railPos{sec, -1})
+		if m.collapsed[sec] {
+			continue
+		}
+		if sec == secSessions {
+			for i := range m.sessionNames() {
+				ps = append(ps, railPos{sec, i})
+			}
+			continue
+		}
+		lo, hi := m.sectionRange(sec)
+		for i := lo; i < hi; i++ {
+			ps = append(ps, railPos{sec, i})
+		}
+	}
+	return ps
+}
+
+// railPos is where the rail's selection stands now: the selected heading,
+// else the shown session or channel.
+func (m Model) railPos() railPos {
+	if m.headSel >= 0 {
+		return railPos{m.headSel, -1}
+	}
+	return m.shownPos()
+}
+
+// shownPos is the item the stream shows, whether or not a heading holds the
+// highlight.
+func (m Model) shownPos() railPos {
+	switch {
+	case m.sessSel >= 0:
+		return railPos{secSessions, m.sessSel}
+	case m.sel >= 0 && m.sel < len(m.channels):
+		return railPos{channelSection(m.channels[m.sel]), m.sel}
+	}
+	return railPos{secChannels, -1}
+}
+
+// headingFor is sec when that section is collapsed, else -1: the headSel
+// value after an item in sec is selected. An item of a collapsed section
+// (a search hit, say) leaves its heading selected, never a hidden row.
+func (m Model) headingFor(sec int) int {
+	if m.collapsed[sec] {
+		return sec
+	}
+	return -1
+}
+
+// stepRail moves the rail selection d stops along railPositions, stopping
+// at either end.
+func (m *Model) stepRail(d int) tea.Cmd {
+	ps := m.railPositions()
+	cur := m.railPos()
+	i := slices.Index(ps, cur)
+	if i < 0 {
+		i = slices.Index(ps, railPos{cur.sec, -1})
+	}
+	next := min(max(i+d, 0), len(ps)-1)
+	if i < 0 || next == i {
+		return nil
+	}
+	return m.selectRailPos(ps[next])
+}
+
+// selectRailPos selects p. A heading only takes the highlight: the stream
+// keeps showing the last selected channel or session. An item is selected
+// as selectChannel or selectSession would.
+func (m *Model) selectRailPos(p railPos) tea.Cmd {
+	switch {
+	case p.item < 0:
+		m.headSel = p.sec
+		return nil
+	case p.sec == secSessions:
+		return m.selectSession(p.item)
+	case m.headSel >= 0 && m.sessSel < 0 && m.sel == p.item:
+		m.headSel = -1 // leaving a heading for the channel the stream already shows
+		return nil
+	}
+	return m.selectChannel(p.item)
+}
+
+// toggleSection collapses or expands section sec. Collapsing the section
+// that holds the shown item moves the selection to its heading, since the
+// item's row is gone; the stream keeps showing the item.
+func (m *Model) toggleSection(sec int, collapse bool) {
+	m.collapsed[sec] = collapse
+	if collapse && m.shownPos().sec == sec {
+		m.headSel = sec
+	}
+}
+
+// sectionUnread is the unread total over the items of section sec.
+func (m *Model) sectionUnread(sec int) int {
+	n := 0
+	if sec == secSessions {
+		for _, name := range m.sessionNames() {
+			n += m.unread(bus.DMChannel(name))
+		}
+		return n
+	}
+	lo, hi := m.sectionRange(sec)
+	for _, c := range m.channels[lo:hi] {
+		n += m.unread(c.Name)
+	}
+	return n
 }
 
 // paneLen is the stream pane's cursor bound for ch: the visible task rows
@@ -968,6 +1099,7 @@ func (m *Model) selectChannel(i int) tea.Cmd {
 	}
 	m.sel = min(max(i, 0), len(m.channels)-1)
 	m.sessSel = -1
+	m.headSel = m.headingFor(channelSection(m.channels[m.sel]))
 	return m.showSelected()
 }
 
@@ -984,6 +1116,7 @@ func (m *Model) selectSession(i int) tea.Cmd {
 		return nil
 	}
 	i = min(max(i, 0), len(names)-1)
+	m.headSel = m.headingFor(secSessions)
 	if i == m.sessSel {
 		return nil
 	}

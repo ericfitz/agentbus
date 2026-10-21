@@ -97,8 +97,12 @@ func TestSessionsPaneShowsInboxAndComposesDM(t *testing.T) {
 	}
 	f.key("esc")
 	f.key("home")
+	if f.m.pane() != paneChannels || f.m.headSel != secChannels || f.m.selName() != "dm/Sam" {
+		t.Fatalf("home must select the channels heading and leave the stream on the inbox: pane=%v headSel=%d sel=%q", f.m.pane(), f.m.headSel, f.m.selName())
+	}
+	f.key("down")
 	if f.m.pane() != paneChannels || strings.HasPrefix(f.m.selName(), "dm/") {
-		t.Fatalf("home must return to the channel list: pane=%v sel=%q", f.m.pane(), f.m.selName())
+		t.Fatalf("down from the channels heading must return to the channel list: pane=%v sel=%q", f.m.pane(), f.m.selName())
 	}
 }
 

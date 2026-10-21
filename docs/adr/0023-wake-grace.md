@@ -74,7 +74,10 @@ Option A.
   between the wake and the first sample by a long-running process, up to
   one heartbeat interval (10 s), even with servers running. On Windows, Go's
   own monotonic clock counts sleep, so `Bus.Mono` reads the unbiased
-  interrupt time (`QueryUnbiasedInterruptTime`), which does not. A stored
+  interrupt time (`QueryUnbiasedInterruptTime`), which does not, and falls
+  back to Go's clock (no detection) if that call is unavailable. Wake
+  detection on Windows is covered by a clock unit test only; it has not
+  been tried across a real sleep on Windows hardware. A stored
   pair that is not `0 < slept_at <= woke_at <= now` (for instance after the
   wall clock stepped back) is ignored, and two sleeps less than the expiry
   apart merge into one longer grace.

@@ -8,7 +8,7 @@ import (
 )
 
 func TestWindowsMonoAdvancesAndIsMonotone(t *testing.T) {
-	if unbiasedInterruptTime() == 0 {
+	if _, ok := unbiasedInterruptTime(); !ok || !haveUnbiased {
 		t.Fatal("QueryUnbiasedInterruptTime failed")
 	}
 	prev := monotonicSinceStart()

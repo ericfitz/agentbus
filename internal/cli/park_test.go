@@ -251,3 +251,58 @@ func TestStopHookParkedKeepsOnlyDMs(t *testing.T) {
 		t.Fatalf("parked: want a block naming only the DM: %q", got)
 	}
 }
+
+func TestHookCwdReadsJSONCwd(t *testing.T) {
+	cwd := t.TempDir()
+	in, _ := json.Marshal(map[string]any{"cwd": cwd, "prompt": "hi", "hook_event_name": "UserPromptSubmit"})
+	if got := ReadHookCwd(bytes.NewReader(in), time.Second); got != cwd {
+		t.Fatalf("got %q, want %q", got, cwd)
+	}
+	for _, bad := range []string{"", "not json", `{"cwd":5}`, `{}`} {
+		if got := ReadHookCwd(strings.NewReader(bad), time.Second); got != "" {
+			t.Errorf("input %q: got %q, want empty", bad, got)
+		}
+	}
+}
+
+func TestHookCwdDoesNotHangWithoutInput(t *testing.T) {
+	r, w, err := os.Pipe() // open, never written: like a terminal nobody types into
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+	start := time.Now()
+	if got := ReadHookCwd(r, 100*time.Millisecond); got != "" || time.Since(start) > 2*time.Second {
+		t.Fatalf("got %q after %v; want empty within the timeout", got, time.Since(start))
+	}
+}
+
+func TestStdinHookCwdSkipsTerminal(t *testing.T) {
+	f, err := os.Open(os.DevNull) // a character device, like a terminal
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if got := StdinHookCwd(f); got != "" {
+		t.Fatalf("a character device must be skipped, got %q", got)
+	}
+}
+
+func TestParkedDMNotMatchingFilterStillWakes(t *testing.T) {
+	cfg, b, sam := parkEnv(t)
+	fastWatch(t)
+	if err := b.Park("Pat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "no mention here"}); err != nil {
+		t.Fatal(err)
+	}
+	o := WaitOptions{Config: cfg, As: "Pat", IdentitySource: SourceAs, NoHarnessWatch: true, Filter: "@Pat", Timeout: 2 * time.Second}
+	var out bytes.Buffer
+	if err := Wait(context.Background(), o, &out); err != nil {
+		t.Fatalf("a DM must wake a parked wait even when it does not match -filter: %v", err)
+	}
+	if !strings.Contains(out.String(), `"channel":"dm/Pat"`) {
+		t.Fatalf("want the DM: %q", out.String())
+	}
+}

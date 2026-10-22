@@ -337,7 +337,9 @@ func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
 					var a struct {
 						As string `json:"as"`
 					}
-					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" {
+					// A subagent identity ("parent/child") is never parked (only top-level
+					// identities can be), so skip it without a bus call or a warning.
+					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" && !strings.Contains(a.As, "/") {
 						if err := b.Unpark(a.As); err != nil && log != nil {
 							log.Warn("unpark on tool call", "tool", p.Name, "as", a.As, "err", err)
 						}

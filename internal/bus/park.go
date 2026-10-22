@@ -1,28 +1,53 @@
 package bus
 
 import (
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Park state (ADR 0025 decision 3) is the file <data dir>/park/<identity>,
-// so the schema does not change. Existence is the whole state. Only
+// Park state (ADR 0025 decision 3) is the file <data dir>/park/<encoded
+// identity>, so the schema does not change. Existence is the whole state. Only
 // top-level identities can be parked.
 
 func (b *Bus) parkDir() string { return filepath.Join(b.cfg.DataDirectory, "park") }
 
-// parkPath is the park file for as, or an error when as cannot be one:
-// it must pass NameRule (so no '/'), and "." and ".." are not file names.
+// parkEnc is lowercase unpadded base32 (a-z, 2-7): it is safe on every file
+// system, including case-insensitive ones and Windows, and a 128-byte name
+// encodes to 205 characters, under the 255 limit.
+var parkEnc = base32.StdEncoding.WithPadding(base32.NoPadding)
+
+// parkTempPrefix starts every temp file; '.' and '-' never occur in an
+// encoded name, so a temp file cannot collide with one.
+const parkTempPrefix = ".tmp-"
+
+// parkFileName is the file name for identity as: the only place identities
+// are encoded. It is injective, so no two identities share a file.
+func parkFileName(as string) string {
+	return strings.ToLower(parkEnc.EncodeToString([]byte(as)))
+}
+
+// parkIdentityFromFile is the inverse of parkFileName; ok is false for a
+// name the encoding cannot produce (a temp file, a stray file).
+func parkIdentityFromFile(name string) (as string, ok bool) {
+	raw, err := parkEnc.DecodeString(strings.ToUpper(name))
+	if err != nil || parkFileName(string(raw)) != name {
+		return "", false
+	}
+	return string(raw), true
+}
+
+// parkPath is the park file for as, or an error when as cannot be one: it
+// must pass NameRule (so no '/'). The identity is encoded (parkFileName), so
+// the path is always a plain file name directly inside park/.
 func (b *Bus) parkPath(as string) (string, error) {
 	if err := NameRule(as); err != nil {
 		return "", errf("validation", false, "name %v", err)
 	}
-	if as == "." || as == ".." {
-		return "", errf("validation", false, "name %q cannot be parked", as)
-	}
-	return filepath.Join(b.parkDir(), as), nil
+	return filepath.Join(b.parkDir(), parkFileName(as)), nil
 }
 
 // Park parks as: only its direct messages wake it. It writes the file
@@ -36,7 +61,7 @@ func (b *Bus) Park(as string) error {
 	if err := os.MkdirAll(b.parkDir(), 0o700); err != nil {
 		return internal(err)
 	}
-	f, err := os.CreateTemp(b.parkDir(), ".tmp-")
+	f, err := os.CreateTemp(b.parkDir(), parkTempPrefix)
 	if err != nil {
 		return internal(err)
 	}

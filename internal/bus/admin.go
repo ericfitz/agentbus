@@ -170,10 +170,15 @@ func (b *Bus) Reset() error {
 	if err := tx.Commit(); err != nil {
 		return internal(err)
 	}
-	if err := b.clearParks(); err != nil {
+	if err := b.ensureDefaults(); err != nil {
 		return err
 	}
-	return b.ensureDefaults()
+	// Park files are advisory state: failing to remove them must not fail a
+	// reset that already wiped the database.
+	if err := b.clearParks(); err != nil {
+		b.log.Warn("reset: could not clear park files", "err", err)
+	}
+	return nil
 }
 
 // SessionLive reports whether name has a session with a current heartbeat.

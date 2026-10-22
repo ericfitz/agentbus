@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"time"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -71,4 +74,36 @@ func parkedMatch(b *bus.Bus, as string, match func(bus.Message) bool) func(bus.M
 		}
 		return match == nil || match(m)
 	}
+}
+
+// hookInputWait bounds how long a hook waits for its stdin JSON.
+const hookInputWait = 500 * time.Millisecond
+
+// ReadHookCwd returns the "cwd" of a hook's stdin JSON (the same field
+// StopHook reads), or "" when the input is missing, odd, or does not arrive
+// within wait. The read runs in a goroutine, so a reader that never delivers
+// cannot hang the caller.
+func ReadHookCwd(r io.Reader, wait time.Duration) string {
+	got := make(chan string, 1)
+	go func() {
+		var hi stopHookInput
+		_ = json.NewDecoder(r).Decode(&hi)
+		got <- hi.Cwd
+	}()
+	select {
+	case cwd := <-got:
+		return cwd
+	case <-time.After(wait):
+		return ""
+	}
+}
+
+// StdinHookCwd is ReadHookCwd for a process's stdin, except that a terminal
+// (character device) is never read: run by hand, the command must not wait
+// for typing.
+func StdinHookCwd(in *os.File) string {
+	if fi, err := in.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 {
+		return ""
+	}
+	return ReadHookCwd(in, hookInputWait)
 }

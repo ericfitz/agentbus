@@ -1,12 +1,16 @@
 package mcpserver
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"testing"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestParkEndedByToolCallsExceptReceive(t *testing.T) {
@@ -65,4 +69,30 @@ func TestParkEndedByToolCallsExceptReceive(t *testing.T) {
 	// A call without `as`, or with a name that cannot be parked, is harmless.
 	call(t, cs, "discover", map[string]any{})
 	call(t, cs, "discover", map[string]any{"as": "a/b"})
+}
+
+func TestUnparkMiddlewareSkipsSubagentNamesSilently(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	b, err := bus.Open(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	reached := false
+	h := unparkOnToolCall(b, log)(func(context.Context, string, mcp.Request) (mcp.Result, error) {
+		reached = true
+		return nil, nil
+	})
+	req := &mcp.ServerRequest[*mcp.CallToolParamsRaw]{Params: &mcp.CallToolParamsRaw{
+		Name: "send", Arguments: json.RawMessage(`{"as":"Sam/worker"}`),
+	}}
+	if _, err := h(context.Background(), "tools/call", req); err != nil || !reached {
+		t.Fatalf("the call must proceed: reached=%v err=%v", reached, err)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("a subagent call must log nothing, got %q", logs.String())
+	}
 }

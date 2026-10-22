@@ -249,7 +249,20 @@ func run(cmd string, args []string) int {
 		if hook {
 			fail = 0
 		}
-		if err := parseFlags(fs, args); err != nil {
+		var perr error
+		if hook {
+			// -h still prints usage; a stray argument or bad flag prints nothing.
+			fs.SetOutput(io.Discard)
+			if perr = fs.Parse(args); perr == nil && fs.NArg() > 0 {
+				perr = errUnexpectedArg
+			} else if errors.Is(perr, flag.ErrHelp) {
+				fs.SetOutput(os.Stderr)
+				fs.Usage()
+			}
+		} else {
+			perr = parseFlags(fs, args)
+		}
+		if err := perr; err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return 0
 			}
@@ -270,6 +283,11 @@ func run(cmd string, args []string) int {
 			return fail
 		}
 		if hook {
+			// As the UserPromptSubmit hook, resolve from the hook's cwd like
+			// the stop hook does (ADR 0025 "Unpark hook").
+			if c := cli.StdinHookCwd(os.Stdin); c != "" {
+				cwd = c
+			}
 			cli.Unpark(cfg, *as, cwd, io.Discard)
 			return 0
 		}

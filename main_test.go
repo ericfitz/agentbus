@@ -173,7 +173,7 @@ func TestExtraArgumentsRejected(t *testing.T) {
 		{[]string{"stop-hook", "extra"}, 0, `agentbus stop-hook: unexpected argument "extra"`},
 		{[]string{"subagent-hook", "extra"}, 0, `agentbus subagent-hook: unexpected argument "extra"`},
 		{[]string{"park", "-as", "Pat", "extra"}, 2, `agentbus park: unexpected argument "extra"`},
-		{[]string{"unpark", "-as", "Pat", "extra"}, 0, `agentbus unpark: unexpected argument "extra"`},
+		{[]string{"unpark", "-as", "Pat", "extra"}, 0, ``}, // the hook prints nothing at all
 		{[]string{"version", "extra"}, 2, `agentbus version: unexpected argument "extra"`},
 		{[]string{"--version", "extra"}, 2, `agentbus --version: unexpected argument "extra"`},
 		{[]string{"help", "status"}, 2, `agentbus help: unexpected argument "status"`},
@@ -198,7 +198,7 @@ func TestExtraArgumentsRejected(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if code != c.code || so.Len() != 0 || !strings.Contains(se.String(), c.want) {
+			if code != c.code || so.Len() != 0 || (c.want == "" && se.Len() != 0) || !strings.Contains(se.String(), c.want) {
 				t.Errorf("exit %d stdout %q stderr %q; want exit %d, %q on stderr only", code, so.String(), se.String(), c.code, c.want)
 			}
 		})

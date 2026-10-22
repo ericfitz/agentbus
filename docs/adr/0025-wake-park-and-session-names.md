@@ -69,7 +69,7 @@ calls and may be revisited.
 - **`agentbus watch` stays** as a command, but nothing recommends it any more.
   Removing it would break scripts, and the next release already breaks
   scripts that pass stray arguments (8d61684).
-- **Park state is a file**, `<data dir>/park/<identity>`, so the database
+- **Park state is a file**, `<data dir>/park/<encoded identity>` (lowercase unpadded base32 of the name, so any identity is a safe, collision-free file name on every OS), so the database
   schema does not change. Only top-level identities can be parked: a name
   with `/` is rejected. `park` on a parked identity and `unpark` on an
   unparked one are no-ops that succeed. `register` clears the file, so a

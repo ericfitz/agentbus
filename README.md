@@ -173,7 +173,7 @@ follow, with a worked example.
   `agentbus unpark`), `register`, any MCP tool call except `receive`, and
   `agentbus unpark` end the park. `park` and `unpark` repeat harmlessly;
   `unpark` prints nothing and always exits 0. `agentbus reset` clears every
-  park. The state is the file `park/<name>` in the data directory.
+  park. The state is the file `park/<encoded name>` in the data directory (the name is base32-encoded so every identity is a safe file name).
 - `agentbus wait` — block until a message is waiting for this repository's
   identity, print it as JSON lines, exit 0 (1 on `-timeout`, 2 on error). It
   never acks, so the next `receive` returns the same batch. A batch

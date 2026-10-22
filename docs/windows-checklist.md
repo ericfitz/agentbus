@@ -61,6 +61,7 @@ machine or a cloud Windows VM with nested virtualization.
       installs; `scoop update agentbus` after stopping sessions upgrades.
 - [ ] Before pushing new manifests to winget-pkgs, from an elevated
       terminal once: `winget settings --enable LocalManifestFiles`; then
+      from a terminal that is not elevated (accept its one UAC prompt)
       `powershell -ExecutionPolicy Bypass -File release\test-winget.ps1 -ManifestDir release\winget\<version>`
       passes (validate, install for x64 and arm64, bare run exits 0,
       version, Defender scan, uninstall with nothing left).

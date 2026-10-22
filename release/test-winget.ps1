@@ -7,8 +7,11 @@
 # it with Microsoft Defender after a signature update, uninstalls, and checks
 # nothing is left behind. Needs Windows, winget with local manifests enabled
 # (once, from an elevated terminal: winget settings --enable LocalManifestFiles)
-# and Microsoft Defender. Run from the repository root in an elevated
-# terminal (MpCmdRun needs one):
+# and Microsoft Defender. Run from the repository root in a terminal that is
+# NOT elevated: winget refuses to uninstall a user-scope package from an
+# elevated one. MpCmdRun needs elevation, so the signature update and the
+# scans run at the end in one elevated child process (one UAC prompt), on
+# copies of each installed agentbus.exe taken before uninstalling:
 #   powershell -ExecutionPolicy Bypass -File release\test-winget.ps1 -ManifestDir release\winget\1.16.0
 #   ... -Architecture x64          one architecture (default: x64 and arm64)
 #   ... -SumsFile <path>           use a local SHA256SUMS instead of the release's
@@ -142,6 +145,92 @@ function Get-DefenderVerdict([int]$Code, [string]$Out) {
 # malware scan of the downloaded archive failed or found something.
 function Test-ArchiveScanFailure([string]$Out) { return ($Out -match '(?i)malware|virus|threat') }
 
+# Test-Elevated reports whether this process runs as an elevated
+# administrator.
+function Test-Elevated {
+    if (-not $IsWin) { return $false }
+    $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# DefenderChild is the script the elevated child runs. Its one argument is a
+# JSON file naming MpCmdRun (Mp), the files to scan (Files) and where to
+# write the results (Out): one record per command with Kind (update or
+# scan), File, Code and Out.
+$DefenderChild = @'
+$ErrorActionPreference = 'Continue'
+$in = [IO.File]::ReadAllText($args[0]) | ConvertFrom-Json
+$res = @()
+function Run([string]$Kind, [string]$File, [string[]]$A) {
+    $global:LASTEXITCODE = 0
+    $o = @(& $in.Mp @A 2>&1 | ForEach-Object { "$_" })
+    $script:res += [pscustomobject]@{ Kind = $Kind; File = $File; Code = $LASTEXITCODE; Out = ($o -join "`n") }
+}
+Run 'update' '' @('-SignatureUpdate')
+foreach ($f in @($in.Files)) { Run 'scan' $f @('-Scan', '-ScanType', '3', '-File', $f, '-DisableRemediation') }
+[IO.File]::WriteAllText($in.Out, (ConvertTo-Json -InputObject @($res) -Depth 3))
+'@
+
+# New-DefenderJob writes the child script and its input under $Dir and
+# returns the paths: Script, Input, Out.
+function New-DefenderJob([string]$Dir, [string]$Mp, [string[]]$Files) {
+    $job = @{ Script = (Join-Path $Dir 'defender-child.ps1'); Input = (Join-Path $Dir 'defender-in.json'); Out = (Join-Path $Dir 'defender-out.json') }
+    [IO.File]::WriteAllText($job.Script, $DefenderChild)
+    [IO.File]::WriteAllText($job.Input, (ConvertTo-Json -InputObject @{ Mp = $Mp; Files = @($Files); Out = $job.Out }))
+    return $job
+}
+
+# Read-DefenderResults reads the child's results, or $null when it wrote
+# none (UAC declined, child failed).
+function Read-DefenderResults([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    # Windows PowerShell 5.1's ConvertFrom-Json emits a JSON array as one
+    # object; foreach unrolls it on both hosts.
+    $j = [IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    return , @(foreach ($i in $j) { $i })
+}
+
+# Get-DefenderFindings turns the child's records into checks (Name, Ok,
+# Verdict, Record); Names maps each scanned file to its architecture label.
+# A file in Names with no scan record is a failed check.
+function Get-DefenderFindings($Results, [hashtable]$Names) {
+    $out = @()
+    foreach ($r in $Results) {
+        if ($r.Kind -eq 'update') {
+            $out += [pscustomobject]@{ Name = "Defender -SignatureUpdate (exit $(Format-Code $r.Code))"; Ok = ($r.Code -eq 0); Verdict = ''; Record = $r }
+            continue
+        }
+        $label = if ($Names.ContainsKey($r.File)) { $Names[$r.File] } else { $r.File }
+        $verdict = Get-DefenderVerdict $r.Code $r.Out
+        $out += [pscustomobject]@{ Name = "$label Defender scan: $verdict (exit $(Format-Code $r.Code))"; Ok = ($verdict -eq 'clean'); Verdict = $verdict; Record = $r }
+    }
+    $scanned = @($Results | Where-Object { $_.Kind -eq 'scan' } | ForEach-Object { $_.File })
+    foreach ($f in $Names.Keys) { if ($scanned -notcontains $f) { $out += [pscustomobject]@{ Name = "$($Names[$f]) Defender scan ran"; Ok = $false; Verdict = 'missing'; Record = $null } } }
+    return , $out
+}
+
+function Assert-DefenderResults($Results, [hashtable]$Names) {
+    foreach ($f in (Get-DefenderFindings $Results $Names)) {
+        Assert $f.Name $f.Ok
+        if ($null -ne $f.Record) { Show-Failure $f.Record }
+        if ($f.Verdict -eq 'threat') { $script:Threat = $true }
+    }
+}
+
+# Invoke-DefenderElevated runs the child elevated (one UAC prompt) and
+# asserts on its results.
+function Invoke-DefenderElevated([string]$Dir, [string]$Mp, [hashtable]$Names) {
+    $job = New-DefenderJob $Dir $Mp @($Names.Keys)
+    $hostExe = (Get-Process -Id $PID).Path
+    try {
+        $p = Start-Process -FilePath $hostExe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$($job.Script)`"", "`"$($job.Input)`"")
+        $null = $p
+    } catch { Assert "Defender steps run elevated ($($_.Exception.Message); accept the UAC prompt)" $false; return }
+    $res = Read-DefenderResults $job.Out
+    if ($null -eq $res) { Assert 'Defender child wrote its results' $false; return }
+    Assert-DefenderResults $res $Names
+}
+
 # Find-MpCmdRun returns the newest Defender platform's MpCmdRun.exe, else
 # the one under Program Files, else $null.
 function Find-MpCmdRun {
@@ -232,6 +321,7 @@ function Invoke-Uninstall([string]$Dir) {
 
 function Test-Preconditions {
     if (-not $IsWin) { throw 'test-winget: the install cases need Windows; run -SelfTest elsewhere' }
+    if (Test-Elevated) { throw 'test-winget: run from a terminal that is not elevated: winget cannot uninstall a user-scope package from an elevated one. The Defender steps ask for elevation themselves (one UAC prompt).' }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'test-winget: winget is not on PATH; install App Installer from the Microsoft Store and open a new terminal' }
     if ([string]::IsNullOrEmpty($ManifestDir)) { throw 'test-winget: -ManifestDir is required (for example -ManifestDir release\winget\1.16.0)' }
     if (-not (Test-Path -LiteralPath $ManifestDir -PathType Container)) { throw "test-winget: -ManifestDir $ManifestDir is not a directory" }
@@ -255,13 +345,12 @@ function Get-SumsLines([string]$Version) {
     return @("$text" -split "`r?`n")
 }
 
-function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]$MpCmdRun) {
+function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]$ScanDir, [hashtable]$ScanNames) {
     Write-Host "==> $Arch"
     $before = @(Get-PackageDirs $env:LOCALAPPDATA)
     $installed = $false
     try {
-        # --scope user: an elevated winget must still install under
-        # LocalAppData, where the checks below look.
+        # --scope user: the checks below look under LocalAppData.
         $r = Invoke-Winget @('install', '--manifest', $Dir, '--architecture', $Arch, '--scope', 'user', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
         Assert "$Arch winget install --manifest (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
         if ($r.Code -ne 0) {
@@ -292,11 +381,9 @@ function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]
         }
         $v = Invoke-Exe $exe @('version')
         Assert "$Arch agentbus version prints $Version (got '$($v.Out.Trim())')" (($v.Code -eq 0) -and ($v.Out.Trim() -eq $Version))
-        $scan = Invoke-Exe $MpCmdRun @('-Scan', '-ScanType', '3', '-File', $exe, '-DisableRemediation')
-        $verdict = Get-DefenderVerdict $scan.Code $scan.Out
-        Assert "$Arch Defender scan: $verdict (exit $(Format-Code $scan.Code))" ($verdict -eq 'clean')
-        Show-Failure $scan
-        if ($verdict -eq 'threat') { $script:Threat = $true }
+        $copy = Join-Path $ScanDir "agentbus-$Arch.exe"
+        Copy-Item -LiteralPath $exe -Destination $copy
+        $ScanNames[$copy] = $Arch
     } finally {
         if ($installed) { Invoke-Uninstall $Dir }
         $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
@@ -316,18 +403,22 @@ function Invoke-Run {
     $r = Invoke-Winget @('validate', '--manifest', $dir, '--disable-interactivity')
     Assert "winget validate --manifest (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
     if ($r.Code -ne 0) { Show-Failure $r; return }
-    $u = Invoke-Exe $mp @('-SignatureUpdate')
-    Assert "Defender -SignatureUpdate (exit $(Format-Code $u.Code))" ($u.Code -eq 0)
-    if ($u.Code -ne 0) { Show-Failure $u; Write-Host '    (the scans below use the signatures already installed; an elevated terminal may be needed to update them)' }
-    foreach ($a in $Architecture) {
-        Invoke-ArchCase $a $dir $check.Version $mp
-        # A later install would land on the leftover one and test nothing.
-        if ($script:Leftover) { Write-Host "stopping: $a left $PackageId installed; fix that, then rerun with -Cleanup -ManifestDir $ManifestDir"; break }
-    }
+    $scanDir = Join-Path ([IO.Path]::GetTempPath()) ('agentbus-wscan-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $scanDir
+    $names = @{}
+    try {
+        foreach ($a in $Architecture) {
+            Invoke-ArchCase $a $dir $check.Version $scanDir $names
+            # A later install would land on the leftover one and test nothing.
+            if ($script:Leftover) { Write-Host "stopping: $a left $PackageId installed; fix that, then rerun with -Cleanup -ManifestDir $ManifestDir"; break }
+        }
+        if ($names.Count -gt 0) { Write-Host '==> Defender (elevated; accept the UAC prompt)'; Invoke-DefenderElevated $scanDir $mp $names }
+    } finally { Remove-Item -LiteralPath $scanDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Invoke-CleanupRun {
     if (-not $IsWin) { throw 'test-winget: -Cleanup needs Windows' }
+    if (Test-Elevated) { throw 'test-winget: run -Cleanup from a terminal that is not elevated: winget cannot uninstall a user-scope package from an elevated one' }
     if ([string]::IsNullOrEmpty($ManifestDir)) { throw 'test-winget: -Cleanup needs -ManifestDir, the manifests the failed run installed from' }
     $state = Get-InstalledState
     if ($state.Count -eq 0) { Write-Host "nothing to clean up: $PackageId is not installed"; return }
@@ -428,6 +519,29 @@ function Invoke-SelfTest {
             Assert "self: Defender exit $($v[0]) with '$(($v[1] -split "`n")[-1])' is $($v[2])" ((Get-DefenderVerdict $v[0] $v[1]) -eq $v[2])
         }
 
+        $pw = (Get-Process -Id $PID).Path
+        $mpDir = Join-Path $work 'mp'
+        $null = New-Item -ItemType Directory -Path $mpDir
+        $fakeMp = Join-Path $mpDir 'FakeMpCmdRun.ps1'
+        [IO.File]::WriteAllText($fakeMp, @"
+if (`$args -contains '-SignatureUpdate') { 'Signature update finished.'; exit 0 }
+`$f = `$args[[array]::IndexOf(`$args, '-File') + 1]
+if (`$f -like '*threat*') { "Scanning `$f found 1 threats."; exit 2 }
+"Scanning `$f found no threats."; exit 0
+"@)
+        $cleanF = Join-Path $mpDir 'agentbus-x64.exe'; $badF = Join-Path $mpDir 'agentbus-threat.exe'; $lostF = Join-Path $mpDir 'agentbus-lost.exe'
+        $job = New-DefenderJob $mpDir $fakeMp @($cleanF, $badF)
+        $r = Invoke-Exe $pw @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $job.Script, $job.Input)
+        $res = Read-DefenderResults $job.Out
+        Assert 'self: Defender child runs and writes one update and two scan records' (($r.Code -eq 0) -and ($null -ne $res) -and (@($res).Count -eq 3) -and ($res[0].Kind -eq 'update') -and ($res[2].File -eq $badF))
+        $fs = Get-DefenderFindings $res @{ $cleanF = 'x64'; $badF = 'arm64'; $lostF = 'lost' }
+        $byName = @{}; foreach ($f in $fs) { $byName[$f.Name] = $f }
+        Assert 'self: Defender findings pass the update and the clean scan' ($byName.ContainsKey('Defender -SignatureUpdate (exit 0)') -and $byName['Defender -SignatureUpdate (exit 0)'].Ok -and $byName.ContainsKey('x64 Defender scan: clean (exit 0)') -and $byName['x64 Defender scan: clean (exit 0)'].Ok)
+        Assert 'self: Defender findings fail the threat as a threat' ($byName.ContainsKey('arm64 Defender scan: threat (exit 2)') -and -not $byName['arm64 Defender scan: threat (exit 2)'].Ok)
+        Assert 'self: Defender findings fail a file that was never scanned' ($byName.ContainsKey('lost Defender scan ran') -and -not $byName['lost Defender scan ran'].Ok)
+        Assert 'self: no Defender results file reads null' ($null -eq (Read-DefenderResults (Join-Path $mpDir 'absent.json')))
+        Assert 'self: Test-Elevated is false outside Windows or unelevated CI' ((-not $IsWin) -or ((Test-Elevated) -is [bool]))
+
         $lad = Join-Path $work 'LocalAppData'
         $pkgs = Join-Path $lad 'Microsoft\WinGet\Packages'
         $null = New-Item -ItemType Directory -Path (Join-Path $pkgs 'Other.Package_Microsoft.Winget.Source_8wekyb3d8bbwe')
@@ -443,7 +557,6 @@ function Invoke-SelfTest {
         $left = Get-Leftovers $lad "C:\bin;$pd"
         Assert 'self: leftovers name the alias, the folder and the PATH entry' (($left.Count -eq 3) -and ($left -contains (Get-LinksExe $lad)) -and ($left -contains $pd) -and ($left -contains "user PATH entry $pd"))
 
-        $pw = (Get-Process -Id $PID).Path
         $r = Invoke-Exe $pw @('-NoProfile', '-Command', 'exit 2')
         Assert 'self: Invoke-Exe reports exit 2' ($r.Code -eq 2)
         $r = Invoke-Exe $pw @('-NoProfile', '-Command', '[Console]::Error.WriteLine(''to-stderr''); exit 3')

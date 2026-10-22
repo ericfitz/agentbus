@@ -8,11 +8,12 @@ top-level name, is refused with a validation error that says to pass
 old name as before). Registering the same name again is unchanged (ADR 0025
 decision 8).
 
-## Every running TUI's name is protected
+## A running TUI's name is refused
 
 MCP `register` refuses any name a running `agentbus tui` holds, not only the
-configured `tui_name`, so a TUI started with `-as` or another `-config` is
-protected too (ADR 0025 decision 9).
+configured `tui_name`, with an error instead of silently registering the
+agent as `<name>2` beside the human (ADR 0025 decision 9). While no TUI is
+running, only the configured `tui_name` is reserved.
 
 ## Breaking changes
 

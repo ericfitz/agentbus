@@ -73,9 +73,12 @@ calls and may be revisited.
    Rejected: documenting only, and a time-based grace window.
 9. **The register guard covers every live TUI** (Eric, 2026-10-22, after
    1.17.0). Widens decision 5: `register` over MCP also refuses any name
-   currently held by a live session whose context is `tui`, so a TUI
-   started with `-as` or another `-config` is protected. The `tui_name`
-   check stays for when no TUI is running.
+   currently held by a live session whose context is `tui`. Before this, an
+   agent asking for a running TUI's name was silently suffixed (`<name>2`)
+   rather than taking it; now it gets an explicit error. The `tui_name`
+   check stays the only protection while no TUI is running: an agent that
+   takes a name before `agentbus tui -as <name>` starts still pushes the
+   TUI to `<name>2`.
 
 ## Rulings (drafted by Claude)
 

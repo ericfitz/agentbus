@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Park state (ADR 0025 decision 3) is the file <data dir>/park/<encoded
@@ -30,16 +31,6 @@ func parkFileName(as string) string {
 	return strings.ToLower(parkEnc.EncodeToString([]byte(as)))
 }
 
-// parkIdentityFromFile is the inverse of parkFileName; ok is false for a
-// name the encoding cannot produce (a temp file, a stray file).
-func parkIdentityFromFile(name string) (as string, ok bool) {
-	raw, err := parkEnc.DecodeString(strings.ToUpper(name))
-	if err != nil || parkFileName(string(raw)) != name {
-		return "", false
-	}
-	return string(raw), true
-}
-
 // parkPath is the park file for as, or an error when as cannot be one: it
 // must pass NameRule (so no '/'). The identity is encoded (parkFileName), so
 // the path is always a plain file name directly inside park/.
@@ -61,6 +52,7 @@ func (b *Bus) Park(as string) error {
 	if err := os.MkdirAll(b.parkDir(), 0o700); err != nil {
 		return internal(err)
 	}
+	b.sweepParkTemps()
 	f, err := os.CreateTemp(b.parkDir(), parkTempPrefix)
 	if err != nil {
 		return internal(err)
@@ -75,6 +67,28 @@ func (b *Bus) Park(as string) error {
 		return internal(fmt.Errorf("park %q: %w", as, err))
 	}
 	return nil
+}
+
+// parkTempMaxAge is how old a temp file must be before Park sweeps it: a
+// park killed between CreateTemp and Rename leaves one behind, and a live
+// Park finishes within milliseconds.
+const parkTempMaxAge = time.Minute
+
+// sweepParkTemps removes temp files older than parkTempMaxAge. Failures are
+// ignored: a leftover temp file is harmless.
+func (b *Bus) sweepParkTemps() {
+	ents, err := os.ReadDir(b.parkDir())
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if !strings.HasPrefix(e.Name(), parkTempPrefix) {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > parkTempMaxAge {
+			_ = os.Remove(filepath.Join(b.parkDir(), e.Name()))
+		}
+	}
 }
 
 // Unpark ends as's park. It succeeds when as is not parked.

@@ -40,6 +40,15 @@ func Park(cfg config.Config, as, cwd string, out, warn io.Writer) error {
 	if name == "" {
 		return ErrNoIdentity
 	}
+	if as != "" {
+		// An explicit -as must name a session that is running; a typo would
+		// otherwise park a name nobody holds.
+		if live, err := b.SessionLive(name); err != nil {
+			return err
+		} else if !live {
+			return fmt.Errorf("%q has no live session; register first (or check the name)", name)
+		}
+	}
 	if err := b.Park(name); err != nil {
 		return err
 	}

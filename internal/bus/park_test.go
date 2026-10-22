@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func parkFiles(t *testing.T, b *Bus) []string {
@@ -179,16 +180,32 @@ func TestParkPathStaysInsideParkDirAndIsInjective(t *testing.T) {
 	}
 }
 
-func TestParkFileNameRoundTrips(t *testing.T) {
-	for _, n := range []string{"Pat", `a\b`, "é", "x.y-z"} {
-		got, ok := parkIdentityFromFile(parkFileName(n))
-		if !ok || got != n {
-			t.Errorf("%q: round trip gave %q ok=%v", n, got, ok)
+func TestParkSweepsStaleTempFiles(t *testing.T) {
+	b := newTestBus(t)
+	if err := os.MkdirAll(b.parkDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(b.parkDir(), parkTempPrefix+"old")
+	fresh := filepath.Join(b.parkDir(), parkTempPrefix+"fresh")
+	stray := filepath.Join(b.parkDir(), "notatemp")
+	for _, f := range []string{old, fresh, stray} {
+		if err := os.WriteFile(f, nil, 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	for _, f := range []string{".tmp-123", "Pat", "a-b", "mfrgg==="} {
-		if _, ok := parkIdentityFromFile(f); ok {
-			t.Errorf("%q must not decode", f)
+	past := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Park("Sam"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("a stale temp file must be swept, stat err=%v", err)
+	}
+	for _, f := range []string{fresh, stray, filepath.Join(b.parkDir(), parkFileName("Sam"))} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s must survive: %v", filepath.Base(f), err)
 		}
 	}
 }

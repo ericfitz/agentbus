@@ -71,6 +71,19 @@ func TestParkRejectsUnparkableName(t *testing.T) {
 	Unpark(cfg, "a/b", t.TempDir(), io.Discard) // must not panic or print
 }
 
+func TestParkRefusesNameWithNoLiveSession(t *testing.T) {
+	cfg, b, _ := parkEnv(t)
+	var out bytes.Buffer
+	err := Park(cfg, "Typo", t.TempDir(), &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `"Typo"`) || !strings.Contains(err.Error(), "register") {
+		t.Fatalf("want an error naming Typo and saying to register first, got %v", err)
+	}
+	if out.Len() != 0 || b.Parked("Typo") {
+		t.Fatalf("nothing may be parked or printed: out=%q", out.String())
+	}
+	Unpark(cfg, "Typo", t.TempDir(), io.Discard) // stays permissive and silent
+}
+
 func TestParkWithoutIdentityFails(t *testing.T) {
 	cfg, cwd, first, _, b := twoSessions(t)
 	setHarness(t, procs.Ref{Pid: 300, Start: 3}, nil) // a harness that registered nothing

@@ -409,6 +409,12 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 			b.log.Warn("register: clearing park", "name", display, "err", err)
 		}
 	}
+	// A rename's dropped names go too; none of them is a subagent name.
+	for _, d := range dropped {
+		if err := b.Unpark(d); err != nil {
+			b.log.Warn("register: clearing park", "name", d, "err", err)
+		}
+	}
 	// Pending is bounded by the number of subscriptions, not by anything a
 	// caller controls, but a session resuming thousands of subscriptions
 	// could still exceed the hard ceiling; trim it to the same whole-record
@@ -457,6 +463,11 @@ func (b *Bus) auth(q execQuerier, as string) error {
 	}
 	return nil
 }
+
+// Owns reports whether this process holds a live session row for as: the
+// ownership check without the error, for callers that must not act on a name
+// another process owns (the unpark middleware).
+func (b *Bus) Owns(as string) bool { return b.auth(b.db, as) == nil }
 
 // sessionRow is the row a process last wrote for one of its sessions: what
 // it needs to put the row back after another process swept it (ADR 0022).

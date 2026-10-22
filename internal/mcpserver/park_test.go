@@ -96,3 +96,24 @@ func TestUnparkMiddlewareSkipsSubagentNamesSilently(t *testing.T) {
 		t.Fatalf("a subagent call must log nothing, got %q", logs.String())
 	}
 }
+
+func TestUnparkIgnoresNamesThisProcessDoesNotOwn(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cs := sessionOn(t, cfg)
+	other, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	if _, err := other.Register("Pat", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Park("Pat"); err != nil {
+		t.Fatal(err)
+	}
+	call(t, cs, "discover", map[string]any{"as": "Pat"})
+	if !other.Parked("Pat") {
+		t.Fatal("a call as a name another process owns must leave its park in place")
+	}
+}

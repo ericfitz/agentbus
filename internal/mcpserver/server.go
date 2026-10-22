@@ -327,7 +327,8 @@ func wrapSchemaErrorsInEnvelope(next mcp.MethodHandler) mcp.MethodHandler {
 
 // unparkOnToolCall ends a session's park (ADR 0025 decision 3) on every tool
 // call except receive, for the call's `as`, before the tool runs. register
-// carries no `as`; the bus clears its park itself. It is one middleware so no
+// carries no `as`; the bus clears its park itself. Only a name this process
+// owns is unparked, so a call as another identity cannot end its park. It is one middleware so no
 // tool can forget it. An error is logged and never fails the call.
 func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -339,7 +340,7 @@ func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
 					}
 					// A subagent identity ("parent/child") is never parked (only top-level
 					// identities can be), so skip it without a bus call or a warning.
-					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" && !strings.Contains(a.As, "/") {
+					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" && !strings.Contains(a.As, "/") && b.Owns(a.As) {
 						if err := b.Unpark(a.As); err != nil && log != nil {
 							log.Warn("unpark on tool call", "tool", p.Name, "as", a.As, "err", err)
 						}

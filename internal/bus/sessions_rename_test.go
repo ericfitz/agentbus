@@ -228,3 +228,25 @@ func TestRenameAfterResetDoesNotRestoreOld(t *testing.T) {
 	}
 	wantRows(t, topLevelRows(t, b), "beta")
 }
+
+func TestRenameClearsDroppedNamesPark(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("alpha", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Park("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Park("other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("beta", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if b.Parked("alpha") {
+		t.Fatal("a rename must clear the dropped name's park file")
+	}
+	if !b.Parked("other") {
+		t.Fatal("a rename must not clear an unrelated name's park")
+	}
+}

@@ -168,7 +168,8 @@ follow, with a worked example.
   waiting for it.
 - `agentbus park` / `agentbus unpark` — park this session (`-as` to name
   one): until it is unparked, `wait`, `watch` and the Stop hook wake it only
-  for direct messages (a `-filter` still has to match). A prompt from the
+  for direct messages (every direct message wakes a parked wait, whatever
+  `-filter` says; other messages never do). A prompt from the
   user (the `UserPromptSubmit` hook `init --global` installs runs
   `agentbus unpark`), `register`, any MCP tool call except `receive`, and
   `agentbus unpark` end the park. `park` and `unpark` repeat harmlessly;

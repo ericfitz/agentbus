@@ -33,11 +33,38 @@ Passed 2026-10-20 (Eric, Windows 11 ARM VM).
       wake line for a message sent to the session, a newer `wait` for the
       identity ends the older one with exit code 3, and closing the harness
       ends it.
+- [ ] `agentbus unpark` runs as the Claude Code UserPromptSubmit hook that
+      `init --global` installs: on each prompt it reads the hook JSON from
+      stdin, prints nothing, exits 0, and ends a park left by `agentbus park`.
+- [ ] `agentbus park` and `agentbus unpark` without `-as`, run from the
+      session's own terminal, resolve that session (`agentbus status` and
+      `agentbus identity` agree) and park and unpark it; `park -as <unregistered
+      name>` exits 2.
+- [ ] A session started in `%USERPROFILE%` itself registers as
+      `<user>-home` (check the case of `<user>` against `whoami`), not the
+      bare user name.
 - [ ] Sleep and wake (ADR 0023; Windows wake detection is unit-tested
       only): a Claude Code session claims a task, Windows itself sleeps
       (Start, Power, Sleep; not a VM suspend) for over a minute, and after
       the wake the task is still claimed and `agentbus status` shows the
       same names.
+
+## Harness checks (park, ADR 0025)
+
+Park relies on three harness behaviors that no test can confirm. Run each
+on a host with that harness installed (any OS) and record the result.
+
+- [ ] Claude Code: does a background-task completion notification (the
+      wake from a background `agentbus wait`) fire `UserPromptSubmit`? Park a
+      session, send it a DM, and watch whether the park file in the data
+      directory's `park/` disappears. If it does, the first DM wake unparks
+      the session and park only holds until then.
+- [ ] Grok: does a `UserPromptSubmit` hook in `~/.grok/hooks/agentbus.json`
+      run? Add a hook that writes a marker file, submit a prompt, check the
+      file. If not, Grok sessions are never unparked by a prompt.
+- [ ] Codex 0.163.0: does `UserPromptSubmit` in `~/.codex/hooks.json` run?
+      Same marker-file check. If not, a Codex session unparks only through
+      `register` or an MCP tool call.
 
 ## Shared database guard (needs WSL2 in the VM)
 

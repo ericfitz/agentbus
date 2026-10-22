@@ -315,11 +315,12 @@ returns a `polling` error after three consecutive empty waits.
 
 ### Park
 
-Before you end a session with a handoff, run `agentbus park`. A parked
-session is woken, and stopped by the Stop hook, only for direct messages. Your
-next prompt (a `UserPromptSubmit` hook runs `agentbus unpark`), `register`, or
-any agentbus call except `receive` unparks it; `agentbus unpark` does it
-explicitly.
+Before you end a session with a handoff, run `agentbus park` as your last
+agentbus action, after the final send or memory write. A parked session is
+woken, and stopped by the Stop hook, only for direct messages. Your next
+prompt (a `UserPromptSubmit` hook runs `agentbus unpark`), `register`, or any
+agentbus tool call except `receive` unparks it; `agentbus unpark` does it
+explicitly. CLI `wait`, `watch` and `status` do not unpark.
 
 When you finish a turn, the `agentbus stop-hook` Stop hook checks the bus.
 If new messages are waiting, the harness keeps you working with an

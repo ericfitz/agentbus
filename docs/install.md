@@ -303,6 +303,9 @@ listed channel (from the current position) and reports them in its
 `subscribed` field; channels that do not exist are reported in
 `subscribe_failed` and skipped. Without a `channels` key the list is
 `general` and `memory`; an empty list means no automatic subscriptions. A
+memory channel in the list is never subscribed: since ADR 0008 `register`
+returns it in `memory_channels` for `search`, and drops any memory
+subscription the identity still holds. A
 `tasks` or `tasks/...` entry left over from before ADR 0013 is ignored
 (not subscribed) and reported in `register`'s `ignored_channels` field
 instead; `init` removes such entries from the file, or delete them by hand.

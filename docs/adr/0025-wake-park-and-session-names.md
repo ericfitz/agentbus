@@ -80,8 +80,9 @@ calls and may be revisited.
   outside `dm/<as>`. A message skipped this way does not wake that wait
   later. The session picks it up at its next `receive`, which an unparked
   session makes at the end of its next turn.
-- **Park and an explicit `-filter`.** While parked, a message must be a
-  direct message and must also pass any `-filter`. When unparked, `-filter`
+- **Park and an explicit `-filter`.** While parked, every direct message
+  wakes the wait, whatever `-filter` says; other messages never do (corrected
+  2026-10-22). When unparked, `-filter`
   works as before (ADR 0012).
 - **Unpark hook.** `agentbus unpark` without `-as` resolves the session the
   same way the Stop hook does (ADR 0017). It never prints anything and

@@ -128,7 +128,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Except on Codex, keep a background \"agentbus wait\" running (no -filter),",
 		"receive (ack the previous batch), handle what concerns you, and start it",
 		"Exit 3 (replaced) or 4 (harness gone): do nothing. Exit 2 is an error: read stderr, do not restart it in a loop, tell the user if it persists.",
-		"a parked one wakes only for DMs. Before ending a session with a handoff, run \"agentbus park\"; your next prompt, register, or any agentbus call except receive unparks.",
+		"a parked one wakes only for DMs. Before ending a session with a handoff, run \"agentbus park\" as your last agentbus action, after the final send or memory write; your next prompt, register, or any agentbus tool call except receive unparks.",
 		"Never poll receive from model turns to wait.",
 		"- Post when you start, finish, or get blocked",
 		"Use general only when you have no project channel",

@@ -41,6 +41,7 @@ $IsWin = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $PackageId = 'ericfitz.agentbus'
 $ManifestFiles = @("$PackageId.yaml", "$PackageId.installer.yaml", "$PackageId.locale.en-US.yaml")
 $script:Pass = 0; $script:Fail = 0; $script:Threat = $false; $script:Leftover = $false
+$NoPackageFound = -1978335212 # 0x8A150014 APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
 # powershell -File passes -Architecture x64,arm64 as one string.
 $Architecture = @($Architecture | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' })
 
@@ -268,6 +269,25 @@ function Get-Leftovers([string]$LocalAppData, [string]$UserPath) {
     return , $left
 }
 
+# Get-StalePathEntries returns the entries of a PATH value that name one of
+# the package's winget folders that no longer exists ($Exists tests a path).
+function Get-StalePathEntries([string]$UserPath, [scriptblock]$Exists) {
+    return , @("$UserPath" -split ';' | Where-Object { (($_ -replace '/', '\') -like "*\WinGet\Packages\${PackageId}_*") -and -not (& $Exists $_) })
+}
+
+# Remove-UserPathEntries drops entries from the user Path registry value,
+# keeping its value kind and the other entries as stored.
+function Remove-UserPathEntries([string[]]$Entries) {
+    $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    try {
+        $v = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $kind = $k.GetValueKind('Path')
+        $k.SetValue('Path', ((@($v -split ';') | Where-Object { $Entries -notcontains $_ }) -join ';'), $kind)
+    } finally { $k.Close() }
+    # Let running programs see the change, as setting a user variable does.
+    try { [Environment]::SetEnvironmentVariable('AGENTBUS_PATH_REFRESH', $null, 'User') } catch { }
+}
+
 function Get-UserPath {
     if (-not $IsWin) { return '' }
     $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
@@ -422,7 +442,19 @@ function Invoke-CleanupRun {
     if ([string]::IsNullOrEmpty($ManifestDir)) { throw 'test-winget: -Cleanup needs -ManifestDir, the manifests the failed run installed from' }
     $state = Get-InstalledState
     if ($state.Count -eq 0) { Write-Host "nothing to clean up: $PackageId is not installed"; return }
-    Invoke-Uninstall (Resolve-Path -LiteralPath $ManifestDir).Path
+    $r = Invoke-Winget @('uninstall', '--manifest', (Resolve-Path -LiteralPath $ManifestDir).Path, '--purge', '--disable-interactivity', '--accept-source-agreements')
+    if ($r.Code -eq $NoPackageFound) {
+        # winget has no record, so what is left is debris: the package's own
+        # folders and PATH entries naming folders that are gone.
+        Write-Host "winget has no install record for $PackageId; removing its leftovers"
+        foreach ($d in (Get-PackageDirs $env:LOCALAPPDATA)) { Write-Host "    removing $d"; Remove-Item -LiteralPath $d -Recurse -Force }
+        $stale = Get-StalePathEntries (Get-UserPath) { param($x) Test-Path -LiteralPath $x }
+        foreach ($e in $stale) { Write-Host "    removing user PATH entry $e" }
+        if ($stale.Count -gt 0) { Remove-UserPathEntries $stale }
+    } else {
+        Assert "winget uninstall --manifest --purge (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
+        if ($r.Code -ne 0) { Show-Failure $r }
+    }
     $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
     Assert "nothing left after uninstall ($($left -join '; '))" ($left.Count -eq 0)
 }
@@ -518,6 +550,12 @@ function Invoke-SelfTest {
         foreach ($v in @(@(0, $clean, 'clean'), @(2, $found, 'threat'), @(2, 'CmdTool: Failed with hr = 0x80508023', 'error'), @(2, $clean, 'error'), @(1, $found, 'error'), @(-2147024891, '', 'error'))) {
             Assert "self: Defender exit $($v[0]) with '$(($v[1] -split "`n")[-1])' is $($v[2])" ((Get-DefenderVerdict $v[0] $v[1]) -eq $v[2])
         }
+
+        $gone = 'C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\ericfitz.agentbus__DefaultSource'
+        $live = 'C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\ericfitz.agentbus__Other'
+        $st = Get-StalePathEntries "C:\bin;$gone;$live;C:\Users\u\AppData\Local\Microsoft\WinGet\Links;C:\x\ericfitz.agentbus__DefaultSource" { param($x) $x -eq $live }
+        Assert 'self: stale PATH entries are only missing package folders' (($st.Count -eq 1) -and ($st[0] -eq $gone))
+        Assert 'self: no stale PATH entries in an empty PATH' ((Get-StalePathEntries '' { $false }).Count -eq 0)
 
         $pw = (Get-Process -Id $PID).Path
         $mpDir = Join-Path $work 'mp'

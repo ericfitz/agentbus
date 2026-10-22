@@ -45,9 +45,6 @@ func twoSessions(t *testing.T) (cfg config.Config, cwd, first, second string, b 
 	if err != nil || r2.Sender == r1.Sender {
 		t.Fatalf("second session: %+v %v", r2, err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
 	return cfg, cwd, r1.Sender, r2.Sender, b
 }
 
@@ -64,20 +61,21 @@ func setHarness(t *testing.T, ref procs.Ref, err error) {
 // messages, and is woken (and told to wait as itself) for its own. With no
 // match it falls back to the cwd identity.
 func TestStopHookUsesSessionFromItsHarness(t *testing.T) {
-	cfg, cwd, first, second, b := twoSessions(t)
+	cfg, cwd, first, second, _ := twoSessions(t)
 	hook := func() string {
 		var out bytes.Buffer
 		StopHook(cfg, strings.NewReader(`{"cwd":`+strconvQuote(cwd)+`}`), &out, io.Discard)
 		return out.String()
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(first), Content: "for first"}); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel(first), Content: "for first"}); err != nil {
 		t.Fatal(err)
 	}
 	setHarness(t, procs.Ref{Pid: 200, Start: 2}, nil)
 	if got := hook(); got != "" {
 		t.Fatalf("second session must not block for the first one's messages: %q", got)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(second), Content: "for second"}); err != nil {
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel(second), Content: "for second"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := hook(); !strings.Contains(got, "dm/"+second) || !strings.Contains(got, "-as "+second) || strings.Contains(got, "dm/"+first+" ") {
@@ -128,7 +126,8 @@ func TestWaitIdentityUsesSessionFromItsHarness(t *testing.T) {
 // does not block for that session's messages, and its wait has no identity.
 func TestUnregisteredSessionDoesNotBorrowAnotherHarnessName(t *testing.T) {
 	cfg, cwd, first, _, b := twoSessions(t)
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(first), Content: "for first"}); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel(first), Content: "for first"}); err != nil {
 		t.Fatal(err)
 	}
 	setHarness(t, procs.Ref{Pid: 300, Start: 3}, nil)

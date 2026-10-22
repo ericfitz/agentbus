@@ -25,6 +25,21 @@ func testSession(t *testing.T) *mcp.ClientSession {
 	t.Helper()
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
+	return sessionOn(t, cfg)
+}
+
+// testPair is two MCP sessions, two processes, on one database. One process
+// holds one top-level name (ADR 0025 decision 6), so a test that needs a
+// second agent registers it through the second session.
+func testPair(t *testing.T) (cs, peer *mcp.ClientSession) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	return sessionOn(t, cfg), sessionOn(t, cfg)
+}
+
+func sessionOn(t *testing.T, cfg config.Config) *mcp.ClientSession {
+	t.Helper()
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -75,16 +90,16 @@ func TestToolsRegisteredWithPrefixDescriptions(t *testing.T) {
 }
 
 func TestRegisterSendReceiveOverMCP(t *testing.T) {
-	cs := testSession(t)
+	cs, peer := testPair(t)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
 	if reg["as"] != "Sam" {
 		t.Fatal(reg)
 	}
-	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	kim, _ := call(t, peer, "register", map[string]any{"name": "Kim"})
 	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"})
-	call(t, cs, "subscribe", map[string]any{"as": kim["as"], "channel": "dev"})
+	call(t, peer, "subscribe", map[string]any{"as": kim["as"], "channel": "dev"})
 	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "dev", "content": "hi"})
-	r, _ := call(t, cs, "receive", map[string]any{"as": "Kim"})
+	r, _ := call(t, peer, "receive", map[string]any{"as": "Kim"})
 	msgs := r["messages"].([]any)
 	if len(msgs) != 1 || r["batch"] == "" {
 		t.Fatalf("%v", r)
@@ -382,6 +397,12 @@ func testSessionIn(t *testing.T, dir string) *mcp.ClientSession {
 	return testSession(t)
 }
 
+func testPairIn(t *testing.T, dir string) (cs, peer *mcp.ClientSession) {
+	t.Helper()
+	t.Chdir(dir)
+	return testPair(t)
+}
+
 func writeRepoFile(t *testing.T, dir, body string) {
 	t.Helper()
 	p := filepath.Join(dir, ".local", "agentbus.json")
@@ -405,7 +426,7 @@ func stringsOf(v any) []string {
 func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
-	cs := testSessionIn(t, dir)
+	cs, peer := testPairIn(t, dir)
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
 	if got := stringsOf(reg["subscribed"]); len(got) != 1 || got[0] != "general" {
 		t.Fatal(reg)
@@ -417,8 +438,8 @@ func TestRegisterSubscribesDefaultsWithoutRepoFile(t *testing.T) {
 		t.Fatal("ignored_channels must be omitted when empty", reg)
 	}
 	// A message on general is now received without an explicit subscribe.
-	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
-	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "hi"})
+	kim, _ := call(t, peer, "register", map[string]any{"name": "Kim"})
+	call(t, peer, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "hi"})
 	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
 	if msgs, _ := got["messages"].([]any); len(msgs) != 1 {
 		t.Fatal(got)
@@ -502,15 +523,15 @@ func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 func TestRegisterDropsMemorySubscription(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
-	cs := testSessionIn(t, dir)
+	cs, peer := testPairIn(t, dir)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
 	call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "memory"})
 	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
 	if got := stringsOf(reg["memory_channels"]); len(got) != 1 || got[0] != "memory" {
 		t.Fatal(reg)
 	}
-	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
-	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "memory", "content": "a fact"})
+	kim, _ := call(t, peer, "register", map[string]any{"name": "Kim"})
+	call(t, peer, "send", map[string]any{"as": kim["as"], "channel": "memory", "content": "a fact"})
 	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
 	if msgs, _ := got["messages"].([]any); len(msgs) != 0 {
 		t.Fatal("memories must not be pushed:", got)
@@ -729,33 +750,33 @@ func TestSendTagsRoundTripOverMCP(t *testing.T) {
 }
 
 func TestTagSubscriptionOverMCP(t *testing.T) {
-	cs := testSession(t)
+	cs, peer := testPair(t)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
 	// Kim is registered without ever subscribing to "dev" directly (unlike
 	// "general", which register's persistent default channel list already
 	// subscribes her to), so a message there can only reach her through the
 	// tag source and carries matched_tags.
 	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "dev", "kind": "ordinary"})
-	call(t, cs, "register", map[string]any{"name": "Kim"})
-	out, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release", "Release"}})
+	call(t, peer, "register", map[string]any{"name": "Kim"})
+	out, res := call(t, peer, "subscribe", map[string]any{"as": "Kim", "tags": []string{"Release", "Release"}})
 	if res.IsError {
 		t.Fatalf("%v %+v", out, res)
 	}
 	if got, ok := out["subscribed_tags"].([]any); !ok || len(got) != 1 || got[0] != "release" {
 		t.Fatalf("subscribed_tags must echo the normalized set: %+v", out)
 	}
-	if _, res := call(t, cs, "subscribe", map[string]any{"as": "Kim", "channel": "general", "tags": []string{"x"}}); !res.IsError {
+	if _, res := call(t, peer, "subscribe", map[string]any{"as": "Kim", "channel": "general", "tags": []string{"x"}}); !res.IsError {
 		t.Fatal("channel and tags together must be rejected")
 	}
 	call(t, cs, "send", map[string]any{"as": "Sam", "channel": "dev", "content": "ship it", "tags": []string{"release"}})
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "receive", Arguments: map[string]any{"as": "Kim"}})
+	res, err := peer.CallTool(context.Background(), &mcp.CallToolParams{Name: "receive", Arguments: map[string]any{"as": "Kim"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"matched_tags":["release"]`) {
 		t.Fatalf("receive: %s", text)
 	}
-	uout, ures := call(t, cs, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}})
+	uout, ures := call(t, peer, "unsubscribe", map[string]any{"as": "Kim", "tags": []string{"Release"}})
 	if ures.IsError {
 		t.Fatal("unsubscribe tags")
 	}

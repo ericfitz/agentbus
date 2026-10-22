@@ -19,6 +19,7 @@ type fixture struct {
 	m   Model
 	c   *client
 	ab  *bus.Bus
+	pat *bus.Bus // Pat's own process, opened by patSend
 	sam string
 	ack string // batch token from the last receive(), acked on the next one (mirrors client.receiveLoop's own ack variable)
 }

@@ -342,9 +342,7 @@ func TestRestoreAfterEndSessionsLeavesNoRow(t *testing.T) {
 func TestHeartbeatRestoresOthersAfterAFailure(t *testing.T) {
 	b := newTestBus(t)
 	for _, n := range []string{"bad", "good"} {
-		if _, err := b.Register(n, "", "ctx", true); err != nil {
-			t.Fatal(err)
-		}
+		regAs(t, b, n, "ctx", true)
 	}
 	sleepSweep(t, b)
 	if _, err := b.db.Exec("CREATE TRIGGER fail_bad BEFORE INSERT ON sessions WHEN NEW.sender='bad' BEGIN SELECT RAISE(ABORT,'boom'); END"); err != nil {

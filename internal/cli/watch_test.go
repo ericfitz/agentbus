@@ -44,6 +44,7 @@ type watchEnv struct {
 	t    *testing.T
 	cfg  config.Config
 	b    *bus.Bus
+	sam  *bus.Bus // the sender, a second process (ADR 0025 decision 6)
 	out  *syncBuf
 	done chan error
 	stop context.CancelFunc
@@ -70,18 +71,17 @@ func newWatchEnv(t *testing.T, mutate func(*config.Config)) *watchEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
-	for _, n := range []string{"Pat", "Sam"} {
-		if _, err := b.Register(n, "", "", false); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := b.Register("Pat", "", "", false); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := b.CreateChannel("Sam", "dev", "ordinary"); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.CreateChannel("Sam", "dev", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Subscribe("Pat", "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
-	return &watchEnv{t: t, cfg: cfg, b: b, out: &syncBuf{}}
+	return &watchEnv{t: t, cfg: cfg, b: b, sam: sam, out: &syncBuf{}}
 }
 
 func (e *watchEnv) start(o WatchOptions) {
@@ -108,7 +108,7 @@ func (e *watchEnv) startWith(o WatchOptions, out io.Writer) {
 
 func (e *watchEnv) send(content string) {
 	e.t.Helper()
-	if _, err := e.b.Send("Sam", bus.SendInput{Channel: "dev", Content: content}); err != nil {
+	if _, err := e.sam.Send("Sam", bus.SendInput{Channel: "dev", Content: content}); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -245,7 +245,7 @@ func TestWatchFilterRejectsThenLaterMatchWakes(t *testing.T) {
 func TestWatchDMWakesDespiteFilter(t *testing.T) {
 	e := newWatchEnv(t, nil)
 	e.start(WatchOptions{Filter: "@nobody"})
-	if _, err := e.b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "secret payload"}); err != nil {
+	if _, err := e.sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "secret payload"}); err != nil {
 		t.Fatal(err)
 	}
 	lines := e.waitLines(1)
@@ -259,7 +259,7 @@ func TestWatchDMWakesDespiteFilter(t *testing.T) {
 
 func TestWatchBurstWithinGapIsOneLine(t *testing.T) {
 	e := newWatchEnv(t, nil)
-	if _, err := e.b.CreateChannel("Sam", "ops", "ordinary"); err != nil {
+	if _, err := e.sam.CreateChannel("Sam", "ops", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.b.Subscribe("Pat", "ops", "now"); err != nil {
@@ -270,7 +270,7 @@ func TestWatchBurstWithinGapIsOneLine(t *testing.T) {
 	e.send("a")
 	e.waitLines(1) // gap starts
 	e.send("b")
-	if _, err := e.b.Send("Sam", bus.SendInput{Channel: "ops", Content: "c"}); err != nil {
+	if _, err := e.sam.Send("Sam", bus.SendInput{Channel: "ops", Content: "c"}); err != nil {
 		t.Fatal(err)
 	}
 	e.send("d")
@@ -285,14 +285,14 @@ func TestWatchBurstWithinGapIsOneLine(t *testing.T) {
 // wakes it despite -filter, once.
 func TestWatchTagMatchWakesOnceDespiteFilter(t *testing.T) {
 	e := newWatchEnv(t, nil)
-	if _, err := e.b.CreateChannel("Sam", "ops", "ordinary"); err != nil {
+	if _, err := e.sam.CreateChannel("Sam", "ops", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.b.SubscribeTags("Pat", []string{"release"}); err != nil {
 		t.Fatal(err)
 	}
 	e.start(WatchOptions{Filter: "@nobody"})
-	if _, err := e.b.Send("Sam", bus.SendInput{Channel: "ops", Content: "shipped", Tags: []string{"release"}}); err != nil {
+	if _, err := e.sam.Send("Sam", bus.SendInput{Channel: "ops", Content: "shipped", Tags: []string{"release"}}); err != nil {
 		t.Fatal(err)
 	}
 	lines := e.waitLines(1)

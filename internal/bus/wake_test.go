@@ -131,9 +131,7 @@ func TestWakeGraceKeepsSessionRowAndReaders(t *testing.T) {
 	}
 	e.hc.sleep(5 * time.Minute)
 	e.beat(t, e.b)
-	if _, err := e.b.Register("Zed", "", "repo", true); err != nil {
-		t.Fatal(err)
-	}
+	reg(t, e.b, "Zed")
 	if _, _, _, ok := sessionRowFor(t, e.b, "Pat"); !ok {
 		t.Fatal("register's sweep deleted the sleeping owner's row")
 	}

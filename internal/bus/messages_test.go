@@ -7,11 +7,38 @@ import (
 	"testing"
 )
 
+// reg registers name on b and returns its display name.
+//
+// Many tests act as several agents through one Bus, which production no
+// longer allows (ADR 0025 decision 6: one top-level name per process). reg
+// puts the rows its Register dropped back, so those tests keep their cast;
+// tests of the rule itself call Register directly.
 func reg(t *testing.T, b *Bus, name string) string {
 	t.Helper()
-	r, err := b.Register(name, "", "repo", true)
+	return regAs(t, b, name, "repo", true)
+}
+
+// regAs is reg with a chosen context and resume flag.
+func regAs(t *testing.T, b *Bus, name, context string, resume bool) string {
+	t.Helper()
+	b.rememberedMu.Lock()
+	prev := make([]sessionRow, 0, len(b.remembered))
+	for _, r := range b.remembered {
+		prev = append(prev, r)
+	}
+	b.rememberedMu.Unlock()
+	r, err := b.Register(name, "", context, resume)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, row := range prev {
+		if row.sender == r.Sender {
+			continue
+		}
+		b.remember(row)
+		if _, err := b.restore(b.db, row); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return r.Sender
 }

@@ -279,6 +279,32 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		display, context, b.owner, now, now, harness, harnessVersion, b.harness.Pid, b.harness.Start); err != nil {
 		return Registration{}, internal(err)
 	}
+	// One top-level name per process (ADR 0025 decision 6): a top-level
+	// register drops this process's other top-level rows. Subagent rows
+	// (parent/name) and every subscription stay, so an old name resumes.
+	var dropped []string
+	if parent == "" {
+		old, err := tx.Query("SELECT sender FROM sessions WHERE owner=? AND instr(sender,'/')=0 AND sender<>?", b.owner, display)
+		if err != nil {
+			return Registration{}, internal(err)
+		}
+		for old.Next() {
+			var s string
+			if err := old.Scan(&s); err != nil {
+				_ = old.Close()
+				return Registration{}, internal(err)
+			}
+			dropped = append(dropped, s)
+		}
+		if err := old.Err(); err != nil {
+			_ = old.Close()
+			return Registration{}, internal(err)
+		}
+		_ = old.Close()
+		if _, err := tx.Exec("DELETE FROM sessions WHERE owner=? AND instr(sender,'/')=0 AND sender<>?", b.owner, display); err != nil {
+			return Registration{}, internal(err)
+		}
+	}
 	if !resume {
 		// resume=false means no backlog at all, inbox included (human
 		// decision, ADR 0004): drop every subscription, including the inbox
@@ -367,6 +393,9 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 	}
 	if err := tx.Commit(); err != nil {
 		return Registration{}, internal(err)
+	}
+	for _, d := range dropped {
+		b.forget(d)
 	}
 	b.remember(sessionRow{sender: display, context: context, harness: harness, harnessVersion: harnessVersion,
 		harnessPid: b.harness.Pid, harnessStart: b.harness.Start, registeredAt: now, generation: gen})

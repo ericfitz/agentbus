@@ -301,9 +301,7 @@ func TestObserverReadsEveryInbox(t *testing.T) {
 	}
 	// The observer's unscoped search still sees every inbox, not only its own
 	// and its sent DMs (spec 2026-09-29).
-	if _, err := other.Register("Lee", "", "repo", true); err != nil {
-		t.Fatal(err)
-	}
+	regAs(t, other, "Lee", "repo", true)
 	if _, err := other.Send("Pat", SendInput{Channel: "dm/Lee", Content: "observer walrus"}); err != nil {
 		t.Fatal(err)
 	}

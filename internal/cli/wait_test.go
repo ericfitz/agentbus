@@ -25,10 +25,8 @@ func TestWaitWakesOnDirectMessageDespiteFilter(t *testing.T) {
 	if _, err := b.Register("Pat", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "rename landed"}); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Content: "rename landed"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,10 +57,8 @@ func TestWaitWithholdsDirectMessageContentFromJSON(t *testing.T) {
 	if _, err := b.Register("Pat", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Subject: "re: rename", Content: "secret payload"}); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel("Pat"), Subject: "re: rename", Content: "secret payload"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,16 +95,14 @@ func TestWaitFilterMatchesSubject(t *testing.T) {
 	if _, err := b.Register("Pat", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.CreateChannel("Sam", "dev", "ordinary"); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.CreateChannel("Sam", "dev", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Subscribe("Pat", "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: "dev", Subject: "rename landed", Content: "see the diff"}); err != nil {
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: "dev", Subject: "rename landed", Content: "see the diff"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,16 +123,14 @@ func TestWaitFilterStillAppliesToOrdinaryChannels(t *testing.T) {
 	if _, err := b.Register("Pat", "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.CreateChannel("Sam", "dev", "ordinary"); err != nil {
+	sam := peerBus(t, cfg, "Sam")
+	if _, err := sam.CreateChannel("Sam", "dev", "ordinary"); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Subscribe("Pat", "dev", "now"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: "dev", Content: "rename landed"}); err != nil {
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: "dev", Content: "rename landed"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,15 +149,14 @@ func TestWaitWakesOnTagMatchDespiteFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = b.Close() }()
-	for _, n := range []string{"Pat", "Sam"} {
-		if _, err := b.Register(n, "", "", false); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := b.Register("Pat", "", "", false); err != nil {
+		t.Fatal(err)
 	}
+	sam := peerBus(t, cfg, "Sam")
 	if err := b.SubscribeTags("Pat", []string{"release"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: "general", Content: "cut v2", Tags: []string{"release"}}); err != nil {
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: "general", Content: "cut v2", Tags: []string{"release"}}); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer

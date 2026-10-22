@@ -11,10 +11,12 @@ import (
 // Sam's inbox from someone other than Sam (a self-DM is rejected, #42).
 func (f *fixture) patSend(t *testing.T, ch, content string, tags ...string) bus.SendResult {
 	t.Helper()
-	if _, err := f.ab.Register("Pat", "", "repo", true); err != nil {
-		t.Fatal(err)
+	// A second process: one process holds one top-level name (ADR 0025
+	// decision 6), so Pat cannot share f.ab with Sam.
+	if f.pat == nil {
+		f.pat, _ = agent(t, f.c.cfg, "Pat")
 	}
-	r, err := f.ab.Send("Pat", bus.SendInput{Channel: ch, Content: content, Tags: tags})
+	r, err := f.pat.Send("Pat", bus.SendInput{Channel: ch, Content: content, Tags: tags})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -261,9 +261,7 @@ func TestReleaseClearsOwnerAndLease(t *testing.T) {
 func TestPendingNoopDoesNotClearAssignment(t *testing.T) {
 	b := newTestBus(t)
 	reg(t, b, "Sam")
-	if _, err := b.Register("Pat", "", "repo", true); err != nil {
-		t.Fatal(err)
-	}
+	reg(t, b, "Pat")
 	taskList(t, b)
 	tk := mustCreate(t, b, TaskCreateInput{Subject: "x"})
 	pat := "Pat"

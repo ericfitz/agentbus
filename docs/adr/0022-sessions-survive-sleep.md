@@ -61,3 +61,7 @@ back.
 - **Sweeps just after a wake.** Amended by ADR 0023: for 30 s after a wake
   the sweeps keep rows that were live when the machine slept, so a sleeping
   owner's row and tasks are not removed before its next heartbeat.
+- **One top-level name per process.** Amended by ADR 0025 decision 6: a
+  top-level register under a new name drops the process's other top-level rows
+  and removes them from the remembered set, so a heartbeat does not restore
+  them. Subagent rows and subscriptions are untouched.

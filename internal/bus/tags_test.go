@@ -369,9 +369,7 @@ func TestTagSubscriptionsResumeFalseAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	sendTagged(t, b, sam, "dev", "old", "t")
-	if _, err := b.Register("Kim", "", "r", false); err != nil {
-		t.Fatal(err)
-	}
+	regAs(t, b, "Kim", "r", false)
 	if sets, _ := b.TagSubscriptions(kim); len(sets) != 0 {
 		t.Fatalf("resume=false drops tag sets: %v", sets)
 	}

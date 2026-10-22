@@ -26,9 +26,7 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	if _, err := b.Register(me, "", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Register("Sam", "", "", false); err != nil {
-		t.Fatal(err)
-	}
+	sam := peerBus(t, cfg, "Sam")
 	hook := func(input map[string]any) string {
 		input["cwd"] = cwd
 		body, _ := json.Marshal(input)
@@ -40,7 +38,7 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	if got := hook(map[string]any{}); got != "" {
 		t.Fatalf("nothing waiting must not block: %q", got)
 	}
-	if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(me), Content: "secret"}); err != nil {
+	if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel(me), Content: "secret"}); err != nil {
 		t.Fatal(err)
 	}
 	got := hook(map[string]any{})
@@ -96,10 +94,8 @@ func TestStopHookReasonByHarness(t *testing.T) {
 			if _, err := b.RegisterWithClient(me, "", "", false, tc.harness, "1.0"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := b.Register("Sam", "", "", false); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := b.Send("Sam", bus.SendInput{Channel: bus.DMChannel(me), Content: "x"}); err != nil {
+			sam := peerBus(t, cfg, "Sam")
+			if _, err := sam.Send("Sam", bus.SendInput{Channel: bus.DMChannel(me), Content: "x"}); err != nil {
 				t.Fatal(err)
 			}
 			body, _ := json.Marshal(map[string]any{"cwd": cwd})

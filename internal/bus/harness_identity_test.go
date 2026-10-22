@@ -60,9 +60,7 @@ func TestIdentityForHarnessFollowsReRegister(t *testing.T) {
 	now := time.Now()
 	for i, name := range []string{"A", "B", "A"} {
 		b.Now = func() time.Time { return now.Add(time.Duration(i) * time.Second) }
-		if _, err := b.Register(name, "", "repo", true); err != nil {
-			t.Fatal(err)
-		}
+		regAs(t, b, name, "repo", true)
 	}
 	if got, err := b.IdentityForHarness(procs.Ref{Pid: 100, Start: 1}); err != nil || got != "A" {
 		t.Fatalf("got %q %v, want A", got, err)

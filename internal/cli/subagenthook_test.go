@@ -52,14 +52,17 @@ func TestSubagentHook(t *testing.T) {
 	c := context(t, run(map[string]any{"agent_type": "general-purpose", "agent_id": "afc4f28c9d818fff9"}))
 	for _, want := range []string{
 		`parent="` + me + `"`, `name="general-purpose-`,
-		"If your dispatcher's prompt asks you to use agentbus",
-		"parent= or name= your prompt names",
-		"do not start a background",
-		"Otherwise ignore this note",
+		"If your prompt says to use agentbus",
+		"or those your prompt names",
+		"using-agentbus skill",
+		"Do not start agentbus wait or watch; use receive.",
 	} {
 		if !strings.Contains(c, want) {
 			t.Fatalf("context lacks %q: %s", want, c)
 		}
+	}
+	if len(c) >= 300 {
+		t.Fatalf("subagent hook text is %d characters, want under 300: %s", len(c), c)
 	}
 	// A subagent that was not asked may still read the bus as its parent.
 	if strings.Contains(c, "do not call agentbus tools") {

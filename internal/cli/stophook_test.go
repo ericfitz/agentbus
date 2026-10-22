@@ -47,9 +47,8 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 		!strings.Contains(res["reason"], "receive") || !strings.Contains(res["reason"], "dm/"+me) {
 		t.Fatalf("waiting message must block with a receive reason: %q", got)
 	}
-	// No recorded harness: the original background-wait text, no watch.
-	if want := "except on Codex, make sure a background `agentbus wait -as " + me + " -filter @" + me + "` is running"; !strings.Contains(res["reason"], want) || strings.Contains(res["reason"], "agentbus watch") {
-		t.Fatalf("unknown harness must get the wait text: %q", res["reason"])
+	if want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."; !strings.Contains(res["reason"], want) || strings.Contains(res["reason"], "watch") || strings.Contains(res["reason"], "-filter") {
+		t.Fatalf("stop hook tail: %q", res["reason"])
 	}
 	if strings.Contains(got, "secret") {
 		t.Fatalf("reason must not carry message content: %q", got)
@@ -76,12 +75,9 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	}
 }
 
-func TestStopHookReasonByHarness(t *testing.T) {
-	for _, tc := range []struct {
-		harness string
-		watch   bool
-	}{{"claude-code", true}, {"grok", false}, {"codex-mcp-client", false}, {"", false}} {
-		t.Run("harness="+tc.harness, func(t *testing.T) {
+func TestStopHookReasonSameForEveryHarness(t *testing.T) {
+	for _, harness := range []string{"claude-code", "grok", "codex-mcp-client", ""} {
+		t.Run("harness="+harness, func(t *testing.T) {
 			cfg := config.Default()
 			cfg.DataDirectory = t.TempDir()
 			cwd := t.TempDir()
@@ -91,7 +87,7 @@ func TestStopHookReasonByHarness(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = b.Close() }()
-			if _, err := b.RegisterWithClient(me, "", "", false, tc.harness, "1.0"); err != nil {
+			if _, err := b.RegisterWithClient(me, "", "", false, harness, "1.0"); err != nil {
 				t.Fatal(err)
 			}
 			sam := peerBus(t, cfg, "Sam")
@@ -105,16 +101,9 @@ func TestStopHookReasonByHarness(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &res); err != nil {
 				t.Fatalf("%v: %q", err, out.String())
 			}
-			r := res["reason"]
-			if tc.watch {
-				if !strings.Contains(r, "`agentbus watch -as "+me+" -filter @"+me+"` is running under the Monitor tool") || !strings.Contains(r, "timeout_ms 1800000") || strings.Contains(r, "agentbus wait") {
-					t.Fatalf("claude-code must get the watch text only: %q", r)
-				}
-				return
-			}
-			want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + " -filter @" + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."
-			if !strings.Contains(r, want) || strings.Contains(r, "agentbus watch") {
-				t.Fatalf("other harness must get the original wait text: %q", r)
+			want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."
+			if r := res["reason"]; !strings.HasSuffix(r, want) || strings.Contains(r, "Monitor") {
+				t.Fatalf("every harness gets the wait text: %q", r)
 			}
 		})
 	}

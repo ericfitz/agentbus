@@ -1,7 +1,7 @@
 # ADR 0021: `agentbus watch` keeps Claude Code awake under Monitor
 
-Status: Accepted 2026-10-20. Issue #38. The goal and acceptance criteria
-come from the issue, which the user filed. The rulings below were drafted
+Status: Superseded by ADR 0025 (2026-10-22). Originally accepted 2026-10-20.
+Issue #38. The goal and acceptance criteria come from the issue, which the user filed. The rulings below were drafted
 by Claude during an autonomous run and ratified by the user on 2026-10-20.
 
 ## Context

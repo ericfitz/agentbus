@@ -125,12 +125,12 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		`Agentbus: call the register tool now with the name parameter set to "Sam"`,
 		"Then follow this protocol:",
 		"- Call receive right after registering",
-		`run "agentbus watch -filter @<your-name>" under the Monitor`,
-		"timeout_ms 1800000",
-		"do not start it again",
-		"expired (timed out), start it again, whatever the exit code",
-		"without an expiry notice: do nothing",
-		`run "agentbus wait -filter @<your-name>" in a`,
+		"- Except on Codex, keep a background \"agentbus wait\" running (no -filter),",
+		"receive (ack the previous batch), handle what concerns you, and start it",
+		"On exit 3 (replaced) or 4 (harness gone), do nothing. Codex has no",
+		"message wakes an idle agent; a parked one wakes only for DMs. Before",
+		"ending a session with a handoff, run \"agentbus park\"; any later prompt or",
+		"Never poll receive from model turns to wait.",
 		"- Post when you start, finish, or get blocked",
 		"Use general only when you have no\n  project channel",
 		"- Search the memory channels register returned",
@@ -145,6 +145,11 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	for _, bad := range []string{"Monitor", "agentbus watch", "-filter @", "timeout_ms", "expired"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("protocol must not mention %q:\n%s", bad, got)
 		}
 	}
 	if !strings.HasSuffix(got, "\n") {

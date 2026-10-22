@@ -332,9 +332,10 @@ the repository directory's basename; when that directory is your home
 directory (no repository, or a dotfiles repository there) the name is
 `<user>-home`, where `<user>` is the TUI's default name, so it cannot collide
 with the human's own identity. An identity in the file is never rewritten, and
-MCP `register` refuses the configured `tui_name`. Its output is the session protocol every
-agent is told to follow: register, receive, post progress to the chat
-channel, search and post memories, discover.
+MCP `register` refuses the configured `tui_name`. Its output is the session
+protocol every agent is told to follow: register, receive, keep a background
+`agentbus wait` running, post progress to the chat channel, search and post
+memories, discover.
 
 Every bus has two channels from the start, `general` (ordinary) and
 `memory` (memory), recreated after `agentbus reset`.
@@ -489,7 +490,9 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   harness replace each other regardless of `-as` (panes of tmux or screen
   share the tmux server as their harness), and a `-no-harness-watch` wait
   still records its harness.
-- `agentbus watch` is `wait` for Claude Code's Monitor tool (ADR 0021). It
+- `agentbus watch` is deprecated but still available (ADR 0025 stops
+  recommending it; agents run a background `wait` on every harness except
+  Codex). It is `wait` for Claude Code's Monitor tool (ADR 0021). It
   takes `wait`'s flags except `-timeout`, runs until Monitor kills it (at
   most 30 minutes, so run it with `timeout_ms` 1800000 and re-arm it when the
   monitor expires), and prints one line per wake:
@@ -501,8 +504,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   exits 0: 2 on an error (message on stderr), 3 when a newer `watch` or
   `wait` for the same identity replaced it, and 4 when its harness exited
   (both silent). `wait` and `watch` share one lock and pidfile, so either
-  replaces the other. Grok keeps the background `wait`; Codex has no idle
-  wake.
+  replaces the other. Codex has no idle wake.
 - `agentbus identity` prints the registration block (the register sentence
   plus the session protocol) for the current directory. It's also what the
   SessionStart hooks above run.

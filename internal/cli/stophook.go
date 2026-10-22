@@ -23,10 +23,6 @@ type stopHookInput struct {
 	StopHookActiveGrok bool   `json:"stopHookActive"`
 }
 
-// claudeCodeClient is the MCP clientInfo name Claude Code reports (ADR 0015),
-// observed as "claude-code" with Claude Code 2.1.304.
-const claudeCodeClient = "claude-code"
-
 // StopHook is the Stop hook `agentbus init --global` installs in every
 // harness (ADR 0012). When messages the session has not been handed yet are
 // waiting for the session this hook runs for (SessionIdentity, ADR 0017), it prints
@@ -75,17 +71,9 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	}
 	head := fmt.Sprintf("Agentbus: %s new message(s) for %s on %s. Call receive "+
 		"(ack the previous batch) and handle what concerns you. ", n, as, strings.Join(chans, ", "))
-	// ADR 0021: Claude Code keeps an `agentbus watch` under Monitor; every other
-	// harness (or an unknown one, or a failed lookup) keeps the background wait.
-	var tail string
-	if client, err := b.SessionClient(as); err == nil && client == claudeCodeClient {
-		tail = fmt.Sprintf("Then make sure an `agentbus watch -as %s -filter @%s` is running "+
-			"under the Monitor tool with timeout_ms 1800000 (start one if none is running; "+
-			"it replaces any running watch or wait) so the next message wakes you, and stop.", as, as)
-	} else {
-		tail = fmt.Sprintf("Then, except on Codex, make sure a background `agentbus wait -as %s -filter @%s` is running "+
-			"(start one; it replaces any running wait) so the next message wakes you, and stop.", as, as)
-	}
+	// ADR 0025: one tail for every harness; Codex has no idle wake.
+	tail := fmt.Sprintf("Then, except on Codex, make sure a background `agentbus wait -as %s` is running "+
+		"(start one; it replaces any running wait) so the next message wakes you, and stop.", as)
 	reason := head + tail
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }

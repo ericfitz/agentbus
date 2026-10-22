@@ -73,3 +73,9 @@ Rejected:
 
 Superseded in part by [ADR 0020](0020-native-windows-support.md): the process table is also read on Windows (#35).
 The text above is the original decision and is left unchanged.
+
+## Amendment (2026-10-22)
+
+Amended by ADR 0025: `register` under a new top-level name drops the
+process's other top-level rows (decision 6), so a harness's session identity
+is its latest registered name.

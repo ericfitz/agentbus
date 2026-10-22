@@ -75,3 +75,10 @@ Grok keeps the background `agentbus wait` exactly as decided above, and Codex
 still has no idle wake. The Stop hook's reason names the watch for Claude Code
 and the wait for the other harnesses. The text above is the original decision
 and is left unchanged.
+
+## Amendment (2026-10-22)
+
+Amended by ADR 0025: the protocol and the Stop hook reason no longer pass
+`-filter @<name>`, so every subscribed message wakes an idle agent, and the
+reason is the same on every harness. A parked session wakes only for direct
+messages.

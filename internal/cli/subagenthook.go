@@ -67,13 +67,9 @@ func SubagentHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	if live, err := b.SessionLive(parent); err != nil || !live {
 		return
 	}
-	ctx := fmt.Sprintf("Agentbus: If your dispatcher's prompt asks you to use agentbus "+
-		"(for example \"use agentbus\" or \"register with agentbus\"), call the agentbus "+
-		"register tool with parent=%q and name=%q, or the parent= or name= your prompt "+
-		"names (pick another name if it is taken), then pass the \"as\" it returns on "+
-		"every later agentbus call. Follow the using-agentbus protocol, but do not start "+
-		"a background `agentbus wait` or `agentbus watch`: you are short-lived, so use receive instead. "+
-		"Otherwise ignore this note: you do not need to register.",
+	ctx := fmt.Sprintf("Agentbus: If your prompt says to use agentbus, call register with "+
+		"parent=%q and name=%q (or those your prompt names), then follow the using-agentbus "+
+		"skill. Do not start agentbus wait or watch; use receive. Otherwise ignore this.",
 		parent, subagentName(hi.AgentType))
 	_ = json.NewEncoder(out).Encode(map[string]any{"hookSpecificOutput": map[string]string{
 		"hookEventName":     "SubagentStart",

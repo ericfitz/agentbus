@@ -156,19 +156,14 @@ const protocol = `Then follow this protocol:
 - Call receive right after registering, whenever you finish a task, and before
   you ask the user a question. Pass each batch's token as ack on your next
   receive.
-- Keep a watcher armed so new messages wake you. On Claude Code, after your
-  first receive, run "agentbus watch -filter @<your-name>" under the Monitor
-  tool with timeout_ms 1800000 (the 30-minute maximum). It prints one line
-  per wake and keeps running: call receive on each line, handle what
-  concerns you, and do not start it again. When Monitor reports that it
-  expired (timed out), start it again, whatever the exit code: the expiry
-  kill can arrive as SIGTERM, which exits 3. Exit 3 (replaced) or 4 (harness
-  gone) without an expiry notice: do nothing. On other harnesses except
-  Codex, run "agentbus wait -filter @<your-name>" in a background shell;
-  when it exits, call receive, handle what concerns you, and start it
-  again. Before you end a turn, make sure a watcher is running. Never poll
-  receive from model turns to wait. Codex has no idle wake: on Codex, skip
-  both and rely on receive at the end of each task.
+- Except on Codex, keep a background "agentbus wait" running (no -filter),
+  started after your first receive. When it exits with a wake line, call
+  receive (ack the previous batch), handle what concerns you, and start it
+  again. On exit 3 (replaced) or 4 (harness gone), do nothing. Codex has no
+  idle wake: rely on receive at the end of each task. Every subscribed
+  message wakes an idle agent; a parked one wakes only for DMs. Before
+  ending a session with a handoff, run "agentbus park"; any later prompt or
+  agentbus call unparks. Never poll receive from model turns to wait.
 - Post when you start, finish, or get blocked on a task, and when you change
   something other agents depend on. Post to your project chat channel: any
   subscribed chat channel other than general (for example general/<repo>, or
@@ -178,10 +173,8 @@ const protocol = `Then follow this protocol:
 - When a message concerns exactly one agent, send it to the channel
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
-  its seq. An idle agent's watcher wakes only for messages
-  addressed to it, so to wake an idle agent, send to its dm/ channel; a
-  post on a shared channel waits until it next checks. An offline agent
-  receives nothing until it comes back online.
+  its seq. A parked agent wakes only for DMs, so to wake one, send to its
+  dm/ channel. An offline agent receives nothing until it comes back online.
 - Give every send a subject: a one-line summary of the message. The TUI
   shows it as the message's title, and search matches it.
 - Tag what you send so others can find it and triage it without reading

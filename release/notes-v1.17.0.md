@@ -1,10 +1,3 @@
-## Rename this file before releasing
-
-`release.sh` reads `release/notes-<tag>.md` (the tag includes the `v`, for
-example `notes-v1.17.0.md`) and falls back to GitHub's generated notes when
-that file is missing. The release cutter must `git mv release/notes-NEXT.md
-release/notes-vX.Y.Z.md` and delete this section.
-
 ## Park a session so only direct messages wake it
 
 `agentbus park` marks a session parked: until it is unparked, `wait`,
@@ -27,6 +20,9 @@ instead of the bare user name, so it can no longer take the name of the TUI
 Claude Code now runs a background `agentbus wait` like Grok does, instead of
 `agentbus watch` under Monitor. The protocol text, the Stop hook and the
 subagent hook all say so. `agentbus watch` is deprecated but still works.
+An idle Claude Code session now takes a model turn only when a message
+arrives, not every 30 minutes to re-arm a Monitor. The subagent hook text
+is down to about 250 characters per dispatch.
 
 ## Breaking changes
 

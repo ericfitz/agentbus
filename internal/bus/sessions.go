@@ -189,14 +189,16 @@ func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
 // decision 9).
 const TUIContext = "tui"
 
-// LiveTUISession reports whether name is held by a live TUI session.
+// LiveTUISession reports whether name is held by a live TUI session of
+// another process. MCP register refuses the TUI context to agents, so only
+// the TUI writes it.
 func (b *Bus) LiveTUISession(name string) (bool, error) {
 	cutoff, err := b.liveCutoff(b.db)
 	if err != nil {
 		return false, err
 	}
 	var n int
-	if err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND context=? AND heartbeat >= ?", name, TUIContext, cutoff).Scan(&n); err != nil {
+	if err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND context=? AND owner<>? AND heartbeat >= ?", name, TUIContext, b.owner, cutoff).Scan(&n); err != nil {
 		return false, internal(err)
 	}
 	return n > 0, nil

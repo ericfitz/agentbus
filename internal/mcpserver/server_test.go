@@ -1228,3 +1228,54 @@ func TestRegisterRefusesLiveTUIName(t *testing.T) {
 		t.Fatalf("register after the TUI ended: %v", reg)
 	}
 }
+
+// Only the TUI writes the tui context: an agent may not pass it, and one
+// working in a directory named tui gets <parent>/tui, so its own
+// re-register is never mistaken for a TUI (ADR 0025 decision 9).
+func TestRegisterReservesTUIContext(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "internal", "tui")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cs := testSessionIn(t, dir)
+	out, res := call(t, cs, "register", map[string]any{"name": "Sam", "context": "tui"})
+	if !res.IsError || out["code"] != "validation" || !strings.Contains(out["message"].(string), "reserved") {
+		t.Fatalf("explicit tui context accepted: %v", out)
+	}
+	for range 2 {
+		if reg, res := call(t, cs, "register", map[string]any{"name": "Sam"}); res.IsError || reg["as"] != "Sam" {
+			t.Fatalf("register from a tui directory: %v", reg)
+		}
+	}
+	if got := defaultContextFor("/x/internal/tui", nil, nil); got != "internal/tui" {
+		t.Fatalf("default context = %q, want internal/tui", got)
+	}
+}
+
+func TestRegisterRefusesRenameWithParent(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	out, res := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam", "rename": true})
+	if !res.IsError || out["code"] != "validation" {
+		t.Fatalf("rename with parent accepted: %v", out)
+	}
+}
+
+// rename=true does not get past the live-TUI guard.
+func TestRegisterRenameStillRefusesLiveTUIName(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	tb, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tb.Close() })
+	if _, err := tb.Register("boss", "", bus.TUIContext, true); err != nil {
+		t.Fatal(err)
+	}
+	cs := sessionOn(t, cfg)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	if out, res := call(t, cs, "register", map[string]any{"name": "boss", "rename": true}); !res.IsError || !strings.Contains(out["message"].(string), "TUI") {
+		t.Fatalf("rename onto a live TUI name accepted: %v", out)
+	}
+}

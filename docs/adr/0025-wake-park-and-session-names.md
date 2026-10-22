@@ -52,7 +52,8 @@ calls and may be revisited.
    with an error telling the agent to pick another name. The TUI's own
    register is not affected.
 6. **One top-level name per process.** A top-level `register` under a new name
-   drops the process's other top-level session rows. Subagent rows
+   drops the process's other top-level session rows (over MCP only with
+   `rename: true`, decision 8). Subagent rows
    (`parent/name`) stay. Subscriptions and cursors stay, so an old name
    resumes if it is registered again.
 7. **Agents never receive memory channels.** Amends ADR 0008, which let an
@@ -110,7 +111,12 @@ calls and may be revisited.
   ignores case). If either cannot be resolved, the name is not rewritten.
 - **Register guard placement.** The guard is in the MCP server's register
   handler: the TUI calls `bus.Register` directly and keeps its name. The
-  error is a validation error naming `tui_name`.
+  error is a validation error naming `tui_name`. The live-TUI check
+  (decision 9) finds the TUI by its `tui` context, so MCP register refuses
+  an explicit `context: "tui"`, and a working directory named `tui` defaults
+  to `<parent>/tui`. `rename` with `parent` is refused. The check runs
+  outside the register transaction; a TUI starting in between is suffixed,
+  the same gap as a TUI that starts after the agent.
 - **Rename and restore.** A top-level register under a new name drops the
   process's other top-level rows inside the same transaction, and removes
   them from the in-memory restore set (ADR 0022) so a heartbeat does not put

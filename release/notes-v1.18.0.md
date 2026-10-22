@@ -18,7 +18,10 @@ running, only the configured `tui_name` is reserved.
 ## Breaking changes
 
 - `register` under a second top-level name in one session needs
-  `rename: true`.
+  `rename: true`; `rename` with `parent` is refused.
+- `register` refuses `context: "tui"`, which marks the TUI's own session. An
+  agent working in a directory named `tui` now defaults to the context
+  `<parent>/tui` (for example `internal/tui`).
 
 ## Upgrading
 

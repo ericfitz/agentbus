@@ -330,3 +330,14 @@ func TestLiveTUISession(t *testing.T) {
 		}
 	}
 }
+
+// The caller's own rows never count as a TUI held by someone else.
+func TestLiveTUISessionIgnoresOwnRows(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("me", "", TUIContext, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.LiveTUISession("me"); err != nil || got {
+		t.Fatalf("LiveTUISession(own) = %v %v, want false", got, err)
+	}
+}

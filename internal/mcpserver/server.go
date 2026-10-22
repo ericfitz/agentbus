@@ -157,7 +157,12 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 		}
 		return "."
 	}
-	return filepath.Base(cwd)
+	// "tui" marks the TUI's own session (ADR 0025 decision 9), so an agent
+	// working in a directory named tui is told apart by its parent too.
+	if base := filepath.Base(cwd); base != bus.TUIContext {
+		return base
+	}
+	return filepath.Base(filepath.Dir(cwd)) + "/" + bus.TUIContext
 }
 
 // applyPersistent subscribes reg.Sender to the repository's persistent
@@ -383,6 +388,12 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 				if tui {
 					return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("name %q is held by a running TUI (the human); register under another name, e.g. %q", in.Name, in.Name+"-home")}
 				}
+			}
+			if in.Rename && in.Parent != "" {
+				return nil, nil, &bus.Error{Code: "validation", Message: "rename applies to a top-level name; a subagent register passes parent without rename"}
+			}
+			if in.Context == bus.TUIContext {
+				return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("context %q is reserved for agentbus tui; pass another context or omit it", bus.TUIContext)}
 			}
 			c := in.Context
 			if c == "" {

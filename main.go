@@ -46,11 +46,39 @@ func main() {
 func loadConfig(cmd string, args []string) (config.Config, error) {
 	fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
 	path := fs.String("config", "", "configuration file")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return config.Config{}, err
 	}
 	cfg, _, err := config.Load(*path)
 	return cfg, err
+}
+
+// errUnexpectedArg is parseFlags' error for a positional argument given to
+// a command that takes flags only.
+var errUnexpectedArg = errors.New("unexpected argument")
+
+// parseFlags parses args for a command that takes flags only. A leftover
+// positional argument is reported like a bad flag (the error, then the
+// flags) and returns errUnexpectedArg, so it is never silently ignored.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		_, _ = fmt.Fprintf(fs.Output(), "%s: unexpected argument %q; it takes flags only\n", fs.Name(), fs.Arg(0))
+		fs.Usage()
+		return errUnexpectedArg
+	}
+	return nil
+}
+
+// noArgs rejects arguments to a command that takes none (help, version).
+func noArgs(cmd string, args []string) int {
+	if len(args) == 0 {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "agentbus %s: unexpected argument %q; it takes none\n", cmd, args[0])
+	return 2
 }
 
 // parseExit maps a flag parse error to an exit code: -h/--help is success.
@@ -86,7 +114,7 @@ func run(cmd string, args []string) int {
 		fs.StringVar(&o.Harness, "harness", "", "configure only this harness (claude, codex, or grok), even if it is not detected")
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
 		path := fs.String("config", "", "configuration file")
-		if err := fs.Parse(args); err != nil {
+		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
@@ -104,7 +132,7 @@ func run(cmd string, args []string) int {
 		fs := flag.NewFlagSet("agentbus tui", flag.ContinueOnError)
 		path := fs.String("config", "", "configuration file")
 		as := fs.String("as", "", "identity to register as (default: tui_name from the config)")
-		if err := fs.Parse(args); err != nil {
+		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
@@ -127,7 +155,7 @@ func run(cmd string, args []string) int {
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep waiting after the harness that started this wait exits (default: exit 4, silently)")
 		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity (or from the same harness) replaced this one, exit 4 that the harness that started it is gone")
-		if err := fs.Parse(args); err != nil {
+		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
@@ -173,7 +201,7 @@ func run(cmd string, args []string) int {
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
 		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages")
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep watching after the harness that started this watch exits (default: exit 4, silently)")
-		if err := fs.Parse(args); err != nil {
+		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
 		cfg, _, err := config.Load(*path)
@@ -235,12 +263,21 @@ func run(cmd string, args []string) int {
 		cli.SubagentHook(cfg, os.Stdin, os.Stdout, os.Stderr)
 		return 0
 	case "help", "-h", "--help":
+		if code := noArgs(cmd, args); code != 0 {
+			return code
+		}
 		fmt.Println(usage)
 		return 0
 	case "version", "-v", "--version":
+		if code := noArgs(cmd, args); code != 0 {
+			return code
+		}
 		fmt.Println(mcpserver.Version)
 		return 0
 	case "identity":
+		if err := parseFlags(flag.NewFlagSet("agentbus identity", flag.ContinueOnError), args); err != nil {
+			return parseExit(err)
+		}
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)

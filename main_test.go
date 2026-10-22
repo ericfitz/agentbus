@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 var (
@@ -122,7 +124,7 @@ func TestUnknownCommandExit2(t *testing.T) {
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
 	cmds := []string{"mcp", "init", "tui", "wait", "watch", "status", "reset", "delete-channel",
-		"subscribe", "unsubscribe", "stop-hook", "subagent-hook"}
+		"subscribe", "unsubscribe", "stop-hook", "subagent-hook", "identity"}
 	for _, c := range cmds {
 		for _, h := range []string{"-h", "--help"} {
 			t.Run(c+" "+h, func(t *testing.T) {
@@ -146,6 +148,66 @@ func TestUnknownFlagStillFails(t *testing.T) {
 				t.Errorf("%s -bogus exited 0", c)
 			}
 		})
+	}
+}
+
+// TestExtraArgumentsRejected: a command that takes flags only (or nothing)
+// reports a positional argument instead of ignoring it. The hooks report it
+// but still exit 0, so a misconfigured hook never blocks the harness. Each
+// run has a deadline: before the fix, wait, watch and tui ran with the
+// argument ignored and never exited.
+func TestExtraArgumentsRejected(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"mcp", "extra"}, 1, `agentbus mcp: unexpected argument "extra"`},
+		{[]string{"init", "extra"}, 2, `agentbus init: unexpected argument "extra"`},
+		{[]string{"tui", "extra"}, 2, `agentbus tui: unexpected argument "extra"`},
+		{[]string{"wait", "-as", "Pat", "extra"}, 2, `agentbus wait: unexpected argument "extra"`},
+		{[]string{"watch", "-as", "Pat", "extra"}, 2, `agentbus watch: unexpected argument "extra"`},
+		{[]string{"status", "extra"}, 1, `agentbus status: unexpected argument "extra"`},
+		{[]string{"reset", "extra"}, 1, `agentbus reset: unexpected argument "extra"`},
+		{[]string{"identity", "Sam"}, 2, `agentbus identity: unexpected argument "Sam"`},
+		{[]string{"stop-hook", "extra"}, 0, `agentbus stop-hook: unexpected argument "extra"`},
+		{[]string{"subagent-hook", "extra"}, 0, `agentbus subagent-hook: unexpected argument "extra"`},
+		{[]string{"version", "extra"}, 2, `agentbus version: unexpected argument "extra"`},
+		{[]string{"--version", "extra"}, 2, `agentbus --version: unexpected argument "extra"`},
+		{[]string{"help", "status"}, 2, `agentbus help: unexpected argument "status"`},
+		{[]string{"-h", "status"}, 2, `agentbus -h: unexpected argument "status"`},
+	} {
+		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, testBinary(t), c.args...)
+			cmd.Dir = t.TempDir()
+			cmd.Env = append(os.Environ(), "HOME="+cmd.Dir, "USERPROFILE="+cmd.Dir)
+			var so, se bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &so, &se
+			err := cmd.Run()
+			if ctx.Err() != nil {
+				t.Fatalf("did not exit within 10s: the argument was ignored")
+			}
+			code := 0
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				code = ee.ExitCode()
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if code != c.code || so.Len() != 0 || !strings.Contains(se.String(), c.want) {
+				t.Errorf("exit %d stdout %q stderr %q; want exit %d, %q on stderr only", code, so.String(), se.String(), c.code, c.want)
+			}
+		})
+	}
+}
+
+// TestIdentityUnknownFlag: identity has no flags, so any flag is an error.
+func TestIdentityUnknownFlag(t *testing.T) {
+	r := execBin(t, "identity", "-bogus")
+	if r.code != 2 || r.stdout != "" || !strings.Contains(r.stderr, "Usage of agentbus identity") {
+		t.Errorf("exit %d stdout %q stderr %q; want exit 2 with usage on stderr only", r.code, r.stdout, r.stderr)
 	}
 }
 

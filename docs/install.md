@@ -335,7 +335,10 @@ the repository directory's basename; when that directory is your home
 directory (no repository, or a dotfiles repository there) the name is
 `<user>-home`, where `<user>` is the TUI's default name, so it cannot collide
 with the human's own identity. An identity in the file is never rewritten, and
-MCP `register` refuses the configured `tui_name`. Its output is the session
+MCP `register` refuses the configured `tui_name` and any name a running
+`agentbus tui` holds. A session that already holds a name cannot register a
+second top-level name unless it passes `rename: true`, which ends the old
+one; a subagent passes `parent` instead. Its output is the session
 protocol every agent is told to follow: register, receive, keep a background
 `agentbus wait` running, post progress to the chat channel, search and post
 memories, discover.

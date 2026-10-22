@@ -33,6 +33,7 @@ type registerIn struct {
 	Parent  string `json:"parent,omitempty" jsonschema:"display name of the parent identity when registering a subagent"`
 	Context string `json:"context,omitempty" jsonschema:"repository hint; defaults to the working directory basename"`
 	Resume  *bool  `json:"resume,omitempty" jsonschema:"default true; false drops this name's existing subscriptions, inbox included, so only messages sent after this register are delivered"`
+	Rename  bool   `json:"rename,omitempty" jsonschema:"true to replace this session's current top-level name with name; without it such a register is refused"`
 }
 
 // asIn field is deliberately omitempty even though every non-register tool
@@ -367,10 +368,21 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are never pushed to you: they are returned in memory_channels for you to search, and register drops any memory subscription you still hold. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags, and entries that are not valid tags in ignored_tags; use repo_tags and the using-agentbus vocabulary before inventing a tag. Registering a new top-level name ends your previous name, so a subagent must pass parent."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are never pushed to you: they are returned in memory_channels for you to search, and register drops any memory subscription you still hold. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags, and entries that are not valid tags in ignored_tags; use repo_tags and the using-agentbus vocabulary before inventing a tag. A subagent must pass parent: a register under a new top-level name while this session holds one is refused unless rename=true, which ends the previous name. Names held by the human TUI are refused."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			if in.Name != "" && in.Name == cfg.TUIName {
 				return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("name %q is the human TUI identity (tui_name); register under another name, e.g. %q", in.Name, in.Name+"-home")}
+			}
+			// Any name a live TUI holds is the human's too, whatever -as or
+			// -config it was started with (ADR 0025 decision 9).
+			if in.Parent == "" {
+				tui, err := b.LiveTUISession(in.Name)
+				if err != nil {
+					return nil, nil, err
+				}
+				if tui {
+					return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("name %q is held by a running TUI (the human); register under another name, e.g. %q", in.Name, in.Name+"-home")}
+				}
 			}
 			c := in.Context
 			if c == "" {
@@ -381,7 +393,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			if ci := req.ClientInfo(); ci != nil {
 				harness, harnessVersion = ci.Name, ci.Version
 			}
-			reg, err := b.RegisterWithClient(in.Name, in.Parent, c, resume, harness, harnessVersion)
+			reg, err := b.RegisterWithClient(in.Name, in.Parent, c, resume, in.Rename, harness, harnessVersion)
 			if err != nil {
 				return nil, nil, err
 			}

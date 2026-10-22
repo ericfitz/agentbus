@@ -45,7 +45,7 @@ func TestHeartbeatRestoresSweptSession(t *testing.T) {
 	b := newTestBus(t)
 	h := procs.Ref{Pid: 100, Start: 5}
 	b.SetHarness(h)
-	if _, err := b.RegisterWithClient("repo", "", "ctx", true, "claude-code", "2.0"); err != nil {
+	if _, err := b.RegisterWithClient("repo", "", "ctx", true, false, "claude-code", "2.0"); err != nil {
 		t.Fatal(err)
 	}
 	_, _, regAt, _ := sessionRowFor(t, b, "repo")

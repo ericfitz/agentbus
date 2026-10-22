@@ -604,10 +604,10 @@ func TestRegisterExistingCursorUntouched(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 	cs := testSessionIn(t, dir)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
-	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim"})
+	kim, _ := call(t, cs, "register", map[string]any{"name": "Kim", "rename": true})
 	call(t, cs, "send", map[string]any{"as": kim["as"], "channel": "general", "content": "before"})
 	// Re-register; the general cursor must still be behind the message.
-	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "register", map[string]any{"name": "Sam", "rename": true})
 	got, _ := call(t, cs, "receive", map[string]any{"as": "Sam"})
 	if msgs, _ := got["messages"].([]any); len(msgs) != 1 {
 		t.Fatal("cursor moved on re-register:", got)
@@ -1042,7 +1042,8 @@ func TestRegisterRecordsClientInfoFromInitialize(t *testing.T) {
 	if len(ss) != 1 || ss[0]["harness"] != "claude-code" || ss[0]["harness_version"] != "2.1.0" {
 		t.Fatalf("discover: %v", ss)
 	}
-	// A client with an empty clientInfo registers and shows no harness.
+	// A client with an empty clientInfo registers and shows no harness. It
+	// shares the server's process, so taking a second name is a rename.
 	st2, ct2 := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(ctx, st2, nil); err != nil {
 		t.Fatal(err)
@@ -1052,7 +1053,7 @@ func TestRegisterRecordsClientInfoFromInitialize(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs2.Close() })
-	if reg2, _ := call(t, cs2, "register", map[string]any{"name": "Kim"}); reg2["as"] != "Kim" {
+	if reg2, _ := call(t, cs2, "register", map[string]any{"name": "Kim", "rename": true}); reg2["as"] != "Kim" {
 		t.Fatalf("register without clientInfo: %v", reg2)
 	}
 }
@@ -1179,5 +1180,51 @@ func TestRegisterRefusesTUIName(t *testing.T) {
 	}
 	if _, res := call(t, cs, "register", map[string]any{"name": cfg.TUIName + "-home"}); res.IsError {
 		t.Fatal("register under <tui_name>-home was refused")
+	}
+}
+
+// ADR 0025 decision 8 over MCP: a second top-level name on one session needs
+// rename=true; the refusal tells a subagent to pass parent.
+func TestRegisterRefusesParentlessRename(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	out, res := call(t, cs, "register", map[string]any{"name": "Kim"})
+	if !res.IsError || out["code"] != "validation" {
+		t.Fatalf("parentless rename accepted: %v", out)
+	}
+	if msg := out["message"].(string); !strings.Contains(msg, `parent="Sam"`) || !strings.Contains(msg, "rename=true") {
+		t.Fatalf("refusal must name parent and rename: %s", msg)
+	}
+	if sub, res := call(t, cs, "register", map[string]any{"name": "worker", "parent": "Sam"}); res.IsError || sub["as"] != "Sam/worker" {
+		t.Fatalf("subagent register: %v", sub)
+	}
+	if kim, res := call(t, cs, "register", map[string]any{"name": "Kim", "rename": true}); res.IsError || kim["as"] != "Kim" {
+		t.Fatalf("rename=true: %v", kim)
+	}
+}
+
+// ADR 0025 decision 9: a name a live TUI holds is refused, whatever tui_name
+// says, and is free again once the TUI ends.
+func TestRegisterRefusesLiveTUIName(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	tb, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tb.Close() })
+	if _, err := tb.Register("boss", "", bus.TUIContext, true); err != nil {
+		t.Fatal(err)
+	}
+	cs := sessionOn(t, cfg)
+	out, res := call(t, cs, "register", map[string]any{"name": "boss"})
+	if !res.IsError || out["code"] != "validation" || !strings.Contains(out["message"].(string), "TUI") {
+		t.Fatalf("want validation error naming the TUI, got %v", out)
+	}
+	if err := tb.EndSessions(); err != nil {
+		t.Fatal(err)
+	}
+	if reg, res := call(t, cs, "register", map[string]any{"name": "boss"}); res.IsError || reg["as"] != "boss" {
+		t.Fatalf("register after the TUI ended: %v", reg)
 	}
 }

@@ -650,7 +650,7 @@ func TestMigrateV7AddsSessionHarness(t *testing.T) {
 	if h != "" || hv != "" {
 		t.Fatalf("existing row harness = %q %q, want empty", h, hv)
 	}
-	if _, err := b.RegisterWithClient("New", "", "repo", true, "claude-code", "2.1.0"); err != nil {
+	if _, err := b.RegisterWithClient("New", "", "repo", true, false, "claude-code", "2.1.0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.db.QueryRow("SELECT harness, harness_version FROM sessions WHERE sender='New'").Scan(&h, &hv); err != nil || h != "claude-code" || hv != "2.1.0" {

@@ -1,6 +1,9 @@
 package bus
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // ADR 0025 decision 6: a process holds one top-level name; a top-level
 // register under a new name drops its other top-level rows.
@@ -248,5 +251,82 @@ func TestRenameClearsDroppedNamesPark(t *testing.T) {
 	}
 	if !b.Parked("other") {
 		t.Fatal("a rename must not clear an unrelated name's park")
+	}
+}
+
+// ADR 0025 decision 8: without rename, a top-level register under a new
+// name is refused while the process holds a live top-level name.
+func TestParentlessRenameNeedsFlag(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.RegisterWithClient("alpha", "", "", true, false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.RegisterWithClient("beta", "", "", true, false, "", "")
+	msg := errText(t, err, "validation")
+	for _, want := range []string{`"alpha"`, `parent="alpha"`, "rename=true"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal must mention %s: %s", want, msg)
+		}
+	}
+	wantRows(t, topLevelRows(t, b), "alpha")
+	if _, ok := b.rememberedRow("alpha"); !ok {
+		t.Fatal("a refused rename must keep alpha")
+	}
+	// Re-registering the held name and registering a subagent stay allowed.
+	if _, err := b.RegisterWithClient("alpha", "", "", true, false, "", ""); err != nil {
+		t.Fatalf("idempotent re-register refused: %v", err)
+	}
+	if _, err := b.RegisterWithClient("helper", "alpha", "", true, false, "", ""); err != nil {
+		t.Fatalf("subagent register refused: %v", err)
+	}
+	if _, err := b.RegisterWithClient("beta", "", "", true, true, "", ""); err != nil {
+		t.Fatalf("rename=true refused: %v", err)
+	}
+	wantRows(t, topLevelRows(t, b), "beta")
+}
+
+// A suffixed name the process already holds is a re-register, not a rename.
+func TestParentlessReRegisterOfSuffixedNameAllowed(t *testing.T) {
+	b := newTestBus(t)
+	insertForeignSession(t, b, "beta", "someone-else")
+	reg, err := b.RegisterWithClient("beta", "", "", true, false, "", "")
+	if err != nil || reg.Sender != "beta2" {
+		t.Fatalf("first register = %q %v, want beta2", reg.Sender, err)
+	}
+	if reg, err = b.RegisterWithClient("beta", "", "", true, false, "", ""); err != nil || reg.Sender != "beta2" {
+		t.Fatalf("re-register = %q %v, want beta2", reg.Sender, err)
+	}
+}
+
+// A name whose session has expired is not held, so no flag is needed.
+func TestParentlessRegisterAfterExpiryAllowed(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.RegisterWithClient("alpha", "", "", true, false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("UPDATE sessions SET heartbeat=0 WHERE sender='alpha'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.RegisterWithClient("beta", "", "", true, false, "", ""); err != nil {
+		t.Fatalf("register after alpha expired refused: %v", err)
+	}
+	wantRows(t, topLevelRows(t, b), "beta")
+}
+
+// ADR 0025 decision 9: LiveTUISession matches only a live session with the
+// TUI context.
+func TestLiveTUISession(t *testing.T) {
+	b := newTestBus(t)
+	insertForeignSession(t, b, "agent", "someone-else")
+	if _, err := b.db.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES(?,?,?,?,?),(?,?,?,?,?)",
+		"human", TUIContext, "tui-proc", b.nowMs(), b.nowMs(),
+		"stale", TUIContext, "tui-proc2", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]bool{"human": true, "agent": false, "stale": false, "nobody": false} {
+		got, err := b.LiveTUISession(name)
+		if err != nil || got != want {
+			t.Errorf("LiveTUISession(%q) = %v %v, want %v", name, got, err, want)
+		}
 	}
 }

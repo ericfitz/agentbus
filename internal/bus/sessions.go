@@ -184,15 +184,37 @@ func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
 	return h, true, nil
 }
 
-// Register is RegisterWithClient for a caller with no MCP clientInfo.
+// TUIContext is the context the TUI registers with; register over MCP
+// refuses any name a live session with this context holds (ADR 0025
+// decision 9).
+const TUIContext = "tui"
+
+// LiveTUISession reports whether name is held by a live TUI session.
+func (b *Bus) LiveTUISession(name string) (bool, error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return false, err
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender=? AND context=? AND heartbeat >= ?", name, TUIContext, cutoff).Scan(&n); err != nil {
+		return false, internal(err)
+	}
+	return n > 0, nil
+}
+
+// Register is RegisterWithClient for an in-process caller with no MCP
+// clientInfo (the TUI, tests). It may rename: the refusal in ADR 0025
+// decision 8 guards agents sharing one MCP process.
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
-	return b.RegisterWithClient(name, parent, context, resume, "", "")
+	return b.RegisterWithClient(name, parent, context, resume, true, "", "")
 }
 
 // RegisterWithClient registers like Register and records harness and
 // harnessVersion (the MCP initialize clientInfo name and version, ADR 0015)
-// on the session, replacing whatever an earlier register stored.
-func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harness, harnessVersion string) (Registration, error) {
+// on the session, replacing whatever an earlier register stored. rename
+// lets a top-level register replace the process's live top-level name; without
+// it that register is refused (ADR 0025 decision 8).
+func (b *Bus) RegisterWithClient(name, parent, context string, resume, rename bool, harness, harnessVersion string) (Registration, error) {
 	harness, harnessVersion = cleanClientField(harness), cleanClientField(harnessVersion)
 	if err := validateName(name); err != nil {
 		return Registration{}, err
@@ -247,6 +269,19 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 			break
 		}
 		display = fmt.Sprintf("%s%s%d", base, sep, n)
+	}
+	// A subagent shares its parent's MCP process, so a parentless register
+	// from one would rename the parent; refuse it unless the caller says it
+	// means to rename (ADR 0025 decision 8).
+	if parent == "" && !rename {
+		var held string
+		err := tx.QueryRow("SELECT sender FROM sessions WHERE owner=? AND instr(sender,'/')=0 AND sender<>? ORDER BY registered_at DESC LIMIT 1", b.owner, display).Scan(&held)
+		if err == nil {
+			return Registration{}, errf("validation", false, "this process is registered as %q; a subagent registers with parent=%q, and renaming %q to %q takes rename=true", held, held, held, name)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Registration{}, internal(err)
+		}
 	}
 	if reused {
 		// registered_at moves too: IdentityForHarness takes the most recent

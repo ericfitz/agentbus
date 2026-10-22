@@ -133,7 +133,7 @@ func TestVisualEditorRunsInBackground(t *testing.T) {
 // one that sent none, and leaves out the TUI's own session.
 func TestHealthLinesShowHarness(t *testing.T) {
 	f := newFixture(t)
-	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, "claude-code", "2.1.0"); err != nil {
+	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, false, "claude-code", "2.1.0"); err != nil {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())
@@ -144,7 +144,7 @@ func TestHealthLinesShowHarness(t *testing.T) {
 	if strings.Contains(body, "eric ") {
 		t.Fatalf("health body lists the TUI's own session:\n%s", body)
 	}
-	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, "", ""); err != nil {
+	if _, err := f.ab.RegisterWithClient("Sam", "", "test", true, false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	f.run(f.m.statusCmd())

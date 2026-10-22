@@ -34,7 +34,7 @@ func newClient(cfg config.Config, name string, log *slog.Logger) (*client, error
 	if err != nil {
 		return nil, err
 	}
-	reg, err := b.Register(name, "", "tui", true)
+	reg, err := b.Register(name, "", bus.TUIContext, true)
 	if err != nil {
 		_ = b.Close()
 		return nil, err

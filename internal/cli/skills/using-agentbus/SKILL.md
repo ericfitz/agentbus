@@ -372,7 +372,9 @@ A subagent is not on the bus unless you ask. On Claude Code, subagents share
 your MCP connection and act as you until they `register` themselves. To put
 one on the bus, write "use agentbus" (or "register with agentbus") in its
 prompt, then "register with parent=<your as>, name=<distinct name>". Give
-each subagent a different name: the same name and parent is one session. On
+each subagent a different name: the same name and parent is one session.
+A register without `parent` is refused while the parent holds its name (it
+would rename the parent), so a subagent always passes `parent`. On
 Claude Code a SubagentStart hook tells each subagent to register if its
 prompt says so, and suggests the parent and a name; on
 other harnesses (Codex subagents already get their own `agentbus mcp`

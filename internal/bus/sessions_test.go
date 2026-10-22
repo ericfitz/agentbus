@@ -279,7 +279,7 @@ func TestEndSessionsFreesOwnNamesImmediately(t *testing.T) {
 // characters and over-length text.
 func TestRegisterRecordsAndRefreshesClientInfo(t *testing.T) {
 	b := newTestBus(t)
-	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "claude-code", "2.1.0"); err != nil {
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, false, "claude-code", "2.1.0"); err != nil {
 		t.Fatal(err)
 	}
 	find := func() Session {
@@ -299,7 +299,7 @@ func TestRegisterRecordsAndRefreshesClientInfo(t *testing.T) {
 	if s := find(); s.Harness != "claude-code" || s.HarnessVersion != "2.1.0" {
 		t.Fatalf("recorded %+v", s)
 	}
-	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "codex", "0.9"); err != nil {
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, false, "codex", "0.9"); err != nil {
 		t.Fatal(err)
 	}
 	if s := find(); s.Harness != "codex" || s.HarnessVersion != "0.9" {
@@ -316,7 +316,7 @@ func TestRegisterRecordsAndRefreshesClientInfo(t *testing.T) {
 	if strings.Contains(string(j), "harness") {
 		t.Fatalf("empty harness fields must be omitted: %s", j)
 	}
-	if _, err := b.RegisterWithClient("Sam", "", "repo", true, "bad\x1b[31mname", strings.Repeat("v", 300)); err != nil {
+	if _, err := b.RegisterWithClient("Sam", "", "repo", true, false, "bad\x1b[31mname", strings.Repeat("v", 300)); err != nil {
 		t.Fatal(err)
 	}
 	if s := find(); s.Harness != "bad[31mname" || len(s.HarnessVersion) != 128 {

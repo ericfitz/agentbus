@@ -87,7 +87,7 @@ func TestStopHookReasonSameForEveryHarness(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = b.Close() }()
-			if _, err := b.RegisterWithClient(me, "", "", false, harness, "1.0"); err != nil {
+			if _, err := b.RegisterWithClient(me, "", "", false, false, harness, "1.0"); err != nil {
 				t.Fatal(err)
 			}
 			sam := peerBus(t, cfg, "Sam")

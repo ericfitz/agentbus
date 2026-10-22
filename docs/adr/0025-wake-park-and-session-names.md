@@ -98,7 +98,14 @@ calls and may be revisited.
   process's other top-level rows inside the same transaction, and removes
   them from the in-memory restore set (ADR 0022) so a heartbeat does not put
   them back. Re-registering the same name changes nothing, and neither does
-  a subagent register.
+  a subagent register. A rename ends the old name's session: the
+  maintenance tick treats tasks claimed under the old name as abandoned and
+  reclaims them (a task owner counts as live only while a session row with
+  that name has a fresh heartbeat), and re-registering the old name does not
+  restore their ownership. By the ADR 0014 per-harness rule, the next
+  top-level `agentbus wait` from the same harness replaces a wait still
+  running under the old name (`acquireWaitLock` terminates a live wait of
+  another top-level identity from that harness).
 - **Subagent hook text** is the register call (parent and suggested name),
   a pointer to the using-agentbus skill, and the sentence telling the
   subagent not to start a wait or watch.

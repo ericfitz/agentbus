@@ -391,11 +391,25 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 			}
 		}
 	}
+	// Forget the dropped names before the commit: once it lands, a Heartbeat
+	// blocked on the write lock could re-insert a dropped row and still pass
+	// restore's remembered check. If the commit fails the rows are still in
+	// the database, so they are remembered again.
+	forgotten := make([]sessionRow, 0, len(dropped))
+	for _, d := range dropped {
+		if r, ok := b.rememberedRow(d); ok {
+			forgotten = append(forgotten, r)
+		}
+		b.forget(d)
+	}
 	if err := tx.Commit(); err != nil {
+		for _, r := range forgotten {
+			b.remember(r)
+		}
 		return Registration{}, internal(err)
 	}
-	for _, d := range dropped {
-		b.forget(d)
+	if b.afterRegisterCommit != nil {
+		b.afterRegisterCommit()
 	}
 	b.remember(sessionRow{sender: display, context: context, harness: harness, harnessVersion: harnessVersion,
 		harnessPid: b.harness.Pid, harnessStart: b.harness.Start, registeredAt: now, generation: gen})

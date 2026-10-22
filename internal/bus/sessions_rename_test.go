@@ -134,3 +134,97 @@ func TestRenameAndBackKeepsCursors(t *testing.T) {
 	}
 	wantRows(t, topLevelRows(t, b), "alpha")
 }
+
+func insertForeignSession(t *testing.T, b *Bus, sender, owner string) {
+	t.Helper()
+	if _, err := b.db.Exec("INSERT INTO sessions(sender,context,owner,heartbeat,registered_at) VALUES(?,?,?,?,?)",
+		sender, "", owner, b.nowMs(), b.nowMs()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A heartbeat that restores the dropped name right after the rename commits
+// must not leave a row behind.
+func TestRenameRestoreAtCommitLeavesNoZombie(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("alpha", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	old, ok := b.rememberedRow("alpha")
+	if !ok {
+		t.Fatal("alpha not remembered")
+	}
+	b.afterRegisterCommit = func() {
+		if _, err := b.restore(b.db, old); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := b.Register("beta", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	b.afterRegisterCommit = nil
+	wantRows(t, topLevelRows(t, b), "beta")
+	if err := b.Heartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	wantRows(t, topLevelRows(t, b), "beta")
+}
+
+func TestRenameKeepsOtherOwnersTopLevelRows(t *testing.T) {
+	b := newTestBus(t)
+	insertForeignSession(t, b, "gamma", "someone-else")
+	if _, err := b.Register("alpha", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("beta", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	wantRows(t, topLevelRows(t, b), "beta")
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM sessions WHERE sender='gamma'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("other owner's row count = %d %v", n, err)
+	}
+}
+
+func TestRenameOntoSuffixedNameDropsOld(t *testing.T) {
+	b := newTestBus(t)
+	insertForeignSession(t, b, "beta", "someone-else")
+	if _, err := b.Register("alpha", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := b.Register("beta", "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reg.Sender != "beta2" {
+		t.Fatalf("sender = %q, want beta2", reg.Sender)
+	}
+	wantRows(t, topLevelRows(t, b), "beta2")
+	if _, ok := b.rememberedRow("alpha"); ok {
+		t.Fatal("alpha still remembered")
+	}
+}
+
+func TestRenameAfterResetDoesNotRestoreOld(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("alpha", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := b.rememberedRow("alpha")
+	if _, err := b.db.Exec("INSERT INTO meta(key,value) VALUES('reset_generation',1) ON CONFLICT(key) DO UPDATE SET value=value+1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec("DELETE FROM sessions"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Register("beta", "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := b.restore(b.db, old); err != nil || ok {
+		t.Fatalf("restore(alpha) = %v %v, want false", ok, err)
+	}
+	if err := b.Heartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	wantRows(t, topLevelRows(t, b), "beta")
+}

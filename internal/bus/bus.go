@@ -44,6 +44,8 @@ type Bus struct {
 	// rememberedMu: Heartbeat runs on a background goroutine.
 	rememberedMu sync.Mutex
 	remembered   map[string]sessionRow
+	// afterRegisterCommit is a test seam, called right after Register commits.
+	afterRegisterCommit func()
 	// observer is the identity SetObserver granted DM-inbox read/subscribe
 	// access to everywhere, set once before use so no lock guards it.
 	observer string

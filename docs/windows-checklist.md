@@ -59,6 +59,11 @@ machine or a cloud Windows VM with nested virtualization.
 
 - [ ] `scoop bucket add ericfitz https://github.com/ericfitz/scoop-bucket && scoop install agentbus`
       installs; `scoop update agentbus` after stopping sessions upgrades.
+- [ ] Before pushing new manifests to winget-pkgs, from an elevated
+      terminal once: `winget settings --enable LocalManifestFiles`; then
+      `powershell -ExecutionPolicy Bypass -File release\test-winget.ps1 -ManifestDir release\winget\<version>`
+      passes (validate, install for x64 and arm64, bare run exits 0,
+      version, Defender scan, uninstall with nothing left).
 - [ ] `winget install ericfitz.agentbus` installs once the package is
       published.
 - [ ] On a release made with `--windows-signing=on`:

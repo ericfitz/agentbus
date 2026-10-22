@@ -1,0 +1,7 @@
+a5b76d15bb8fe76ecc0ac6f940fbc43859627cf4d740368af4cc85ece5268ea2  agentbus-v1.16.0-macos-universal.tar.gz
+37a1538a0f87d67f4bc87d37cc9a137f87d553b3bde130affb54fc953eb4b470  agentbus-v1.16.0-linux-amd64.tar.gz
+929dbeb8b38d06e26297a2cba471b8ac3ee6f763f8cb85701fe3edb345b827c3  agentbus-v1.16.0-linux-arm64.tar.gz
+de7b967d831647c0055abbd392f7bf8570d896d150560fe8b4c2b823f222f8bb  agentbus-v1.16.0-windows-amd64.zip
+05404ebc208a9775dbbdae6fc71362c222de5ec6c5038d7ba4ce0bc97f307dde  agentbus-v1.16.0-windows-arm64.zip
+4d26892b784e13becb5b5ef29b32ca1b081709898e4d8f33a184f64a393355fb  install.sh
+a4bbe603a36fde5595b3e0dc9e4d56f8b6ae3ec458758c40bad26959aeddaf54  install.ps1

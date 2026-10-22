@@ -1,5 +1,5 @@
-# Informational: runs the Go tests and the install.ps1 harness on Windows
-# amd64 and arm64. It does not gate; `make verify` is the done gate.
+# Informational: runs the Go tests, the install.ps1 harness and the
+# test-winget.ps1 self-test on Windows amd64 and arm64. It does not gate; `make verify` is the done gate.
 name: windows
 on:
   push:
@@ -31,3 +31,9 @@ jobs:
       - name: install.ps1 harness (PowerShell 7)
         shell: pwsh
         run: ./release/test-install.ps1
+      - name: test-winget.ps1 self-test (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\release\test-winget.ps1 -SelfTest
+      - name: test-winget.ps1 self-test (PowerShell 7)
+        shell: pwsh
+        run: ./release/test-winget.ps1 -SelfTest

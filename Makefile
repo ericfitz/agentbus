@@ -44,6 +44,7 @@ release-check: ## Release tooling checks: actionlint, shellcheck, release.sh uni
 	shellcheck -x release/*.sh
 	shellcheck -s sh install.sh
 	@echo "note: release/test-install.ps1 runs on Windows only (windows.yml, release/test-windows.ps1)"
+	@echo "note: release/test-winget.ps1 -SelfTest runs in windows.yml; run it here with pwsh if installed"
 	release/test-release.sh
 	release/test-render.sh
 	release/test-install.sh

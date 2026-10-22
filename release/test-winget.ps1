@@ -336,7 +336,19 @@ function Get-InstalledState {
 function Invoke-Uninstall([string]$Dir) {
     $r = Invoke-Winget @('uninstall', '--manifest', $Dir, '--purge', '--disable-interactivity', '--accept-source-agreements')
     Assert "winget uninstall --manifest --purge (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
-    if ($r.Code -ne 0) { Show-Failure $r }
+    if ($r.Code -ne 0) { Show-Failure $r; return }
+    # winget removes the package folder but leaves the user PATH entry it
+    # added for it (seen with winget in the Windows 11 ARM VM, 2026-10-21).
+    # That is winget's leak, not the package's, so drop it and say so.
+    Remove-StalePathDebris 'note: winget left'
+}
+
+# Remove-StalePathDebris removes user PATH entries naming the package's
+# winget folders that no longer exist, printing each with $Prefix.
+function Remove-StalePathDebris([string]$Prefix) {
+    $stale = Get-StalePathEntries (Get-UserPath) { param($x) Test-Path -LiteralPath $x }
+    foreach ($e in $stale) { Write-Host "    $Prefix user PATH entry $e (its folder is gone); removing it" }
+    if ($stale.Count -gt 0) { Remove-UserPathEntries $stale }
 }
 
 function Test-Preconditions {
@@ -448,12 +460,10 @@ function Invoke-CleanupRun {
         # folders and PATH entries naming folders that are gone.
         Write-Host "winget has no install record for $PackageId; removing its leftovers"
         foreach ($d in (Get-PackageDirs $env:LOCALAPPDATA)) { Write-Host "    removing $d"; Remove-Item -LiteralPath $d -Recurse -Force }
-        $stale = Get-StalePathEntries (Get-UserPath) { param($x) Test-Path -LiteralPath $x }
-        foreach ($e in $stale) { Write-Host "    removing user PATH entry $e" }
-        if ($stale.Count -gt 0) { Remove-UserPathEntries $stale }
+        Remove-StalePathDebris 'found'
     } else {
         Assert "winget uninstall --manifest --purge (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
-        if ($r.Code -ne 0) { Show-Failure $r }
+        if ($r.Code -ne 0) { Show-Failure $r } else { Remove-StalePathDebris 'note: winget left' }
     }
     $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
     Assert "nothing left after uninstall ($($left -join '; '))" ($left.Count -eq 0)
@@ -546,6 +556,8 @@ function Invoke-SelfTest {
         Assert 'self: non-JSON settings output reads null' ($null -eq (Get-LocalManifestSetting 'Unrecognized command: export'))
 
         $found = "Scan starting...`nScan finished.`nScanning C:\x\agentbus.exe found 1 threats.`nThreat                  : Trojan:Win32/Example"
+        # $clean is recorded from MpCmdRun 4.18.26090.9 in the VM (2026-10-21);
+        # $found follows the same shape, with a detection.
         $clean = "Scan starting...`nScan finished.`nScanning C:\x\agentbus.exe found no threats."
         foreach ($v in @(@(0, $clean, 'clean'), @(2, $found, 'threat'), @(2, 'CmdTool: Failed with hr = 0x80508023', 'error'), @(2, $clean, 'error'), @(1, $found, 'error'), @(-2147024891, '', 'error'))) {
             Assert "self: Defender exit $($v[0]) with '$(($v[1] -split "`n")[-1])' is $($v[2])" ((Get-DefenderVerdict $v[0] $v[1]) -eq $v[2])

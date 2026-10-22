@@ -109,3 +109,67 @@ func TestLeftoverMemorySubscriptionKeepsTaskListDelivering(t *testing.T) {
 		t.Fatalf("only the task list may deliver: %+v %v", r, err)
 	}
 }
+
+// A resumed identity's register result must not list a leftover memory
+// subscription as pending (ADR 0025 decision 7).
+func TestRegisterPendingHidesLeftoverMemorySubscription(t *testing.T) {
+	b, other := twoAgents(t)
+	leftoverMemorySub(t, b, "Sam", "memory")
+	if _, err := other.Send("Pat", SendInput{Channel: "memory", Content: "a fact"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Register("Sam", "", "repo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range r.Pending {
+		if p.Channel == "memory" {
+			t.Fatalf("register leaked a memory channel in pending: %+v", r.Pending)
+		}
+	}
+}
+
+// The TUI registers before SetObserver, so register must not delete its
+// memory subscription row or cursor.
+func TestTUIStyleRegisterKeepsMemorySubscription(t *testing.T) {
+	b, _ := twoAgents(t)
+	leftoverMemorySub(t, b, "Sam", "memory")
+	if _, err := b.Register("Sam", "", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel='memory'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("register must keep the memory subscription row: %d %v", n, err)
+	}
+}
+
+// memoryHidden uses the case-sensitive IsTaskChannel, so the drop must too:
+// "Tasks/x" is not a task list.
+func TestDropMemorySubscriptionsIsCaseSensitiveAboutTaskLists(t *testing.T) {
+	b, _ := twoAgents(t)
+	for _, name := range []string{"Tasks/x", "tasks/y"} {
+		if _, err := b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES(?, 'memory', 0)", name); err != nil {
+			t.Fatal(err)
+		}
+		leftoverMemorySub(t, b, "Sam", name)
+	}
+	if err := b.DropMemorySubscriptions("Sam"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	rows, err := b.db.Query("SELECT channel FROM subscriptions WHERE sender='Sam' AND channel IN ('Tasks/x','tasks/y')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, c)
+	}
+	if len(got) != 1 || got[0] != "tasks/y" {
+		t.Fatalf("want only the real task list kept, got %v", got)
+	}
+}

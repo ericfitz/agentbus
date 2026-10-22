@@ -147,6 +147,12 @@ func (b *Bus) memoryHidden(q rowQuerier, as, channel string) bool {
 	return err != nil || kind == "memory"
 }
 
+// memoryKindHidden is memoryHidden for a caller that already has the
+// channel's kind ("" when the channel row is missing).
+func (b *Bus) memoryKindHidden(as, channel, kind string) bool {
+	return kind == "memory" && !IsTaskChannel(channel) && !b.isObserver(as)
+}
+
 type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
@@ -161,7 +167,7 @@ func (b *Bus) DropMemorySubscriptions(as string) error {
 		return nil
 	}
 	_, err := b.db.Exec(`DELETE FROM subscriptions WHERE sender=? AND channel IN
-		(SELECT name FROM channels WHERE kind='memory' AND name<>'tasks' AND name NOT LIKE 'tasks/%')`, as)
+		(SELECT name FROM channels WHERE kind='memory' AND name<>'tasks' AND substr(name,1,6)<>'tasks/')`, as)
 	return internal(err)
 }
 

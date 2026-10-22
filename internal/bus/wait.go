@@ -103,7 +103,7 @@ func (b *Bus) WaitAbove(ctx context.Context, as string, channels []string, inclu
 // channel for messages a caller has already rejected; above raises it for
 // every channel (0 for none).
 func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[string]int64, above int64) ([]Message, error) {
-	rows, err := b.db.Query("SELECT channel, cursor_seq, pending_end_seq FROM subscriptions WHERE sender=? ORDER BY channel", as)
+	rows, err := b.db.Query("SELECT s.channel, s.cursor_seq, s.pending_end_seq, coalesce((SELECT c.kind FROM channels c WHERE c.name=s.channel),'') FROM subscriptions s WHERE s.sender=? ORDER BY s.channel", as)
 	if err != nil {
 		return nil, internal(err)
 	}
@@ -115,14 +115,15 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 	var subs []sub
 	for rows.Next() {
 		var s sub
-		if err := rows.Scan(&s.channel, &s.cursor, &s.pending); err != nil {
+		var kind string
+		if err := rows.Scan(&s.channel, &s.cursor, &s.pending, &kind); err != nil {
 			_ = rows.Close()
 			return nil, internal(err)
 		}
 		// Same guard as receive's delivery loop: a leftover observer-only row
 		// (or a CLI `agentbus wait` process, never an observer) must not peek
 		// another identity's inbox.
-		if !b.dmReadable(as, s.channel) || b.memoryHidden(b.db, as, s.channel) {
+		if !b.dmReadable(as, s.channel) || b.memoryKindHidden(as, s.channel, kind) {
 			continue
 		}
 		if len(channels) > 0 && !contains(channels, s.channel) {

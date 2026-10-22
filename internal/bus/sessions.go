@@ -353,7 +353,8 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		return Registration{}, err
 	}
 	rows, err := tx.Query(`SELECT s.channel,
-	  (SELECT count(*) FROM messages m WHERE m.channel=s.channel AND m.seq>s.cursor_seq AND m.tombstone=0 AND m.sender<>s.sender)
+	  (SELECT count(*) FROM messages m WHERE m.channel=s.channel AND m.seq>s.cursor_seq AND m.tombstone=0 AND m.sender<>s.sender),
+	  coalesce((SELECT c.kind FROM channels c WHERE c.name=s.channel),'')
 	  FROM subscriptions s WHERE s.sender=? ORDER BY s.channel`, display)
 	if err != nil {
 		return Registration{}, internal(err)
@@ -361,7 +362,8 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 	reg := Registration{Sender: display, Pending: []PendingChannel{}, Subscribed: []string{}}
 	for rows.Next() {
 		var p PendingChannel
-		if err := rows.Scan(&p.Channel, &p.Pending); err != nil {
+		var kind string
+		if err := rows.Scan(&p.Channel, &p.Pending, &kind); err != nil {
 			_ = rows.Close()
 			return Registration{}, internal(err)
 		}
@@ -369,6 +371,12 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 		// over from a past observer session) must not surface as pending. The
 		// tags/ pseudo row is not a channel either.
 		if !b.dmReadable(display, p.Channel) || p.Channel == tagSource {
+			continue
+		}
+		// ADR 0025 decision 7: a leftover memory subscription is not pending.
+		// Skipped rather than dropped here: the TUI registers before
+		// SetObserver and must keep its memory rows and cursors.
+		if b.memoryKindHidden(display, p.Channel, kind) {
 			continue
 		}
 		reg.Pending = append(reg.Pending, p)

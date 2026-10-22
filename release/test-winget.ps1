@@ -12,13 +12,16 @@
 #   powershell -ExecutionPolicy Bypass -File release\test-winget.ps1 -ManifestDir release\winget\1.16.0
 #   ... -Architecture x64          one architecture (default: x64 and arm64)
 #   ... -SumsFile <path>           use a local SHA256SUMS instead of the release's
-#   release\test-winget.ps1 -Cleanup   uninstall ericfitz.agentbus left by a failed run
+#   ... -Cleanup                   uninstall ericfitz.agentbus left by a failed run
 #   release\test-winget.ps1 -SelfTest  checks the harness's own functions (needs Go;
 #                                      also runs outside Windows)
 # Refuses to start when ericfitz.agentbus is already installed, so it never
 # removes an install it did not make. Two runs at once are refused (a named
 # mutex). Every install is uninstalled in a finally block; a run killed before
 # that leaves the package installed, and the next run refuses until -Cleanup.
+# winget does not find a package installed from local manifests by id
+# (`winget uninstall --id` says no installed package matches), so uninstall
+# goes through the same manifests.
 # Dot-sourcing (. release\test-winget.ps1) loads the functions without running.
 param(
     [switch]$SelfTest,
@@ -34,7 +37,7 @@ $RepoRoot = (Resolve-Path (Join-Path $Here '..')).Path
 $IsWin = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $PackageId = 'ericfitz.agentbus'
 $ManifestFiles = @("$PackageId.yaml", "$PackageId.installer.yaml", "$PackageId.locale.en-US.yaml")
-$script:Pass = 0; $script:Fail = 0; $script:Threat = $false
+$script:Pass = 0; $script:Fail = 0; $script:Threat = $false; $script:Leftover = $false
 # powershell -File passes -Architecture x64,arm64 as one string.
 $Architecture = @($Architecture | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' })
 
@@ -221,9 +224,9 @@ function Get-InstalledState {
     return , $left
 }
 
-function Invoke-Uninstall {
-    $r = Invoke-Winget @('uninstall', '--id', $PackageId, '-e', '--purge', '--disable-interactivity', '--accept-source-agreements')
-    Assert "winget uninstall $PackageId (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
+function Invoke-Uninstall([string]$Dir) {
+    $r = Invoke-Winget @('uninstall', '--manifest', $Dir, '--purge', '--disable-interactivity', '--accept-source-agreements')
+    Assert "winget uninstall --manifest --purge (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
     if ($r.Code -ne 0) { Show-Failure $r }
 }
 
@@ -239,7 +242,7 @@ function Test-Preconditions {
     if ($setting -eq $false) { throw 'test-winget: winget local manifests are disabled; run once from an elevated terminal: winget settings --enable LocalManifestFiles' }
     if ($null -eq $setting) { Write-Host 'warning: could not read LocalManifestFiles from `winget settings export`; if install fails, run from an elevated terminal: winget settings --enable LocalManifestFiles' }
     $state = Get-InstalledState
-    if ($state.Count -gt 0) { throw "test-winget: $PackageId is already installed ($($state -join '; ')). This harness only removes installs it made: uninstall it with 'winget uninstall --id $PackageId -e' (or rerun with -Cleanup if a failed run left it), then rerun." }
+    if ($state.Count -gt 0) { throw "test-winget: $PackageId is already installed ($($state -join '; ')). This harness only removes installs it made: uninstall it with 'winget uninstall --id $PackageId -e', or if a failed run left it, rerun with -Cleanup -ManifestDir $ManifestDir; then rerun." }
     return $mp
 }
 
@@ -292,12 +295,13 @@ function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]
         $scan = Invoke-Exe $MpCmdRun @('-Scan', '-ScanType', '3', '-File', $exe, '-DisableRemediation')
         $verdict = Get-DefenderVerdict $scan.Code $scan.Out
         Assert "$Arch Defender scan: $verdict (exit $(Format-Code $scan.Code))" ($verdict -eq 'clean')
-        if ($verdict -ne 'clean') { Show-Failure $scan }
+        Show-Failure $scan
         if ($verdict -eq 'threat') { $script:Threat = $true }
     } finally {
-        if ($installed) { Invoke-Uninstall }
+        if ($installed) { Invoke-Uninstall $Dir }
         $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
         Assert "$Arch nothing left after uninstall ($($left -join '; '))" ($left.Count -eq 0)
+        $script:Leftover = ($left.Count -gt 0)
     }
 }
 
@@ -315,14 +319,19 @@ function Invoke-Run {
     $u = Invoke-Exe $mp @('-SignatureUpdate')
     Assert "Defender -SignatureUpdate (exit $(Format-Code $u.Code))" ($u.Code -eq 0)
     if ($u.Code -ne 0) { Show-Failure $u; Write-Host '    (the scans below use the signatures already installed; an elevated terminal may be needed to update them)' }
-    foreach ($a in $Architecture) { Invoke-ArchCase $a $dir $check.Version $mp }
+    foreach ($a in $Architecture) {
+        Invoke-ArchCase $a $dir $check.Version $mp
+        # A later install would land on the leftover one and test nothing.
+        if ($script:Leftover) { Write-Host "stopping: $a left $PackageId installed; fix that, then rerun with -Cleanup -ManifestDir $ManifestDir"; break }
+    }
 }
 
 function Invoke-CleanupRun {
     if (-not $IsWin) { throw 'test-winget: -Cleanup needs Windows' }
+    if ([string]::IsNullOrEmpty($ManifestDir)) { throw 'test-winget: -Cleanup needs -ManifestDir, the manifests the failed run installed from' }
     $state = Get-InstalledState
     if ($state.Count -eq 0) { Write-Host "nothing to clean up: $PackageId is not installed"; return }
-    Invoke-Uninstall
+    Invoke-Uninstall (Resolve-Path -LiteralPath $ManifestDir).Path
     $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
     Assert "nothing left after uninstall ($($left -join '; '))" ($left.Count -eq 0)
 }
@@ -400,8 +409,10 @@ function Invoke-SelfTest {
         $threw = $false; try { $null = Get-GoArch 'x86' } catch { $threw = $_.Exception.Message.Contains("unsupported architecture 'x86'") }
         Assert 'self: Get-GoArch rejects x86' $threw
 
-        # The settings-export fixtures are written by hand: the export format
-        # is undocumented, so a real run that cannot read it only warns.
+        # settings-export-enabled.json is recorded from winget in the Windows
+        # 11 ARM VM (2026-10-21, user name replaced); the disabled one is
+        # derived from it. The format is undocumented, so a real run that
+        # cannot read it only warns.
         $fx = Join-Path $Here 'testdata/winget'
         Assert 'self: archive scan failure is recognized' (Test-ArchiveScanFailure 'Archive malware scan failed.')
         Assert 'self: a hash mismatch is not an archive scan failure' (-not (Test-ArchiveScanFailure 'Installer hash does not match; this cannot be overridden when running as admin'))

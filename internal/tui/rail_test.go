@@ -1116,3 +1116,45 @@ func TestDeleteLastChannelBeforeCollapsedSection(t *testing.T) {
 		t.Fatalf("want exactly the tags heading highlighted, got %q", marked)
 	}
 }
+
+// When the last session ages out the selection returns to the channel the
+// list last held; if that channel's section was collapsed meanwhile, the
+// selection must land on the collapsed heading, with exactly one rail row
+// highlighted.
+func TestLastSessionAgesOutIntoCollapsedSection(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f := sectionedFixture(t)
+	probe := sgrPrefix(lipgloss.NewStyle().Background(f.m.theme.SelBG(true)))
+	if probe == "" {
+		t.Skip("theme selection color has no escape under this profile")
+	}
+	f.toSessions()
+	if f.m.pane() != paneSessions || f.m.sel < 0 {
+		t.Fatalf("setup: pane=%v sel=%d", f.m.pane(), f.m.sel)
+	}
+	sec := channelSection(f.m.channels[f.m.sel])
+	f.m.toggleSection(sec, true)
+	if f.m.headSel != -1 {
+		t.Fatalf("setup: collapsing a section the stream isn't showing must not move the selection, headSel=%d", f.m.headSel)
+	}
+	for name := range f.m.sessionsSeen {
+		f.m.sessionsSeen[name] = time.Now().Add(-2 * idleSessionTTL)
+	}
+	// Keep the followed tag set: dropping it would move the selection out of
+	// the tags section on its own.
+	f.send(statusMsg{st: bus.Status{Channels: f.m.status.Channels}, tags: [][]string{{"docs"}}})
+	if f.m.sessSel != -1 || f.m.headSel != sec {
+		t.Fatalf("sessSel=%d headSel=%d, want -1 and the collapsed heading %d", f.m.sessSel, f.m.headSel, sec)
+	}
+	var marked []string
+	for _, l := range strings.Split(f.m.renderRails(), "\n") {
+		if strings.Contains(l, probe) {
+			marked = append(marked, ansi.Strip(l))
+		}
+	}
+	if len(marked) != 1 || !strings.Contains(marked[0], railHeadings[sec]) {
+		t.Fatalf("want exactly the collapsed heading highlighted, got %q", marked)
+	}
+}

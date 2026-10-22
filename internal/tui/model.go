@@ -1284,6 +1284,11 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 		case len(names) == 0:
 			// The last session aged out: return to the channel list.
 			m.sessSel = -1
+			if m.sel >= 0 && m.sel < len(m.channels) {
+				// That channel's section may have been collapsed while the
+				// sessions pane held the selection; keep one row highlighted.
+				m.headSel = m.headingFor(channelSection(m.channels[m.sel]))
+			}
 			cmds = append(cmds, m.showSelected())
 		case i >= 0:
 			m.sessSel = i // still the same inbox, just possibly reindexed

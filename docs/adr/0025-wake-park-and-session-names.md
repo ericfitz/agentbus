@@ -63,6 +63,19 @@ calls and may be revisited.
    config lists. `receive`, `wait`, `watch` and the Stop hook ignore any
    memory subscription an agent still has. Task lists (`tasks/...`) are
    memory-kind but stay pushed (ADR 0008 decision 2).
+8. **A parentless register cannot take a live name by accident** (Eric,
+   2026-10-22, after 1.17.0). Subagents share their parent's MCP process,
+   so under decision 6 a subagent that registers without `parent` renames
+   the parent. A top-level `register` under a new name, on a process that
+   already holds a live top-level name, is refused with a validation error
+   telling the caller to pass `parent` (subagent) or `rename: true`
+   (deliberate rename). Re-registering the same name stays idempotent.
+   Rejected: documenting only, and a time-based grace window.
+9. **The register guard covers every live TUI** (Eric, 2026-10-22, after
+   1.17.0). Widens decision 5: `register` over MCP also refuses any name
+   currently held by a live session whose context is `tui`, so a TUI
+   started with `-as` or another `-config` is protected. The `tui_name`
+   check stays for when no TUI is running.
 
 ## Rulings (drafted by Claude)
 

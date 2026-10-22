@@ -127,12 +127,11 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Call receive right after registering",
 		"- Except on Codex, keep a background \"agentbus wait\" running (no -filter),",
 		"receive (ack the previous batch), handle what concerns you, and start it",
-		"On exit 3 (replaced) or 4 (harness gone), do nothing. Codex has no",
-		"message wakes an idle agent; a parked one wakes only for DMs. Before",
-		"ending a session with a handoff, run \"agentbus park\"; any later prompt or",
+		"Exit 3 (replaced) or 4 (harness gone): do nothing. Exit 2 is an error: read stderr, do not restart it in a loop, tell the user if it persists.",
+		"a parked one wakes only for DMs. Before ending a session with a handoff, run \"agentbus park\"; your next prompt, register, or any agentbus call except receive unparks.",
 		"Never poll receive from model turns to wait.",
 		"- Post when you start, finish, or get blocked",
-		"Use general only when you have no\n  project channel",
+		"Use general only when you have no project channel",
 		"- Search the memory channels register returned",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
 		"- Use a task list (tasks/<effort>, created with create_channel by whoever",
@@ -140,10 +139,10 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Register returns the other live agents in \"others\"; call discover only to",
 		"- Give every send a subject",
 		"- Tag what you send so others can find it and triage it",
-		"change plus\n  its area",
+		"change plus its area",
 		"env:prod",
 	} {
-		if !strings.Contains(got, want) {
+		if !strings.Contains(normWS(got), normWS(want)) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}

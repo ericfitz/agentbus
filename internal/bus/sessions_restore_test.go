@@ -63,9 +63,6 @@ func TestHeartbeatRestoresSweptSession(t *testing.T) {
 	if got, err := b.IdentityForHarness(h); err != nil || got != "repo" {
 		t.Fatalf("IdentityForHarness = %q %v", got, err)
 	}
-	if c, _ := b.SessionClient("repo"); c != "claude-code" {
-		t.Fatalf("harness client not restored: %q", c)
-	}
 }
 
 func TestAuthRestoresSweptSessionBeforeHeartbeat(t *testing.T) {

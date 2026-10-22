@@ -73,7 +73,7 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 		"(ack the previous batch) and handle what concerns you. ", n, as, strings.Join(chans, ", "))
 	// ADR 0025: one tail for every harness; Codex has no idle wake.
 	tail := fmt.Sprintf("Then, except on Codex, make sure a background `agentbus wait -as %s` is running "+
-		"(start one; it replaces any running wait) so the next message wakes you, and stop.", as)
+		"(start one; it replaces any running wait) so the next message wakes you, and stop. If it exits 2, read stderr; do not loop.", as)
 	reason := head + tail
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }

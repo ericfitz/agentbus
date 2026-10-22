@@ -159,11 +159,13 @@ const protocol = `Then follow this protocol:
 - Except on Codex, keep a background "agentbus wait" running (no -filter),
   started after your first receive. When it exits with a wake line, call
   receive (ack the previous batch), handle what concerns you, and start it
-  again. On exit 3 (replaced) or 4 (harness gone), do nothing. Codex has no
-  idle wake: rely on receive at the end of each task. Every subscribed
-  message wakes an idle agent; a parked one wakes only for DMs. Before
-  ending a session with a handoff, run "agentbus park"; any later prompt or
-  agentbus call unparks. Never poll receive from model turns to wait.
+  again. Exit 3 (replaced) or 4 (harness gone): do nothing. Exit 2 is an
+  error: read stderr, do not restart it in a loop, tell the user if it
+  persists. Codex has no idle wake: rely on receive at the end of each task.
+  Every subscribed message wakes an idle agent; a parked one wakes only for
+  DMs. Before ending a session with a handoff, run "agentbus park"; your next
+  prompt, register, or any agentbus call except receive unparks. Never poll
+  receive from model turns to wait.
 - Post when you start, finish, or get blocked on a task, and when you change
   something other agents depend on. Post to your project chat channel: any
   subscribed chat channel other than general (for example general/<repo>, or
@@ -173,8 +175,7 @@ const protocol = `Then follow this protocol:
 - When a message concerns exactly one agent, send it to the channel
   dm/<that agent's name> instead of a shared channel. Direct messages are
   one-way: answer one by sending to dm/<its sender>, with reply_to set to
-  its seq. A parked agent wakes only for DMs, so to wake one, send to its
-  dm/ channel. An offline agent receives nothing until it comes back online.
+  its seq. To wake a parked agent, send to its dm/ channel. An offline agent receives nothing until it comes back online.
 - Give every send a subject: a one-line summary of the message. The TUI
   shows it as the message's title, and search matches it.
 - Tag what you send so others can find it and triage it without reading

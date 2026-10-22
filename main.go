@@ -31,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch|park|unpark|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -153,7 +153,7 @@ func run(cmd string, args []string) int {
 		fs.StringVar(&o.As, "as", "", "identity to wait for (default: the session registered from the same harness, else what `agentbus identity` reports)")
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
-		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
+		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. 'deploy'), except direct messages, whose content is withheld from the printed JSON (call receive to read it)")
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep waiting after the harness that started this wait exits (default: exit 4, silently)")
 		fs.DurationVar(&o.Timeout, "timeout", 0, "give up after this long, exit 1 (default: wait forever); exit 3 means a newer wait for this identity (or from the same harness) replaced this one, exit 4 that the harness that started it is gone")
 		if err := parseFlags(fs, args); err != nil {
@@ -195,12 +195,16 @@ func run(cmd string, args []string) int {
 		return 0
 	case "watch":
 		fs := flag.NewFlagSet("agentbus watch", flag.ContinueOnError)
+		fs.Usage = func() {
+			_, _ = fmt.Fprintln(fs.Output(), "Usage of agentbus watch (deprecated, ADR 0025: use wait):")
+			fs.PrintDefaults()
+		}
 		var o cli.WatchOptions
 		path := fs.String("config", "", "configuration file")
 		fs.StringVar(&o.As, "as", "", "identity to watch for (default: the session registered from the same harness, else what `agentbus identity` reports)")
 		fs.Func("channel", "only this channel (repeatable; default: all subscribed)", func(s string) error { o.Channels = append(o.Channels, s); return nil })
 		fs.BoolVar(&o.IncludeOwn, "include-own", false, "also wake for the identity's own messages")
-		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. '@myname'), except direct messages")
+		fs.StringVar(&o.Filter, "filter", "", "regexp on content; only matching messages wake (e.g. 'deploy'), except direct messages")
 		fs.BoolVar(&o.NoHarnessWatch, "no-harness-watch", false, "keep watching after the harness that started this watch exits (default: exit 4, silently)")
 		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)

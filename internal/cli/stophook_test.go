@@ -47,7 +47,7 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 		!strings.Contains(res["reason"], "receive") || !strings.Contains(res["reason"], "dm/"+me) {
 		t.Fatalf("waiting message must block with a receive reason: %q", got)
 	}
-	if want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."; !strings.Contains(res["reason"], want) || strings.Contains(res["reason"], "watch") || strings.Contains(res["reason"], "-filter") {
+	if want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop. If it exits 2, read stderr; do not loop."; !strings.Contains(res["reason"], want) || strings.Contains(res["reason"], "watch") || strings.Contains(res["reason"], "-filter") {
 		t.Fatalf("stop hook tail: %q", res["reason"])
 	}
 	if strings.Contains(got, "secret") {
@@ -101,7 +101,7 @@ func TestStopHookReasonSameForEveryHarness(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &res); err != nil {
 				t.Fatalf("%v: %q", err, out.String())
 			}
-			want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop."
+			want := "Then, except on Codex, make sure a background `agentbus wait -as " + me + "` is running (start one; it replaces any running wait) so the next message wakes you, and stop. If it exits 2, read stderr; do not loop."
 			if r := res["reason"]; !strings.HasSuffix(r, want) || strings.Contains(r, "Monitor") {
 				t.Fatalf("every harness gets the wait text: %q", r)
 			}

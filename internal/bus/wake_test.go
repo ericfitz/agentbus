@@ -144,9 +144,6 @@ func TestWakeGraceKeepsSessionRowAndReaders(t *testing.T) {
 	if _, live, err := e.b.SessionHarness("Pat"); err != nil || !live {
 		t.Fatalf("SessionHarness live=%v %v", live, err)
 	}
-	if c, err := e.b.SessionClient("Pat"); err != nil || c != "cc" {
-		t.Fatalf("SessionClient=%q %v", c, err)
-	}
 	if n, err := e.b.LiveSessionCount(); err != nil || n != 3 {
 		t.Fatalf("LiveSessionCount=%d %v, want 3", n, err)
 	}

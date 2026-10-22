@@ -184,25 +184,6 @@ func (b *Bus) SessionHarness(name string) (h procs.Ref, live bool, err error) {
 	return h, true, nil
 }
 
-// SessionClient is the MCP clientInfo name recorded on name's live session
-// (ADR 0015): "" when none was recorded or name has no live session.
-func (b *Bus) SessionClient(name string) (string, error) {
-	cutoff, err := b.liveCutoff(b.db)
-	if err != nil {
-		return "", err
-	}
-	var h string
-	err = b.db.QueryRow("SELECT harness FROM sessions WHERE sender=? AND heartbeat >= ?",
-		name, cutoff).Scan(&h)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", internal(err)
-	}
-	return h, nil
-}
-
 // Register is RegisterWithClient for a caller with no MCP clientInfo.
 func (b *Bus) Register(name, parent, context string, resume bool) (Registration, error) {
 	return b.RegisterWithClient(name, parent, context, resume, "", "")

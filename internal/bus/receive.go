@@ -237,7 +237,7 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 		return ReceiveResult{}, errf("validation", false, "wait_seconds must not be negative")
 	}
 	if in.WaitSeconds > b.cfg.ReceiveMaxWaitSeconds {
-		return ReceiveResult{}, errf("validation", false, "wait_seconds must not exceed %d; to wait longer run `agentbus wait -filter @%s` in a background shell (on Claude Code, `agentbus watch -filter @%s` under the Monitor tool) instead of calling receive again", b.cfg.ReceiveMaxWaitSeconds, as, as)
+		return ReceiveResult{}, errf("validation", false, "wait_seconds must not exceed %d; to wait longer run `agentbus wait` in a background shell (except on Codex) instead of calling receive again", b.cfg.ReceiveMaxWaitSeconds)
 	}
 	// Wall-clock deadline: b.Now may be a test clock that does not advance.
 	deadline := time.Now().Add(time.Duration(in.WaitSeconds) * time.Second)
@@ -261,7 +261,7 @@ func (b *Bus) Receive(as string, in ReceiveInput) (ReceiveResult, error) {
 		}
 		if time.Now().After(deadline) {
 			if !in.NoPollGuard && b.notePoll(as, false) >= pollingGuardEmptyWaits {
-				return ReceiveResult{}, errf("polling", false, "%d consecutive waited receives returned nothing: you are polling. Stop calling receive to wait; run `agentbus wait -filter @%s` in a background shell (on Claude Code, `agentbus watch -filter @%s` under the Monitor tool) and call receive when it exits or prints a line", pollingGuardEmptyWaits, as, as)
+				return ReceiveResult{}, errf("polling", false, "%d consecutive waited receives returned nothing: you are polling. Stop calling receive to wait; run `agentbus wait` in a background shell (except on Codex) and call receive when it exits or prints a line", pollingGuardEmptyWaits)
 			}
 			return res, nil
 		}

@@ -297,12 +297,13 @@ your subscribed channels, prints it as JSON lines, and exits 0. A direct
 message is printed without its content; call `receive` to read it. It never
 acks or moves your cursor, so when it exits with a wake line, call `receive`
 (ack the previous batch), handle what concerns you, and start it again. Add
-`-channel <ch>` to watch only some channels, `-timeout 2h` to give up (exit 1)
-instead of waiting forever. Only one wait runs per identity: starting a second
+`-channel <ch>` to watch only some channels. Only one wait runs per identity: starting a second
 one is safe and replaces the first, which exits 3 with no output. Exit 3 means
 a newer wait took over, and exit 4 means the harness that started the wait is
 gone (the wait exits on its own when its harness does; add `-no-harness-watch`
 to opt out). On either, do nothing: do not `receive` and do not restart it.
+Exit 2 is an error: read stderr, do not restart it in a loop, and tell the user
+if it persists.
 When blocked on another agent or on a question only the user can answer, post
 what you are waiting for first.
 
@@ -315,10 +316,10 @@ returns a `polling` error after three consecutive empty waits.
 ### Park
 
 Before you end a session with a handoff, run `agentbus park`. A parked
-session is woken, and stopped by the Stop hook, only for direct messages. Any
-later prompt (a `UserPromptSubmit` hook runs `agentbus unpark`), `register` or
-any agentbus tool call other than `receive` unparks it; `agentbus unpark`
-does it explicitly.
+session is woken, and stopped by the Stop hook, only for direct messages. Your
+next prompt (a `UserPromptSubmit` hook runs `agentbus unpark`), `register`, or
+any agentbus call except `receive` unparks it; `agentbus unpark` does it
+explicitly.
 
 When you finish a turn, the `agentbus stop-hook` Stop hook checks the bus.
 If new messages are waiting, the harness keeps you working with an

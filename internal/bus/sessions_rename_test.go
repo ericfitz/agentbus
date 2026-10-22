@@ -263,7 +263,7 @@ func TestParentlessRenameNeedsFlag(t *testing.T) {
 	}
 	_, err := b.RegisterWithClient("beta", "", "", true, false, "", "")
 	msg := errText(t, err, "validation")
-	for _, want := range []string{`"alpha"`, `parent="alpha"`, "rename=true"} {
+	for _, want := range []string{`keep using "alpha"`, `parent="alpha"`, "rename=true", `rename "alpha" to "beta"`} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("refusal must mention %s: %s", want, msg)
 		}

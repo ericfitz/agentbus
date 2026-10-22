@@ -279,7 +279,7 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume, rename bo
 		var held string
 		err := tx.QueryRow("SELECT sender FROM sessions WHERE owner=? AND instr(sender,'/')=0 AND sender<>? ORDER BY registered_at DESC LIMIT 1", b.owner, display).Scan(&held)
 		if err == nil {
-			return Registration{}, errf("validation", false, "this process is registered as %q; a subagent registers with parent=%q, and renaming %q to %q takes rename=true", held, held, held, name)
+			return Registration{}, errf("validation", false, "this session is already registered as %q; keep using %q. A subagent registers with parent=%q. Pass rename=true only to rename %q to %q on purpose (it ends %q)", held, held, held, held, name, held)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Registration{}, internal(err)

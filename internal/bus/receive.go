@@ -98,6 +98,11 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 	if _, ok := dmOwner(channel); ok && !b.isObserver(as) {
 		return errf("validation", false, "direct-message channels cannot be subscribed to; register manages your inbox")
 	}
+	if kind, err := b.ChannelKind(channel); err != nil {
+		return err
+	} else if kind == "memory" && !IsTaskChannel(channel) && !b.isObserver(as) {
+		return errf("validation", false, "memory channels are searched, not pushed; use search (ADR 0025)")
+	}
 	tx, err := b.db.Begin()
 	if err != nil {
 		return internal(err)
@@ -124,6 +129,40 @@ func (b *Bus) Subscribe(as, channel, from string) error {
 		return internal(err)
 	}
 	return internal(tx.Commit())
+}
+
+// memoryHidden reports whether channel is a memory channel (not a task list)
+// that as, a non-observer, must never be pushed (ADR 0025 decision 7). A
+// leftover subscription to one is treated as not subscribed: skipped, and
+// left in place for register to drop. A lookup error hides the channel.
+func (b *Bus) memoryHidden(q rowQuerier, as, channel string) bool {
+	if IsTaskChannel(channel) || b.isObserver(as) {
+		return false
+	}
+	var kind string
+	err := q.QueryRow("SELECT kind FROM channels WHERE name=?", channel).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false // the orphan sweep deals with it
+	}
+	return err != nil || kind == "memory"
+}
+
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// DropMemorySubscriptions deletes every memory, non-task subscription as
+// holds (ADR 0025 decision 7). The observer keeps its own.
+func (b *Bus) DropMemorySubscriptions(as string) error {
+	if err := b.auth(b.db, as); err != nil {
+		return err
+	}
+	if b.isObserver(as) {
+		return nil
+	}
+	_, err := b.db.Exec(`DELETE FROM subscriptions WHERE sender=? AND channel IN
+		(SELECT name FROM channels WHERE kind='memory' AND name<>'tasks' AND name NOT LIKE 'tasks/%')`, as)
+	return internal(err)
 }
 
 func (b *Bus) Unsubscribe(as, channel string) error {
@@ -275,7 +314,7 @@ func (b *Bus) receiveOnce(as string, in ReceiveInput) (ReceiveResult, error) {
 		// from before it lost that role) is not something as can read now:
 		// treat it as not subscribed rather than as expired, and leave it
 		// untouched so a later observer session still finds it.
-		if !b.dmReadable(as, s.channel) {
+		if !b.dmReadable(as, s.channel) || b.memoryHidden(tx, as, s.channel) {
 			continue
 		}
 		// Outside the filter with nothing pending: not involved in this call,

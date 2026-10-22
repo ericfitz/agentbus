@@ -122,7 +122,7 @@ func (b *Bus) peek(as string, channels []string, includeOwn bool, skipBelow map[
 		// Same guard as receive's delivery loop: a leftover observer-only row
 		// (or a CLI `agentbus wait` process, never an observer) must not peek
 		// another identity's inbox.
-		if !b.dmReadable(as, s.channel) {
+		if !b.dmReadable(as, s.channel) || b.memoryHidden(b.db, as, s.channel) {
 			continue
 		}
 		if len(channels) > 0 && !contains(channels, s.channel) {

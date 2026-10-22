@@ -482,9 +482,6 @@ func TestMemoryEditVisibleAcrossProcesses(t *testing.T) {
 	if _, e := a.call(t, "create_channel", map[string]any{"as": "Sam", "name": "mem", "kind": "memory"}); e != "" {
 		t.Fatal(e)
 	}
-	if _, e := b.call(t, "subscribe", map[string]any{"as": "Kim", "channel": "mem"}); e != "" {
-		t.Fatal(e)
-	}
 	c, e := a.call(t, "send", map[string]any{"as": "Sam", "channel": "mem", "content": "v1"})
 	if e != "" {
 		t.Fatal(e)
@@ -494,17 +491,13 @@ func TestMemoryEditVisibleAcrossProcesses(t *testing.T) {
 		t.Fatal(e)
 	}
 
+	// ADR 0025: memories are never pushed, so Kim reads them by id and search.
 	r, e := b.call(t, "receive", map[string]any{"as": "Kim"})
 	if e != "" {
 		t.Fatal(e)
 	}
-	msgs := messagesOf(t, r)
-	if len(msgs) != 1 {
-		t.Fatalf("expected one message: %v", r)
-	}
-	first, ok := msgs[0].(map[string]any)
-	if !ok || first["content"] != "v2" {
-		t.Fatalf("receive must show the edited content: %v", msgs)
+	if msgs := messagesOf(t, r); len(msgs) != 0 {
+		t.Fatalf("a memory must not be pushed: %v", r)
 	}
 
 	m, e := b.call(t, "get_memory", map[string]any{"as": "Kim", "id": id})

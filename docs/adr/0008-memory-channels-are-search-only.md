@@ -1,6 +1,6 @@
 # ADR 0008: Memory channels are search-only for agents
 
-Status: Accepted 2026-09-21. Decided by the user.
+Status: Accepted 2026-09-21. Decided by the user. Amended by ADR 0025 (decision 7): agents can no longer subscribe to a memory channel explicitly.
 
 ## Context
 
@@ -16,8 +16,8 @@ other agent's context.
    channel listed in `.local/agentbus.json` (or the default `memory`) is
    reported in a new `memory_channels` field of the register result instead
    of `subscribed`. Any memory subscription left by an earlier register is
-   dropped, so resumed identities stop receiving memories too. An agent that
-   wants the firehose can still `subscribe` explicitly after registering.
+   dropped, so resumed identities stop receiving memories too. (Superseded by ADR 0025
+   decision 7: `subscribe` now refuses memory channels.)
 2. **Task lists keep push.** `tasks` and `tasks/<repo>` are memory-kind but
    event-driven (claims, status changes), so they stay in `subscribed`.
 3. **The TUI keeps monitoring memory channels** through its own subscribe

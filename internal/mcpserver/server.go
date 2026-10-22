@@ -171,6 +171,9 @@ func defaultContextFor(cwd string, err error, log *slog.Logger) string {
 func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	reg.Subscribed = []string{}
 	reg.MemoryChannels = []string{}
+	// ADR 0025 decision 7: drop every memory subscription the identity holds,
+	// configured or not, so a resumed identity stops receiving memories.
+	_ = b.DropMemorySubscriptions(reg.Sender)
 	channels := repoconfig.DefaultChannels
 	f, err := repoconfig.Find(cwd)
 	if err != nil {
@@ -201,12 +204,10 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		if _, ok := bus.PrefixKind(c); ok {
 			_ = b.EnsureChannel(c, "")
 		}
-		// Memory channels are searched, not pushed (ADR 0008): report them
-		// and drop any subscription an earlier register left behind, so a
-		// resumed identity stops receiving memories too. c is never a task
-		// list here (skipped above), so no exception is needed for it.
+		// Memory channels are searched, not pushed (ADR 0008, 0025): report
+		// them. Subscriptions an earlier version left behind were dropped
+		// above. c is never a task list here (skipped above).
 		if kind, _ := b.ChannelKind(c); kind == "memory" {
-			_ = b.Unsubscribe(reg.Sender, c)
 			reg.MemoryChannels = append(reg.MemoryChannels, c)
 			continue
 		}
@@ -339,7 +340,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags, and entries that are not valid tags in ignored_tags; use repo_tags and the using-agentbus vocabulary before inventing a tag."},
+	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are never pushed to you: they are returned in memory_channels for you to search, and register drops any memory subscription you still hold. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags, and entries that are not valid tags in ignored_tags; use repo_tags and the using-agentbus vocabulary before inventing a tag."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
 			if in.Name != "" && in.Name == cfg.TUIName {
 				return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("name %q is the human TUI identity (tui_name); register under another name, e.g. %q", in.Name, in.Name+"-home")}
@@ -368,7 +369,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {
 			return result(b.ListChannels(in.As))
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) are not accepted. Or pass tags instead of channel: an AND set of 1-10 tags or prefix patterns (a tag ending in * matches every tag with that prefix: env:*, or area:* with change); matching messages from any chat channel you are not already subscribed to arrive through receive with matched_tags (the message's own tags, not your patterns), starting from now."},
+	mcp.AddTool(s, &mcp.Tool{Name: "subscribe", Description: "Agentbus: subscribe to a channel so receive returns its messages. from=now (default) starts at the current position; from=oldest starts at the oldest retained message. persistent=true also records the channel in this repository's .local/agentbus.json so register subscribes it in later sessions. Direct-message channels (dm/...) and memory channels are not accepted (memories are searched with search, never pushed; task lists tasks/... are fine). Or pass tags instead of channel: an AND set of 1-10 tags or prefix patterns (a tag ending in * matches every tag with that prefix: env:*, or area:* with change); matching messages from any chat channel you are not already subscribed to arrive through receive with matched_tags (the message's own tags, not your patterns), starting from now."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in subscribeIn) (*mcp.CallToolResult, any, error) {
 			if (in.Channel == "") == (len(in.Tags) == 0) {
 				return nil, nil, &bus.Error{Code: "validation", Message: "pass channel or tags, not both"}

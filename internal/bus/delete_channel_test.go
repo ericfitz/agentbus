@@ -46,9 +46,7 @@ func TestDeleteChannelDropsEverything(t *testing.T) {
 	b := newTestBus(t)
 	sam := reg(t, b, "Sam")
 	_, _ = b.CreateChannel(sam, "mem", "memory")
-	if err := b.Subscribe(sam, "mem", "now"); err != nil {
-		t.Fatal(err)
-	}
+	leftoverMemorySub(t, b, sam, "mem") // Subscribe refuses memories (ADR 0025)
 	fill(t, b, sam, "mem", 3, 10)
 	// The excepted sender's own subscription does not block.
 	got, err := b.DeleteChannel("mem", sam)

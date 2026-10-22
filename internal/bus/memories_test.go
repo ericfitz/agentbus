@@ -115,6 +115,7 @@ func TestMemoryRevisionsDeliverOnceWithCurrentContent(t *testing.T) {
 	sam := reg(t, b, "Sam")
 	kim := reg(t, b, "Kim")
 	_, _ = b.CreateChannel(sam, "mem", "memory")
+	b.SetObserver(kim) // only the observer may be pushed memories (ADR 0025)
 	_ = b.Subscribe(kim, "mem", "now")
 	c, _ := b.Send(sam, SendInput{Channel: "mem", Content: "v1"})
 	_, _ = b.EditMemory(sam, EditInput{ID: *c.MemoryID, Content: "v2"})
@@ -262,6 +263,7 @@ func TestBusReadPathsNeverTouchMemoryAccess(t *testing.T) {
 	if _, err := b.History(sam, "mem", nil, nil, 10); err != nil {
 		t.Fatal(err)
 	}
+	b.SetObserver(sam) // only the observer may subscribe to memories (ADR 0025)
 	if err := b.Subscribe(sam, "mem", "oldest"); err != nil {
 		t.Fatal(err)
 	}

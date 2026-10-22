@@ -128,3 +128,18 @@ func TestSubscribeTagsWritesTagSets(t *testing.T) {
 		t.Fatalf("%v %q", err, out.String())
 	}
 }
+
+// ADR 0025 decision 7: the CLI refuses a memory channel and leaves the file alone.
+func TestSubscribeRefusesMemoryChannel(t *testing.T) {
+	root := repoRoot(t, "myrepo")
+	var out bytes.Buffer
+	for _, ch := range []string{"memory", "memory/myrepo"} {
+		err := Subscribe(root, ch, &out)
+		if err == nil || !strings.Contains(err.Error(), "use search") {
+			t.Fatalf("Subscribe(%q): want refusal pointing at search, got %v", ch, err)
+		}
+	}
+	if err := Subscribe(root, "tasks/x", &out); err != nil {
+		t.Fatalf("task lists stay subscribable: %v", err)
+	}
+}

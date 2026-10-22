@@ -16,6 +16,12 @@ var errNotRepoRoot = errors.New("run this from the repository root (the director
 // Subscribe adds channel to the persistent list in cwd/.local/agentbus.json,
 // creating the file when absent. cwd must be a repository root.
 func Subscribe(cwd, channel string, out io.Writer) error {
+	// ADR 0025 decision 7: agents never receive memory channels. Only the
+	// name is known here (init itself persists memory/<repo> through
+	// repoconfig, so the refusal lives in this command, not the file layer).
+	if channel == "memory" || strings.HasPrefix(channel, "memory/") {
+		return fmt.Errorf("channel %q: memory channels are searched, not pushed; use search (ADR 0025)", channel)
+	}
 	f, err := openRepoFile(cwd, true)
 	if err != nil {
 		return err

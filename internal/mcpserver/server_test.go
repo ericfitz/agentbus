@@ -517,18 +517,29 @@ func TestRegisterSubscribesListedChannelsAndReportsUnknown(t *testing.T) {
 	}
 }
 
-// ADR 0008: register never pushes memories. A memory subscription left by
-// an older register is dropped on the next one, and memory posts are not
-// received; task lists, though memory-kind, stay subscribed.
+// ADR 0008, 0025: register never pushes memories. A memory subscription left
+// by an older version, listed in the repo file or not, is dropped on the next
+// register, and memory posts are not received.
 func TestRegisterDropsMemorySubscription(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
-	cs, peer := testPairIn(t, dir)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general"]}`)
+	t.Chdir(dir)
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cs, peer := sessionOn(t, cfg), sessionOn(t, cfg)
+	raw := openDirectDB(t, cfg.DataDirectory)
 	call(t, cs, "register", map[string]any{"name": "Sam"})
-	call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "memory"})
-	reg, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
-	if got := stringsOf(reg["memory_channels"]); len(got) != 1 || got[0] != "memory" {
-		t.Fatal(reg)
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "notes", "kind": "memory"})
+	for _, ch := range []string{"memory", "notes"} { // neither is in the repo file
+		if _, err := raw.Exec("INSERT INTO subscriptions(sender,channel,cursor_seq,last_activity) VALUES('Sam',?,0,?)", ch, time.Now().UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	var n int
+	if err := raw.QueryRow("SELECT count(*) FROM subscriptions WHERE sender='Sam' AND channel IN ('memory','notes')").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("register must drop every memory subscription: %d %v", n, err)
 	}
 	kim, _ := call(t, peer, "register", map[string]any{"name": "Kim"})
 	call(t, peer, "send", map[string]any{"as": kim["as"], "channel": "memory", "content": "a fact"})
@@ -538,6 +549,26 @@ func TestRegisterDropsMemorySubscription(t *testing.T) {
 	}
 	if hits, _ := call(t, cs, "search", map[string]any{"as": "Sam", "query": "fact"}); len(hits["hits"].([]any)) != 1 {
 		t.Fatal("memory must still be searchable:", hits)
+	}
+}
+
+// ADR 0025 decision 7: subscribe refuses a memory channel, and persistent=true
+// must not write it to the repo file either.
+func TestSubscribeRefusesMemoryChannelAndDoesNotPersist(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	writeRepoFile(t, dir, `{"identity":"Sam","channels":["general"]}`)
+	cs := testSessionIn(t, dir)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	for _, persistent := range []bool{false, true} {
+		out, res := call(t, cs, "subscribe", map[string]any{"as": "Sam", "channel": "memory", "persistent": persistent})
+		if !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "use search") {
+			t.Fatalf("persistent=%v: want refusal pointing at search: %v", persistent, out)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".local", "agentbus.json"))
+	if err != nil || strings.Contains(string(raw), "memory") || !strings.Contains(string(raw), "general") {
+		t.Fatalf("repo file must be untouched: %s %v", raw, err)
 	}
 }
 

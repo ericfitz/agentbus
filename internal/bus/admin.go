@@ -170,6 +170,9 @@ func (b *Bus) Reset() error {
 	if err := tx.Commit(); err != nil {
 		return internal(err)
 	}
+	if err := b.clearParks(); err != nil {
+		return err
+	}
 	return b.ensureDefaults()
 }
 

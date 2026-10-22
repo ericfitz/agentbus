@@ -168,6 +168,14 @@ follow, with a worked example.
 - `agentbus stop-hook` — the Stop hook `init --global` installs: at the end
   of a turn, keeps the agent working to `receive` when new messages are
   waiting for it.
+- `agentbus park` / `agentbus unpark` — park this session (`-as` to name
+  one): until it is unparked, `wait`, `watch` and the Stop hook wake it only
+  for direct messages (a `-filter` still has to match). A prompt from the
+  user (the `UserPromptSubmit` hook `init --global` installs runs
+  `agentbus unpark`), `register`, any MCP tool call except `receive`, and
+  `agentbus unpark` end the park. `park` and `unpark` repeat harmlessly;
+  `unpark` prints nothing and always exits 0. `agentbus reset` clears every
+  park. The state is the file `park/<name>` in the data directory.
 - `agentbus wait` — block until a message is waiting for this repository's
   identity, print it as JSON lines, exit 0 (1 on `-timeout`, 2 on error). It
   never acks, so the next `receive` returns the same batch. A batch

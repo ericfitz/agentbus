@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -30,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch|park|unpark|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -236,6 +237,47 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		return 2 // unreachable: Watch runs until it fails
+	case "park", "unpark":
+		// park: only direct messages wake this session until it is unparked
+		// (ADR 0025 decision 3). unpark is the UserPromptSubmit hook: it never
+		// prints and always exits 0 so a prompt is never blocked.
+		fs := flag.NewFlagSet("agentbus "+cmd, flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		as := fs.String("as", "", "identity to "+cmd+" (default: the session registered from the same harness, else what `agentbus identity` reports)")
+		hook := cmd == "unpark"
+		fail := 2
+		if hook {
+			fail = 0
+		}
+		if err := parseFlags(fs, args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			return fail
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			if !hook {
+				fmt.Fprintln(os.Stderr, "agentbus:", err)
+			}
+			return fail
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			if !hook {
+				fmt.Fprintln(os.Stderr, "agentbus:", err)
+			}
+			return fail
+		}
+		if hook {
+			cli.Unpark(cfg, *as, cwd, io.Discard)
+			return 0
+		}
+		if err := cli.Park(cfg, *as, cwd, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		return 0
 	case "stop-hook":
 		// Installed as a Stop hook by init --global. Always exits 0 so a
 		// broken bus never keeps a harness from stopping.

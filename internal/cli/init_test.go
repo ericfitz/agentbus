@@ -122,6 +122,12 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 			t.Fatalf("%s Stop hooks = %v", name, got)
 		}
 	}
+	// Every harness gets the unpark hook (ADR 0025 decision 3).
+	for name, cfg := range map[string]map[string]any{"claude": m, "codex": readJSON(t, filepath.Join(home, ".codex", "hooks.json")), "grok": grokHooks} {
+		if got := hookCommands(cfg, "UserPromptSubmit"); len(got) != 1 || got[0] != "agentbus unpark" {
+			t.Fatalf("%s UserPromptSubmit hooks = %v", name, got)
+		}
+	}
 	// Only Claude Code gets the SubagentStart hook (ADR 0016).
 	if got := hookCommands(m, "SubagentStart"); len(got) != 1 || got[0] != "agentbus subagent-hook" {
 		t.Fatalf("claude SubagentStart hooks = %v", got)
@@ -168,6 +174,11 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 	if got := hookCommands(readJSON(t, settings), "SubagentStart"); len(got) != 1 {
 		t.Fatalf("SubagentStart hook duplicated on rerun: %v", got)
+	}
+	for name, p := range map[string]string{"claude": settings, "codex": filepath.Join(home, ".codex", "hooks.json"), "grok": filepath.Join(home, ".grok", "hooks", "agentbus.json")} {
+		if got := hookCommands(readJSON(t, p), "UserPromptSubmit"); len(got) != 1 {
+			t.Fatalf("%s UserPromptSubmit hook duplicated on rerun: %v", name, got)
+		}
 	}
 	toml, _ = os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if strings.Count(string(toml), "tool_timeout_sec") != 1 {

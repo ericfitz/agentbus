@@ -325,6 +325,30 @@ func wrapSchemaErrorsInEnvelope(next mcp.MethodHandler) mcp.MethodHandler {
 	}
 }
 
+// unparkOnToolCall ends a session's park (ADR 0025 decision 3) on every tool
+// call except receive, for the call's `as`, before the tool runs. register
+// carries no `as`; the bus clears its park itself. It is one middleware so no
+// tool can forget it. An error is logged and never fails the call.
+func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if method == "tools/call" {
+				if p, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && p.Name != "receive" && len(p.Arguments) > 0 {
+					var a struct {
+						As string `json:"as"`
+					}
+					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" {
+						if err := b.Unpark(a.As); err != nil && log != nil {
+							log.Warn("unpark on tool call", "tool", p.Name, "as", a.As, "err", err)
+						}
+					}
+				}
+			}
+			return next(ctx, method, req)
+		}
+	}
+}
+
 // newServer is NewServer plus an optional logger, used by Run so a Getwd
 // failure is recorded in the log instead of silently defaulting.
 func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
@@ -336,7 +360,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: cli.InitPrompt}}}}, nil
 		})
-	s.AddReceivingMiddleware(wrapSchemaErrorsInEnvelope)
+	s.AddReceivingMiddleware(wrapSchemaErrorsInEnvelope, unparkOnToolCall(b, log))
 	cwd, err := os.Getwd()
 	defaultContext := defaultContextFor(cwd, err, log)
 

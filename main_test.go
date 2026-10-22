@@ -124,7 +124,7 @@ func TestUnknownCommandExit2(t *testing.T) {
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
 	cmds := []string{"mcp", "init", "tui", "wait", "watch", "status", "reset", "delete-channel",
-		"subscribe", "unsubscribe", "stop-hook", "subagent-hook", "identity"}
+		"subscribe", "unsubscribe", "stop-hook", "subagent-hook", "identity", "park", "unpark"}
 	for _, c := range cmds {
 		for _, h := range []string{"-h", "--help"} {
 			t.Run(c+" "+h, func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestSubcommandHelpExitsZero(t *testing.T) {
 }
 
 func TestUnknownFlagStillFails(t *testing.T) {
-	for _, c := range []string{"init", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe"} {
+	for _, c := range []string{"init", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe", "park"} {
 		t.Run(c, func(t *testing.T) {
 			r := execBin(t, c, "-bogus")
 			if r.code == 0 {
@@ -172,6 +172,8 @@ func TestExtraArgumentsRejected(t *testing.T) {
 		{[]string{"identity", "Sam"}, 2, `agentbus identity: unexpected argument "Sam"`},
 		{[]string{"stop-hook", "extra"}, 0, `agentbus stop-hook: unexpected argument "extra"`},
 		{[]string{"subagent-hook", "extra"}, 0, `agentbus subagent-hook: unexpected argument "extra"`},
+		{[]string{"park", "-as", "Pat", "extra"}, 2, `agentbus park: unexpected argument "extra"`},
+		{[]string{"unpark", "-as", "Pat", "extra"}, 0, `agentbus unpark: unexpected argument "extra"`},
 		{[]string{"version", "extra"}, 2, `agentbus version: unexpected argument "extra"`},
 		{[]string{"--version", "extra"}, 2, `agentbus --version: unexpected argument "extra"`},
 		{[]string{"help", "status"}, 2, `agentbus help: unexpected argument "status"`},

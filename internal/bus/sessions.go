@@ -421,6 +421,13 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume bool, harn
 	}
 	b.remember(sessionRow{sender: display, context: context, harness: harness, harnessVersion: harnessVersion,
 		harnessPid: b.harness.Pid, harnessStart: b.harness.Start, registeredAt: now, generation: gen})
+	// A park left by a session that died must not outlive its name (ADR 0025
+	// decision 3). A subagent name has a '/', which cannot be parked.
+	if parent == "" {
+		if err := b.Unpark(display); err != nil {
+			b.log.Warn("register: clearing park", "name", display, "err", err)
+		}
+	}
 	// Pending is bounded by the number of subscriptions, not by anything a
 	// caller controls, but a session resuming thousands of subscriptions
 	// could still exceed the hard ceiling; trim it to the same whole-record

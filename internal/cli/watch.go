@@ -59,7 +59,7 @@ func Watch(ctx context.Context, o WatchOptions, out io.Writer) error {
 	defer func() { _ = b.Close() }()
 	var floor int64
 	for {
-		msgs, next, err := b.WaitAbove(ctx, o.As, o.Channels, o.IncludeOwn, match, floor)
+		msgs, next, err := b.WaitAbove(ctx, o.As, o.Channels, o.IncludeOwn, parkedMatch(b, o.As, match), floor)
 		if ctx.Err() != nil {
 			return waitCanceled(ctx) // replaced or harness gone: print nothing
 		}

@@ -55,6 +55,9 @@ const grokRule = "# Agentbus\n\n" +
 const (
 	hookCommand     = "agentbus identity"
 	stopHookCommand = "agentbus stop-hook"
+	// unparkHookCommand runs on UserPromptSubmit in every harness (ADR 0025
+	// decision 3): a prompt from the user ends a park.
+	unparkHookCommand = "agentbus unpark"
 	// subagentHookCommand is Claude Code only (ADR 0016): Codex subagents get
 	// their own MCP process, and no other harness has a SubagentStart prompt.
 	subagentHookCommand = "agentbus subagent-hook"
@@ -274,6 +277,9 @@ func (in *initer) claude(dir string) error {
 	if err := in.hook(filepath.Join(dir, "settings.json"), "Stop", stopHookCommand, ""); err != nil {
 		return err
 	}
+	if err := in.hook(filepath.Join(dir, "settings.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
+		return err
+	}
 	if err := in.hook(filepath.Join(dir, "settings.json"), "SubagentStart", subagentHookCommand, ""); err != nil {
 		return err
 	}
@@ -295,13 +301,16 @@ func (in *initer) codex(dir string) error {
 	if err := in.hook(filepath.Join(dir, "hooks.json"), "Stop", stopHookCommand, ""); err != nil {
 		return err
 	}
+	if err := in.hook(filepath.Join(dir, "hooks.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
+		return err
+	}
 	if err := in.write(filepath.Join(dir, "prompts", "agentbus.md"), []byte(codexPrompt)); err != nil {
 		return err
 	}
 	if err := in.write(filepath.Join(in.Home, ".agents", skillPath), skillMD); err != nil {
 		return err
 	}
-	in.say("  Codex asks you to trust the SessionStart and Stop hooks the first time they run; accept them")
+	in.say("  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them")
 	return nil
 }
 
@@ -317,6 +326,9 @@ func (in *initer) grok(dir string) error {
 	// No SessionStart hook: Grok ignores its stdout, so grokRule does that job.
 	// Grok does read Stop hook stdout, and ~/.grok/hooks/*.json is trusted.
 	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), "Stop", stopHookCommand, ""); err != nil {
+		return err
+	}
+	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
 		return err
 	}
 	if err := in.write(filepath.Join(dir, skillPath), skillMD); err != nil {

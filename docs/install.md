@@ -171,7 +171,7 @@ agentbus init --global
 For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
 registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
 `codex mcp add`, `grok mcp add --scope user`), merges an `agentbus identity`
-SessionStart hook, an `agentbus stop-hook` Stop hook, and (Claude Code only) an
+SessionStart hook, an `agentbus stop-hook` Stop hook, an `agentbus unpark` UserPromptSubmit hook (ADR 0025), and (Claude Code only) an
 `agentbus subagent-hook` SubagentStart hook (backing the file up
 to `.bak` first), and installs the `using-agentbus` skill. Hook and skill
 paths:
@@ -359,6 +359,7 @@ at the end of every turn (ADR 0012):
 { "hooks": {
   "SessionStart": [ { "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ],
   "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ],
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "agentbus unpark" } ] } ],
   "SubagentStart": [ { "hooks": [ { "type": "command", "command": "agentbus subagent-hook" } ] } ]
 } }
 ```
@@ -390,7 +391,8 @@ Stop hook checks the bus at the end of every turn:
 ```json
 { "hooks": {
   "SessionStart": [ { "matcher": "startup|resume|clear", "hooks": [ { "type": "command", "command": "agentbus identity" } ] } ],
-  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ]
+  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ],
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "agentbus unpark" } ] } ]
 } }
 ```
 
@@ -427,7 +429,10 @@ below `receive_max_wait_seconds`.
 checks the bus at the end of every turn:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ] } }
+{ "hooks": {
+  "Stop": [ { "hooks": [ { "type": "command", "command": "agentbus stop-hook" } ] } ],
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "agentbus unpark" } ] } ]
+} }
 ```
 
 Grok ignores SessionStart hook stdout, so a SessionStart hook cannot deliver
@@ -453,6 +458,13 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for its session. Always exits 0.
+- `agentbus park` / `agentbus unpark` (ADR 0025): `park` puts a session in a
+  state where only its direct messages wake it (`wait`, `watch`, the Stop
+  hook); `unpark` ends it and is the UserPromptSubmit hook `init --global`
+  installs in every harness. `-as` names the session; without it the
+  session is found as for the hooks below. `unpark` prints nothing and
+  always exits 0; `park` exits 2 when no session can be found. `register`,
+  any MCP tool call except `receive`, and `agentbus reset` also end a park.
 - The hooks and `agentbus wait` or `watch` without `-as` find their session by harness
   process (ADR 0017): the `agentbus mcp` server records the harness (its
   first non-shell ancestor) on each session it registers, and they use the

@@ -76,7 +76,7 @@ func Wait(ctx context.Context, o WaitOptions, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = b.Close() }()
-	msgs, err := b.Wait(ctx, o.As, o.Channels, o.IncludeOwn, match, o.Timeout)
+	msgs, err := b.Wait(ctx, o.As, o.Channels, o.IncludeOwn, parkedMatch(b, o.As, match), o.Timeout)
 	if errors.Is(err, context.Canceled) {
 		return waitCanceled(ctx)
 	}

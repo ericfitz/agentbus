@@ -55,7 +55,8 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 		return // this session has not registered, and the cwd name is another's
 	}
 	// A nanosecond timeout makes Wait check once and return.
-	msgs, err := b.Wait(context.Background(), as, nil, false, nil, time.Nanosecond)
+	// A parked session keeps only its direct messages (ADR 0025 decision 3).
+	msgs, err := b.Wait(context.Background(), as, nil, false, parkedMatch(b, as, nil), time.Nanosecond)
 	if err != nil || len(msgs) == 0 {
 		return // not subscribed here (not an agentbus session), or nothing new
 	}

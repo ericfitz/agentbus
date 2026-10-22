@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"os"
@@ -340,6 +341,9 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "register", Description: "Agentbus: register your identity for this session. Idempotent: calling it again from the same session returns the same name. Subscribes you to the repository's persistent chat channels (.local/agentbus.json; default general) and reports them in subscribed. Memory channels are not subscribed: they are returned in memory_channels for you to search. A tasks or tasks/... entry in the file is skipped (task lists are no longer a default) and reported in ignored_channels; remove it from the file yourself, and subscribe to the effort list you are working on if any. Returns the display name to pass as `as` on every other Agentbus call, plus pending message counts if the name was resumed and the other live identities in others. Also creates your direct-message inbox dm/<as>, which receive reads like any subscribed channel. Also applies the file's tag_subscriptions (sets of tags to follow across channels) and reports them in tag_subscriptions. Also returns the repository's own approved tags (.local/agentbus.json tags) in repo_tags, and entries that are not valid tags in ignored_tags; use repo_tags and the using-agentbus vocabulary before inventing a tag."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in registerIn) (*mcp.CallToolResult, any, error) {
+			if in.Name != "" && in.Name == cfg.TUIName {
+				return nil, nil, &bus.Error{Code: "validation", Message: fmt.Sprintf("name %q is the human TUI identity (tui_name); register under another name, e.g. %q", in.Name, in.Name+"-home")}
+			}
 			c := in.Context
 			if c == "" {
 				c = defaultContext

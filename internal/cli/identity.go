@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/config"
@@ -86,33 +88,65 @@ func WaitIdentitySource(cfg config.Config, cwd string, warn io.Writer) (name, so
 // IdentityName is the name identity would print, without the prompt.
 func IdentityName(cwd string, warn io.Writer) string {
 	name := filepath.Base(cwd)
+	dir := cwd
 	f, err := repoconfig.Find(cwd)
 	switch {
 	case err != nil:
 		_, _ = fmt.Fprintf(warn, "agentbus: %v\n", err)
-		name = gitBaseOr(cwd, name)
+		dir = gitRootOr(cwd)
 	case f != nil:
 		name = f.Identity
 		if _, bad := f.Channels(); len(bad) > 0 {
 			_, _ = fmt.Fprintf(warn, "agentbus: %s: ignoring invalid channels %q\n", f.Path, bad)
 		}
 	default:
-		name = gitBaseOr(cwd, name)
+		dir = gitRootOr(cwd)
+	}
+	if f == nil || err != nil {
+		name = homeAware(dir)
 	}
 	return name
 }
 
-// gitBaseOr returns the basename of the nearest directory at or above cwd
-// that contains .git, or fallback when there is none.
-func gitBaseOr(cwd, fallback string) string {
+// gitRootOr returns the nearest directory at or above cwd that contains
+// .git, or cwd when there is none.
+func gitRootOr(cwd string) string {
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return filepath.Base(dir)
+			return dir
 		}
 		if filepath.Dir(dir) == dir {
-			return fallback
+			return cwd
 		}
 	}
+}
+
+// Seams for tests: the home directory and the TUI's default user name.
+var (
+	userHomeDir = os.UserHomeDir
+	tuiUserName = config.DefaultTUIName
+)
+
+// homeAware is the name for a directory-derived identity: the directory's
+// basename, except that the user's home directory is named "<user>-home"
+// (ADR 0025), where <user> is the TUI's default name. Both paths are
+// symlink-resolved first (case-insensitive on Windows); if either fails to
+// resolve, the basename stands.
+func homeAware(dir string) string {
+	base := filepath.Base(dir)
+	home, err := userHomeDir()
+	if err != nil || home == "" {
+		return base
+	}
+	a, errA := filepath.EvalSymlinks(dir)
+	b, errB := filepath.EvalSymlinks(home)
+	if errA != nil || errB != nil {
+		return base
+	}
+	if a == b || (runtime.GOOS == "windows" && strings.EqualFold(a, b)) {
+		return tuiUserName() + "-home"
+	}
+	return base
 }
 
 // protocol is what every agent is told to do on Agentbus after registering.

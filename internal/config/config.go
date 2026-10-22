@@ -83,7 +83,7 @@ func Default() Config {
 		InspectionTimeoutSeconds:     5,
 		EmbeddingQueryTimeoutSeconds: 10,
 		LogLevel:                     "info",
-		TUIName:                      defaultTUIName(),
+		TUIName:                      DefaultTUIName(),
 		Theme:                        "default",
 		Themes:                       []Theme{DefaultTheme()},
 		Icons:                        "emoji",
@@ -184,11 +184,11 @@ func ColorIndex(s string) (int, error) {
 	return 0, errors.New("unknown color")
 }
 
-// defaultTUIName is the OS user name, the identity `agentbus tui` registers
+// DefaultTUIName is the OS user name, the identity `agentbus tui` registers
 // under unless tui_name or --as says otherwise. On Windows user.Current
 // returns DOMAIN\name; keep the part after the last backslash. A '/' would
 // fail the bus's name rule, so it is replaced.
-func defaultTUIName() string {
+func DefaultTUIName() string {
 	u, err := user.Current()
 	if err != nil || u.Username == "" {
 		return "human"

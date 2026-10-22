@@ -328,7 +328,11 @@ from inside a session by passing `persistent: true` to the `subscribe` or
 `agentbus identity` looks for this file by walking up from the current
 directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
-the repository directory's basename. Its output is the session protocol every
+the repository directory's basename; when that directory is your home
+directory (no repository, or a dotfiles repository there) the name is
+`<user>-home`, where `<user>` is the TUI's default name, so it cannot collide
+with the human's own identity. An identity in the file is never rewritten, and
+MCP `register` refuses the configured `tui_name`. Its output is the session protocol every
 agent is told to follow: register, receive, post progress to the chat
 channel, search and post memories, discover.
 

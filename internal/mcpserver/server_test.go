@@ -1114,3 +1114,18 @@ func TestSendAndEditMemoryRejectRefs(t *testing.T) {
 		t.Fatalf("payloads must not carry refs: %v", got)
 	}
 }
+
+func TestRegisterRefusesTUIName(t *testing.T) {
+	cs := testSession(t)
+	cfg := config.Default()
+	out, res := call(t, cs, "register", map[string]any{"name": cfg.TUIName})
+	if !res.IsError {
+		t.Fatalf("register as tui_name %q was accepted: %v", cfg.TUIName, out)
+	}
+	if !strings.Contains(out["message"].(string), "tui_name") || out["code"] != "validation" {
+		t.Fatalf("want validation error naming tui_name, got %v", out)
+	}
+	if _, res := call(t, cs, "register", map[string]any{"name": cfg.TUIName + "-home"}); res.IsError {
+		t.Fatal("register under <tui_name>-home was refused")
+	}
+}

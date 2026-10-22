@@ -322,3 +322,10 @@ func TestRegisterRecordsAndRefreshesClientInfo(t *testing.T) {
 		t.Fatalf("clientInfo must be cleaned, got %q (%d bytes)", s.Harness, len(s.HarnessVersion))
 	}
 }
+
+func TestBusRegisterAcceptsTUIName(t *testing.T) {
+	b := newTestBus(t)
+	if _, err := b.Register("eric", "", "", true); err != nil {
+		t.Fatalf("bus.Register must keep working for the TUI: %v", err)
+	}
+}

@@ -63,12 +63,21 @@ on a host with that harness installed (any OS) and record the result.
       `agentbus park`, then a background task finished with no other input,
       and the park file was gone after the notification. A cross-session
       message also unparks. So park holds only until the first wake.
-- [ ] Grok: does a `UserPromptSubmit` hook in `~/.grok/hooks/agentbus.json`
+- [x] Grok: does a `UserPromptSubmit` hook in `~/.grok/hooks/agentbus.json`
       run? Add a hook that writes a marker file, submit a prompt, check the
       file. If not, Grok sessions are never unparked by a prompt.
-- [ ] Codex 0.163.0: does `UserPromptSubmit` in `~/.codex/hooks.json` run?
+      Result 2026-11-01 (grok 1.0.41, macOS, `grok -p`): yes, the marker
+      hook ran.
+- [x] Codex 0.163.0: does `UserPromptSubmit` in `~/.codex/hooks.json` run?
       Same marker-file check. If not, a Codex session unparks only through
       `register` or an MCP tool call.
+      Result 2026-11-01 (codex-cli 0.166.0, macOS, `codex exec`): yes, but
+      only for trusted hooks. The two existing `UserPromptSubmit` entries ran
+      (`hook: UserPromptSubmit` twice in the output); the added marker hook
+      did not, because Codex skips a hook whose hash has no
+      `trusted_hash` under `[hooks.state]` in `~/.codex/config.toml`. A hook
+      that `agentbus init` adds or changes stays inert until it is trusted
+      in an interactive Codex session.
 
 ## Shared database guard (needs WSL2 in the VM)
 

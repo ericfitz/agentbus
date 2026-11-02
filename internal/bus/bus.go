@@ -32,10 +32,12 @@ const (
 var WaitPollInterval = time.Second
 
 type Bus struct {
-	db    *sql.DB
-	cfg   config.Config
-	log   *slog.Logger
-	owner string
+	db  *sql.DB
+	cfg config.Config
+	log *slog.Logger
+	// failLog rate-limits repeated identical background-failure warnings.
+	failLog failLimiter
+	owner   string
 	// harness is the harness process SetHarness recorded, stamped on every
 	// session this process registers (ADR 0017); zero when unknown.
 	harness procs.Ref

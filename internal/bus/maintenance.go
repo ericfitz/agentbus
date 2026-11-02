@@ -49,7 +49,7 @@ func (b *Bus) Tick(ctx context.Context) {
 	// the other steps run; the wake stays pending for the next sample.
 	cutoff, err := b.liveCutoff(b.db)
 	if err != nil {
-		b.log.Warn("maintenance tick", "step", "wake grace", "err", err)
+		b.warnLimited("maintenance:wake grace:"+err.Error(), "maintenance tick", "step", "wake grace", "err", err)
 	}
 	steps := []struct {
 		name string
@@ -116,8 +116,17 @@ func (b *Bus) Tick(ctx context.Context) {
 			// inside embedBatch (ADR 0018), so it cannot block this loop.
 			for i := 0; i < embedBatchesPT && tickCtx.Err() == nil; i++ {
 				n, err := b.embedBatch(tickCtx)
-				if err != nil || n == 0 {
-					return err
+				if err != nil {
+					// embedBatch has logged the diagnostics; returning the
+					// error here would only log a bare duplicate. A tick
+					// deadline is the exception: the step line records it.
+					if tickCtx.Err() != nil {
+						return err
+					}
+					return nil
+				}
+				if n == 0 {
+					return nil
 				}
 			}
 			return nil
@@ -128,8 +137,9 @@ func (b *Bus) Tick(ctx context.Context) {
 			b.log.Info("maintenance deadline reached", "at", s.name)
 			return
 		}
+		began := time.Now()
 		if err := s.fn(); err != nil {
-			b.log.Warn("maintenance step failed", "step", s.name, "err", err)
+			b.logStepFailure(s.name, err, time.Since(began))
 		}
 	}
 }
@@ -420,8 +430,7 @@ func (b *Bus) embedSoon() {
 		// may make one per row when a batch is rejected (ADR 0018).
 		ctx, cancel := context.WithTimeout(context.Background(), (embedBatchSize+1)*embedRequestTimeout)
 		defer cancel()
-		if _, err := b.embedBatch(ctx); err != nil {
-			b.log.Warn("background embedding failed", "err", err)
-		}
+		// A failure is logged, with diagnostics, inside embedBatch.
+		_, _ = b.embedBatch(ctx)
 	}()
 }

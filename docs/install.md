@@ -522,7 +522,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   root; takes effect at the next register.
 - The MCP server logs to `agentbus.log` in the data directory as JSON lines
   (one object per line with `time` in UTC RFC3339 milliseconds, `level`,
-  `msg`, `pid`), rotated across four 16 MiB files.
+  `msg`, `pid`), rotated across four 16 MiB files. Background failures (embedding,
+  maintenance steps) are logged there as warnings with diagnostic fields;
+  repeats of an identical failure are summarized (`suppressed=N`) at most
+  once per ten minutes.
 - `agentbus status` shows live identities, channels, usage against budget,
   and any capacity notice.
 - `agentbus tui` opens a live dashboard: channels with unread counts on the

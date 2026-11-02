@@ -24,6 +24,22 @@ and every embedding request failed with `invalid header field value for
 quotes, whitespace in the value) are now an error that names the file and
 never shows the key (#45).
 
+## Background failures log what they need to be diagnosed
+
+A failed embedding pass now writes one `agentbus.log` warning, "embedding
+failed", with the endpoint, model, HTTP status, a response body excerpt (at
+most 300 bytes), the request's batch size and the affected row ids (#44).
+Rows the endpoint rejects on their own are logged once as "embedding rejected
+rows". The API key, the Authorization header, endpoint userinfo and endpoint
+query values never appear in the log or in the `status` embedding notice; an
+echoed key in a response body is removed before the excerpt is cut.
+
+Identical repeated failures (embedding, maintenance steps, wake and session
+restore, semantic search fallback) are logged once, then not again for ten
+minutes; the next line carries `suppressed=N`, the number held back. Maintenance
+step failures also record how long the step ran. Look in `agentbus.log` in the
+data directory.
+
 ## Breaking changes
 
 - `register` under a second top-level name in one session needs

@@ -23,6 +23,7 @@ import (
 const (
 	embedBatchSize      = 64
 	embedRequestTimeout = 30 * time.Second
+	embedBodyExcerpt    = 300 // bytes of an error response body kept for status and logs
 )
 
 type embedder struct {
@@ -148,8 +149,10 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 		// A 422 body (validation detail) often echoes the input back, and
 		// this text reaches status output, so it is left out.
 		if resp.StatusCode != http.StatusUnprocessableEntity {
-			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-			he.body = strings.Join(strings.Fields(string(snippet)), " ")
+			// Read past the limit so a key echoed across the cut is still
+			// recognized and removed before the excerpt is cut.
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, int64(embedBodyExcerpt+len(e.key))))
+			he.body = e.excerpt(string(snippet))
 		}
 		return nil, he
 	}
@@ -197,6 +200,16 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 		}
 	}
 	return vecs, nil
+}
+
+// excerpt is s with whitespace collapsed, the API key removed, and the result
+// cut to embedBodyExcerpt bytes on a character boundary.
+func (e *embedder) excerpt(s string) string {
+	s = e.scrub(strings.Join(strings.Fields(strings.ToValidUTF8(s, "?")), " "))
+	if len(s) > embedBodyExcerpt {
+		s = strings.ToValidUTF8(s[:embedBodyExcerpt], "")
+	}
+	return s
 }
 
 func normalize(v []float32) {
@@ -311,7 +324,7 @@ func (b *Bus) noteEmbed(ctx context.Context, err error) {
 	} else {
 		// Name the process: with several agentbus processes, the one that
 		// failed (for example, one started without the key) is the one to fix.
-		msg := fmt.Sprintf("agentbus pid %d: %v", os.Getpid(), err)
+		msg := fmt.Sprintf("agentbus pid %d: %s", os.Getpid(), b.embedder.errText(err))
 		_, dbErr = b.db.Exec("INSERT OR REPLACE INTO notices(kind,message,set_at) VALUES('embedding',?,?)", msg, b.nowMs())
 	}
 	if dbErr != nil {
@@ -332,7 +345,11 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	if b.embedder == nil {
 		return 0, nil
 	}
-	defer func() { b.noteEmbed(ctx, err) }()
+	var failed []int64 // the rows of the request that failed, for the log
+	defer func() {
+		b.noteEmbed(ctx, err)
+		b.logEmbedFailure(ctx, err, failed)
+	}()
 	// Only pay for the DELETE when there is actually a stale-model row to
 	// remove (e.g. embedding_model changed since these were written), not on
 	// every batch pass. Rejections are per model too: a new model retries.
@@ -370,6 +387,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	if len(seqs) == 0 {
 		return 0, nil
 	}
+	failed = seqs
 	vecs, err := b.embedTimed(ctx, texts)
 	rejected := map[int]string{}
 	var stopErr error // a non-row failure partway through the row retry
@@ -389,7 +407,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 			v, err := b.embedTimed(ctx, []string{text})
 			switch {
 			case rowRejected(err):
-				rejected[i] = err.Error()
+				rejected[i] = b.embedder.errText(err)
 			case err != nil:
 				// Keep what this retry already did (below), so the next
 				// pass starts after it rather than repeating it.
@@ -437,6 +455,9 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, internal(err)
+	}
+	if len(rejected) > 0 {
+		b.logEmbedRejected(rejected, seqs)
 	}
 	return int(done), stopErr
 }

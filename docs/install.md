@@ -333,10 +333,10 @@ from inside a session by passing `persistent: true` to the `subscribe` or
 
 `agentbus identity` first checks the bus: if this harness process already holds
 a live top-level session (for example after a rename, resume or compaction), it
-prints that session's name (ADR 0025 decision 10); if the bus cannot be opened
-or the harness holds none, it falls back to the name below. It looks for this
-file by walking up from the current
-directory, stopping at the nearest `.git`, so a nested repository reports its
+prints that session's name (ADR 0025 decision 10; opening the bus creates the
+data directory and database if absent, as `wait` does). If the bus cannot be
+opened or the harness holds none, it falls back to the name below. It looks
+for this file by walking up from the current directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
 the repository directory's basename; when that directory is your home
 directory (no repository, or a dotfiles repository there) the name is
@@ -519,8 +519,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   (both silent). `wait` and `watch` share one lock and pidfile, so either
   replaces the other. Codex has no idle wake.
 - `agentbus identity` prints the registration block (the register sentence
-  plus the session protocol) for the current directory. It's also what the
-  SessionStart hooks above run.
+  plus the session protocol) for the current directory, naming the live
+  session this harness already holds if there is one (else the name derived
+  from the directory). It takes `-config` (or `AGENTBUS_CONFIG`) to find the
+  bus. It's also what the SessionStart hooks above run.
 - `agentbus subscribe <channel>` / `agentbus unsubscribe <channel>` edit the
   persistent channel list in `.local/agentbus.json`. Run from the repository
   root; takes effect at the next register.

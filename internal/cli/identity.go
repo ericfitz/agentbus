@@ -47,9 +47,11 @@ func hookIdentityName(cfg *config.Config, cwd string, warn io.Writer) string {
 	if cfg != nil {
 		if b, err := bus.Open(*cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
 			defer func() { _ = b.Close() }()
-			if name, source := sessionIdentity(b, cwd, warn); source == SourceSession && name != "" {
+			// sessionIdentity already warned about a bad identity file.
+			if name, _ := sessionIdentity(b, cwd, warn); name != "" {
 				return name
 			}
+			return IdentityName(cwd, io.Discard)
 		}
 	}
 	return IdentityName(cwd, warn)

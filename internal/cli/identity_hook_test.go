@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ericfitz/agentbus/internal/config"
@@ -59,5 +60,23 @@ func TestIdentityHookHarnessHoldsNothing(t *testing.T) {
 	var out bytes.Buffer
 	if err := identity(&cfg, cwd, &out, io.Discard); err != nil || out.String() != identityLine(filepath.Base(cwd)) {
 		t.Fatalf("%q %v", out.String(), err)
+	}
+}
+
+// A malformed identity file is warned about once, not once per lookup.
+func TestIdentityHookWarnsOnce(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	root := filepath.Join(t.TempDir(), "myrepo")
+	mkdirAll(t, filepath.Join(root, ".git"))
+	mkdirAll(t, filepath.Join(root, ".local"))
+	writeIdentityFile(t, filepath.Join(root, ".local", "agentbus.json"), `{not json`)
+	setHarness(t, procs.Ref{Pid: 400, Start: 4}, nil)
+	var out, warn bytes.Buffer
+	if err := identity(&cfg, root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
+		t.Fatalf("%q %v", out.String(), err)
+	}
+	if n := strings.Count(warn.String(), "\n"); n != 1 {
+		t.Fatalf("want 1 warning line, got %d: %q", n, warn.String())
 	}
 }

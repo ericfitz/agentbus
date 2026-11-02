@@ -351,7 +351,9 @@ func run(cmd string, args []string) int {
 		}
 		// The bus is optional here: a bad config or flag still prints the cwd name.
 		var busCfg *config.Config
-		if cfg, err := loadConfig(cmd, args); err == nil {
+		if cfg, err := loadConfig(cmd, args); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+		} else {
 			busCfg = &cfg
 		}
 		if err := cli.Identity(busCfg, cwd, os.Stdout); err != nil {

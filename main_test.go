@@ -205,7 +205,7 @@ func TestExtraArgumentsRejected(t *testing.T) {
 	}
 }
 
-// TestIdentityUnknownFlag: identity has no flags, so any flag is an error.
+// TestIdentityUnknownFlag: identity takes only -config, so any other flag is an error.
 func TestIdentityUnknownFlag(t *testing.T) {
 	r := execBin(t, "identity", "-bogus")
 	if r.code != 2 || r.stdout != "" || !strings.Contains(r.stderr, "Usage of agentbus identity") {
@@ -225,5 +225,18 @@ func TestWatchErrorsExit2WithNothingOnStdout(t *testing.T) {
 				t.Errorf("exit %d stdout %q stderr %q; want exit 2, error on stderr only", r.code, r.stdout, r.stderr)
 			}
 		})
+	}
+}
+
+// TestIdentityBadConfigStillPrintsName: a bad -config is reported on stderr
+// but the hook still exits 0 and prints the cwd name.
+func TestIdentityBadConfigStillPrintsName(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte("{not valid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := execBin(t, "identity", "-config", bad)
+	if r.code != 0 || !strings.Contains(r.stdout, "call the register tool now with the name parameter set to") || !strings.HasPrefix(r.stderr, "agentbus: ") {
+		t.Errorf("exit %d stdout %q stderr %q; want exit 0, register line, agentbus: error on stderr", r.code, r.stdout, r.stderr)
 	}
 }

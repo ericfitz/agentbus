@@ -473,7 +473,7 @@ func (in *initer) repo(root string) error {
 	if err := in.projectChannels(root); err != nil {
 		return err
 	}
-	return identity(in.Cwd, in.out, os.Stderr)
+	return identity(&in.Config, in.Cwd, in.out, os.Stderr)
 }
 
 // projectChannels creates general/<identity> and memory/<identity> on the

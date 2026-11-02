@@ -339,7 +339,9 @@ func run(cmd string, args []string) int {
 		fmt.Println(mcpserver.Version)
 		return 0
 	case "identity":
-		if err := parseFlags(flag.NewFlagSet("agentbus identity", flag.ContinueOnError), args); err != nil {
+		cfgFlags := flag.NewFlagSet("agentbus identity", flag.ContinueOnError)
+		cfgFlags.String("config", "", "configuration file")
+		if err := parseFlags(cfgFlags, args); err != nil {
 			return parseExit(err)
 		}
 		cwd, err := os.Getwd()
@@ -347,7 +349,12 @@ func run(cmd string, args []string) int {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}
-		if err := cli.Identity(cwd, os.Stdout); err != nil {
+		// The bus is optional here: a bad config or flag still prints the cwd name.
+		var busCfg *config.Config
+		if cfg, err := loadConfig(cmd, args); err == nil {
+			busCfg = &cfg
+		}
+		if err := cli.Identity(busCfg, cwd, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}

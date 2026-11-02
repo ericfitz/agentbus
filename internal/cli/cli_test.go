@@ -32,13 +32,13 @@ func TestIdentityWalksUpAndDefaultsToRepoName(t *testing.T) {
 	mkdirAll(t, sub)
 	mkdirAll(t, filepath.Join(root, ".git"))
 	var out bytes.Buffer
-	if err := Identity(sub, &out); err != nil || out.String() != identityLine("myrepo") {
+	if err := Identity(nil, sub, &out); err != nil || out.String() != identityLine("myrepo") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 	mkdirAll(t, filepath.Join(root, ".local"))
 	writeIdentityFile(t, filepath.Join(root, ".local", "agentbus.json"), `{"identity": "Sam"}`)
 	out.Reset()
-	if err := Identity(sub, &out); err != nil {
+	if err := Identity(nil, sub, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != identityLine("Sam") {
@@ -56,7 +56,7 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	mkdirAll(t, filepath.Join(outer, ".git"))
 	mkdirAll(t, filepath.Join(inner, ".git"))
 	var out bytes.Buffer
-	if err := Identity(inner, &out); err != nil || out.String() != identityLine("inner") {
+	if err := Identity(nil, inner, &out); err != nil || out.String() != identityLine("inner") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
@@ -64,7 +64,7 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	mkdirAll(t, filepath.Join(outer, ".local"))
 	writeIdentityFile(t, filepath.Join(outer, ".local", "agentbus.json"), `{"identity": "OuterName"}`)
 	out.Reset()
-	if err := Identity(inner, &out); err != nil || out.String() != identityLine("inner") {
+	if err := Identity(nil, inner, &out); err != nil || out.String() != identityLine("inner") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 
@@ -72,7 +72,7 @@ func TestIdentityStopsAtNearestGitRoot(t *testing.T) {
 	mkdirAll(t, filepath.Join(inner, ".local"))
 	writeIdentityFile(t, filepath.Join(inner, ".local", "agentbus.json"), `{"identity": "InnerName"}`)
 	out.Reset()
-	if err := Identity(inner, &out); err != nil || out.String() != identityLine("InnerName") {
+	if err := Identity(nil, inner, &out); err != nil || out.String() != identityLine("InnerName") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 }
@@ -89,7 +89,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	// Malformed JSON: warn and fall back to the repo basename.
 	writeIdentityFile(t, identityPath, `{not json`)
 	var out, warn bytes.Buffer
-	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
+	if err := identity(nil, root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 	if warn.Len() == 0 {
@@ -100,7 +100,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	writeIdentityFile(t, identityPath, `{"identity": "a/b"}`)
 	out.Reset()
 	warn.Reset()
-	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
+	if err := identity(nil, root, &out, &warn); err != nil || out.String() != identityLine("myrepo") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 	if warn.Len() == 0 {
@@ -111,7 +111,7 @@ func TestIdentityWarnsOnMalformedOrInvalidIdentity(t *testing.T) {
 	writeIdentityFile(t, identityPath, `{"identity": "Sam"}`)
 	out.Reset()
 	warn.Reset()
-	if err := identity(root, &out, &warn); err != nil || out.String() != identityLine("Sam") {
+	if err := identity(nil, root, &out, &warn); err != nil || out.String() != identityLine("Sam") {
 		t.Fatalf("%q %v", out.String(), err)
 	}
 	if warn.Len() != 0 {

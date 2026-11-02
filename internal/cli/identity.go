@@ -23,13 +23,36 @@ import (
 // repository reports its own (inner) name rather than an enclosing repo's.
 // A malformed or unreadable identity file, or one whose identity fails the
 // name rule, is reported to stderr and treated as absent.
-func Identity(cwd string, out io.Writer) error {
-	return identity(cwd, out, os.Stderr)
+//
+// With a bus config it first names the live top-level session this harness
+// already holds (ADR 0025 decision 10), so a SessionStart after a rename,
+// resume or compaction re-registers as that session rather than the cwd
+// name. Any bus or harness failure, or no held session, falls back to the
+// cwd name; the hook never fails or goes silent because of the bus. A nil
+// cfg skips the bus.
+func Identity(cfg *config.Config, cwd string, out io.Writer) error {
+	return identity(cfg, cwd, out, os.Stderr)
 }
 
-func identity(cwd string, out, warn io.Writer) error {
-	_, err := fmt.Fprint(out, identityLine(IdentityName(cwd, warn)))
+func identity(cfg *config.Config, cwd string, out, warn io.Writer) error {
+	_, err := fmt.Fprint(out, identityLine(hookIdentityName(cfg, cwd, warn)))
 	return err
+}
+
+// hookIdentityName is the name the SessionStart hook registers: the session
+// the harness holds, else IdentityName(cwd). It also falls back to
+// IdentityName when the harness holds nothing and the cwd name is live under
+// another harness (sessionIdentity returns "").
+func hookIdentityName(cfg *config.Config, cwd string, warn io.Writer) string {
+	if cfg != nil {
+		if b, err := bus.Open(*cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+			defer func() { _ = b.Close() }()
+			if name, source := sessionIdentity(b, cwd, warn); source == SourceSession && name != "" {
+				return name
+			}
+		}
+	}
+	return IdentityName(cwd, warn)
 }
 
 // findHarness finds the harness running this process: the first non-shell

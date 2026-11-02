@@ -331,7 +331,11 @@ from inside a session by passing `persistent: true` to the `subscribe` or
 `subscribe` from a subdirectory creates the file at the nearest git root
 (not the subdirectory) when none exists yet.
 
-`agentbus identity` looks for this file by walking up from the current
+`agentbus identity` first checks the bus: if this harness process already holds
+a live top-level session (for example after a rename, resume or compaction), it
+prints that session's name (ADR 0025 decision 10); if the bus cannot be opened
+or the harness holds none, it falls back to the name below. It looks for this
+file by walking up from the current
 directory, stopping at the nearest `.git`, so a nested repository reports its
 own name rather than an enclosing one. Without a matching file it suggests
 the repository directory's basename; when that directory is your home

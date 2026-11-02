@@ -34,6 +34,10 @@ type embedder struct {
 
 var exportLine = regexp.MustCompile(`^export\s+[A-Za-z_][A-Za-z0-9_]*\s*=(.*)$`)
 
+// assignLine matches `NAME=value` without export; padded base64 only has
+// trailing `=`, so a value after the first `=` that is not `=` is an assignment.
+var assignLine = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=[^=]`)
+
 // readKeyFile reads an API key from a credential file. Blank lines and
 // shell-style comments are ignored (full-line, or ` # ...` after the value).
 // Exactly one other line must remain: a bare key, or `export NAME=value`
@@ -48,7 +52,8 @@ func readKeyFile(path string) (string, error) {
 	}
 	var line string
 	n := 0
-	for _, l := range strings.Split(string(body), "\n") {
+	text := strings.TrimPrefix(string(body), "\ufeff")
+	for _, l := range strings.Split(text, "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
@@ -63,6 +68,12 @@ func readKeyFile(path string) (string, error) {
 	default:
 		return "", fmt.Errorf("key file %s: %d non-comment lines; expected exactly one", path, n)
 	}
+	if assignLine.MatchString(line) {
+		return "", fmt.Errorf("key file %s: NAME=value needs the `export` prefix (export NAME=value)", path)
+	}
+	if line == "export" {
+		return "", fmt.Errorf("key file %s: no key after export", path)
+	}
 	val := line
 	if m := exportLine.FindStringSubmatch(line); m != nil {
 		val = strings.TrimSpace(m[1])
@@ -71,14 +82,15 @@ func readKeyFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("key file %s: %w", path, err)
 	}
-	if rest = strings.TrimSpace(rest); rest != "" && !strings.HasPrefix(rest, "#") {
+	// A # starts a comment only after whitespace (or a bare token end).
+	if t := strings.TrimSpace(rest); t != "" && (rest == t || !strings.HasPrefix(t, "#")) {
 		return "", fmt.Errorf("key file %s: unexpected text after the key", path)
 	}
 	if key == "" {
 		return "", fmt.Errorf("key file %s: empty key", path)
 	}
 	for _, r := range key {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return "", fmt.Errorf("key file %s: key contains whitespace or control characters", path)
 		}
 	}

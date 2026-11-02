@@ -22,7 +22,8 @@ lines and `#` comments. Before, a leading comment line became part of the key
 and every embedding request failed with `invalid header field value for
 "Authorization"`. Malformed files (no key, several key lines, unterminated
 quotes, whitespace in the value) are now an error that names the file and
-never shows the key (#45).
+never shows the key (#45). Plain `NAME=value` without `export` is not
+supported. A malformed key file fails startup with an error naming the file.
 
 ## Background failures log what they need to be diagnosed
 

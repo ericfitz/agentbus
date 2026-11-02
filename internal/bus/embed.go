@@ -217,9 +217,18 @@ func (e *embedder) embed(ctx context.Context, texts []string) (vecs [][]float32,
 // excerpt is s with whitespace collapsed, the API key removed, and the result
 // cut to embedBodyExcerpt bytes on a character boundary.
 func (e *embedder) excerpt(s string) string {
-	s = e.scrub(strings.Join(strings.Fields(strings.ToValidUTF8(s, "?")), " "))
+	// Scrub the raw text first: collapsing whitespace could otherwise hide a
+	// key that contains a space or newline from the match.
+	s = strings.Join(strings.Fields(e.scrub(strings.ToValidUTF8(s, "?"))), " ")
 	if len(s) > embedBodyExcerpt {
 		s = strings.ToValidUTF8(s[:embedBodyExcerpt], "")
+	}
+	// A cut inside the key leaves a prefix of it, which scrub cannot match.
+	for k := min(len(e.key)-1, len(s)); k > 0; k-- {
+		if strings.HasSuffix(s, e.key[:k]) {
+			s = s[:len(s)-k]
+			break
+		}
 	}
 	return s
 }
@@ -340,7 +349,7 @@ func (b *Bus) noteEmbed(ctx context.Context, err error) {
 		_, dbErr = b.db.Exec("INSERT OR REPLACE INTO notices(kind,message,set_at) VALUES('embedding',?,?)", msg, b.nowMs())
 	}
 	if dbErr != nil {
-		b.log.Warn("record embedding status failed", "err", dbErr)
+		b.warnLimited("embed status:"+normText(dbErr.Error()), "record embedding status failed", "err", dbErr)
 	}
 }
 
@@ -424,6 +433,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 				// Keep what this retry already did (below), so the next
 				// pass starts after it rather than repeating it.
 				stopErr = err
+				failed = []int64{seqs[i]}
 				seqs, texts = seqs[:i], texts[:i]
 			default:
 				vecs[i] = v[0]

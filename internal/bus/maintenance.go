@@ -117,12 +117,9 @@ func (b *Bus) Tick(ctx context.Context) {
 			for i := 0; i < embedBatchesPT && tickCtx.Err() == nil; i++ {
 				n, err := b.embedBatch(tickCtx)
 				if err != nil {
-					// embedBatch has logged the diagnostics; returning the
-					// error here would only log a bare duplicate. A tick
-					// deadline is the exception: the step line records it.
-					if tickCtx.Err() != nil {
-						return err
-					}
+					// embedBatch has logged the diagnostics (redacted, with row
+					// ids), including when the tick deadline cut it short;
+					// returning the error would log a raw duplicate.
 					return nil
 				}
 				if n == 0 {

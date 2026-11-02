@@ -855,9 +855,9 @@ func TestTickDeadlineBoundsBlockedEmbeddingStep(t *testing.T) {
 
 	if !pollUntil(time.Now().Add(3*time.Second), 100*time.Millisecond, func() bool {
 		body, err := os.ReadFile(filepath.Join(dir, "agentbus.log"))
-		return err == nil && strings.Contains(string(body), "maintenance step failed") && strings.Contains(string(body), `"step":"embeddings"`)
+		return err == nil && strings.Contains(string(body), `"msg":"embedding failed"`) && strings.Contains(string(body), `"row_ids"`)
 	}) {
-		t.Fatalf("log file never recorded the embeddings step failure after the deadline")
+		t.Fatalf("log file never recorded the embedding failure (with row ids) after the deadline")
 	}
 
 	if e := callOK(t, a, "list_channels", map[string]any{"as": "Sam"}); e != "" {

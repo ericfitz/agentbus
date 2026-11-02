@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -30,15 +32,42 @@ type failLimiter struct {
 }
 
 type failState struct {
+	msg        string
 	last       time.Time
 	suppressed int
+}
+
+// NormText strips digits from error text used in a limiter key, so request
+// ids, counts and retry-after values do not make identical failures look
+// different.
+func NormText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsDigit(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func normText(s string) string { return NormText(s) }
+
+// WarnLimited is warnLimited for other packages' background warnings, so one
+// limiter (per process, per key) covers them.
+func (b *Bus) WarnLimited(key, msg string, args ...any) { b.warnLimited(key, msg, args...) }
+
+type failSummary struct {
+	msg string
+	n   int
 }
 
 // warnLimited logs a warning unless the same key was logged less than
 // failLogInterval ago, in which case it counts the repeat. The first
 // occurrence after the interval is logged with suppressed=N, the number of
-// identical failures held back. key must identify the failure but not vary
-// with incidental detail (row ids, elapsed time), or nothing is suppressed.
+// identical failures held back. When the table is full the oldest key is
+// evicted, and Close flushes everything pending, each with a summary line, so
+// a count is not lost. key must identify the failure but not vary with
+// incidental detail (row ids, elapsed time, digits in text; see NormText).
+// The limiter is per Bus (per process); another process logs its own.
 func (b *Bus) warnLimited(key, msg string, args ...any) {
 	if len(key) > failLogKeyMax {
 		key = key[:failLogKeyMax]
@@ -56,60 +85,100 @@ func (b *Bus) warnLimited(key, msg string, args ...any) {
 		return
 	}
 	suppressed := 0
+	var evicted *failSummary
 	if ok {
 		suppressed = st.suppressed
 	} else if len(l.seen) >= failLogMaxKeys {
+		oldest := ""
+		var ot time.Time
 		for k, v := range l.seen {
-			if now.Sub(v.last) >= failLogInterval {
-				delete(l.seen, k)
+			if oldest == "" || v.last.Before(ot) {
+				oldest, ot = k, v.last
 			}
 		}
-		if len(l.seen) >= failLogMaxKeys {
-			clear(l.seen)
+		if v := l.seen[oldest]; v.suppressed > 0 {
+			evicted = &failSummary{v.msg, v.suppressed}
 		}
+		delete(l.seen, oldest)
 	}
-	l.seen[key] = &failState{last: now}
+	l.seen[key] = &failState{msg: msg, last: now}
 	l.mu.Unlock()
+	if evicted != nil {
+		b.logSummary(*evicted)
+	}
 	if suppressed > 0 {
 		args = append(args, "suppressed", suppressed, "suppressed_note", "identical failures since the last log line")
 	}
 	b.log.Warn(msg, args...)
 }
 
+func (b *Bus) logSummary(s failSummary) {
+	b.log.Warn(s.msg, "suppressed", s.n, "summary", true, "suppressed_note", "identical failures not logged individually")
+}
+
+// flushFailLog logs a summary for every key with held-back repeats. Close
+// calls it, so a process that exits does not lose the counts.
+func (b *Bus) flushFailLog() {
+	l := &b.failLog
+	l.mu.Lock()
+	var out []failSummary
+	for _, v := range l.seen {
+		if v.suppressed > 0 {
+			out = append(out, failSummary{v.msg, v.suppressed})
+			v.suppressed = 0
+		}
+	}
+	l.mu.Unlock()
+	slices.SortFunc(out, func(x, y failSummary) int { return strings.Compare(x.msg, y.msg) })
+	for _, s := range out {
+		b.logSummary(s)
+	}
+}
+
 // logStepFailure reports a failed maintenance step with its name and how
 // long it ran, rate-limited per step and error text.
 func (b *Bus) logStepFailure(step string, err error, elapsed time.Duration) {
-	b.warnLimited("maintenance:"+step+":"+err.Error(), "maintenance step failed",
+	b.warnLimited("maintenance:"+step+":"+normText(err.Error()), "maintenance step failed",
 		"step", step, "elapsed_ms", elapsed.Milliseconds(), "err", err)
 }
 
-// redactEndpoint drops userinfo and replaces query values, so an endpoint
-// that carries credentials is safe to log. An unparsable endpoint is not
-// logged at all.
+// redactEndpoint drops userinfo, the fragment and the whole query string
+// (whatever its shape: ?key=v, a bare ?token, malformed escapes, ; pairs), so
+// an endpoint that carries credentials is safe to log. The path is kept as is
+// so the log still shows which route failed; embedder.safeEndpoint also
+// removes the API key from it. An unparsable endpoint is not logged at all.
 func redactEndpoint(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "[unparsable endpoint]"
 	}
 	u.User = nil
-	if q := u.Query(); len(q) > 0 {
-		for k := range q {
-			q[k] = []string{"REDACTED"}
-		}
-		u.RawQuery = q.Encode()
-	}
 	u.Fragment = ""
+	u.RawFragment = ""
+	if u.RawQuery != "" || u.ForceQuery {
+		u.RawQuery = "REDACTED"
+	}
 	return u.String()
+}
+
+// safeEndpoint is the endpoint for logs: redacted, and without the API key
+// should it appear in the path. Other path segments are logged as they are.
+func (e *embedder) safeEndpoint() string {
+	s := redactEndpoint(e.endpoint)
+	if e.key != "" {
+		s = strings.ReplaceAll(s, e.key, "[redacted]")
+	}
+	return s
 }
 
 // scrub removes the API key and the raw endpoint (which may hold userinfo or
 // a key in its query) from text bound for a log or the status notice.
 func (e *embedder) scrub(s string) string {
+	if e.endpoint != "" {
+		s = strings.ReplaceAll(s, e.endpoint, e.safeEndpoint())
+	}
 	if e.key != "" {
 		s = strings.ReplaceAll(s, e.key, "[redacted]")
-	}
-	if e.endpoint != "" {
-		s = strings.ReplaceAll(s, e.endpoint, redactEndpoint(e.endpoint))
 	}
 	return s
 }
@@ -127,14 +196,14 @@ func (b *Bus) logEmbedFailure(ctx context.Context, err error, rows []int64) {
 		return
 	}
 	e := b.embedder
-	endpoint := redactEndpoint(e.endpoint)
+	endpoint := e.safeEndpoint()
 	status, body := 0, ""
 	var he *embedHTTPError
 	if errors.As(err, &he) {
 		status, body = he.code, he.body
 	}
 	text := e.errText(err)
-	b.warnLimited("embed:"+endpoint+"|"+e.model+"|"+text, "embedding failed",
+	b.warnLimited("embed|"+endpoint+"|"+e.model+"|"+strconv.Itoa(status)+"|"+normText(text), "embedding failed",
 		"endpoint", endpoint, "model", e.model, "status", status, "body", body,
 		"batch_size", len(rows), "row_ids", rows, "err", text)
 }
@@ -144,31 +213,39 @@ func (b *Bus) logEmbedFailure(ctx context.Context, err error, rows []int64) {
 // maps an index into seqs to the endpoint's answer. Not rate-limited: each
 // row is reported once.
 func (b *Bus) logEmbedRejected(rejected map[int]string, seqs []int64) {
-	var ids []int64
-	first := ""
-	for i, reason := range rejected {
+	idx := make([]int, 0, len(rejected))
+	for i := range rejected {
 		if i < len(seqs) {
-			ids = append(ids, seqs[i])
-			if first == "" {
-				first = reason
-			}
+			idx = append(idx, i)
 		}
 	}
-	if len(ids) == 0 {
+	if len(idx) == 0 {
 		return
 	}
-	slices.Sort(ids)
-	b.log.Warn("embedding rejected rows", "endpoint", redactEndpoint(b.embedder.endpoint), "model", b.embedder.model,
-		"row_count", len(ids), "row_ids", ids, "err", b.embedder.scrub(first))
+	slices.Sort(idx)
+	ids := make([]int64, 0, len(idx))
+	counts := map[string]int{}
+	for _, i := range idx {
+		ids = append(ids, seqs[i])
+		counts[rejected[i]]++
+	}
+	var reasons []string
+	for r, n := range counts {
+		reasons = append(reasons, fmt.Sprintf("%d x %s", n, r))
+	}
+	slices.Sort(reasons)
+	b.log.Warn("embedding rejected rows", "endpoint", b.embedder.safeEndpoint(), "model", b.embedder.model,
+		"row_count", len(ids), "row_ids", ids, "err", b.embedder.scrub(rejected[idx[0]]), "reasons", strings.Join(reasons, "; "))
 }
 
-// errText is err's text, safe to log. net/http's *url.Error carries the
-// request URL with the user name and query intact, so it is rebuilt around the
-// redacted endpoint.
+// errText is err's text, safe to log, keeping any wrapper text around it.
+// net/http's *url.Error carries the request URL (user name and query intact),
+// so that URL is replaced inside the message by the redacted endpoint.
 func (e *embedder) errText(err error) string {
+	s := err.Error()
 	var ue *url.Error
-	if errors.As(err, &ue) {
-		return e.scrub(fmt.Sprintf("%s %q: %v", ue.Op, redactEndpoint(e.endpoint), ue.Err))
+	if errors.As(err, &ue) && ue.URL != "" {
+		s = strings.ReplaceAll(s, ue.URL, e.safeEndpoint())
 	}
-	return e.scrub(err.Error())
+	return e.scrub(s)
 }

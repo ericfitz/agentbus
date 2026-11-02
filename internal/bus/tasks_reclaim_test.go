@@ -423,7 +423,8 @@ func TestGetAndListReturnSnapshotWhenFixUpFails(t *testing.T) {
 	if len(list) != 1 || list[0].Status != "in_progress" || list[0].Owner != "Pat" {
 		t.Fatalf("TaskList must return the pre-fix-up snapshot: %+v", list)
 	}
-	if !strings.Contains(buf.String(), "task fix-up failed") {
-		t.Fatalf("fix-up failure not logged: %s", buf.String())
+	// The identical failure is rate-limited: logged once above, not again.
+	if strings.Contains(buf.String(), "task fix-up failed") {
+		t.Fatalf("repeated identical fix-up failure was logged again: %s", buf.String())
 	}
 }

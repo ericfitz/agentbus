@@ -348,7 +348,7 @@ func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
 					// identities can be), so skip it without a bus call or a warning.
 					if json.Unmarshal(p.Arguments, &a) == nil && a.As != "" && !strings.Contains(a.As, "/") && b.Owns(a.As) {
 						if err := b.Unpark(a.As); err != nil && log != nil {
-							log.Warn("unpark on tool call", "tool", p.Name, "as", a.As, "err", err)
+							b.WarnLimited("unpark:"+a.As+":"+bus.NormText(err.Error()), "unpark on tool call", "tool", p.Name, "as", a.As, "err", err)
 						}
 					}
 				}
@@ -523,7 +523,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 					}
 				}
 				if terr := b.TouchMemoryAccess(ids); terr != nil && log != nil {
-					log.Warn("memory access touch failed", "err", terr)
+					b.WarnLimited("memory touch:"+bus.NormText(terr.Error()), "memory access touch failed", "err", terr)
 				}
 			}
 			return result(res, err)
@@ -533,7 +533,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			msg, err := b.GetMemory(in.As, in.ID)
 			if err == nil {
 				if terr := b.TouchMemoryAccess([]int64{in.ID}); terr != nil && log != nil {
-					log.Warn("memory access touch failed", "err", terr)
+					b.WarnLimited("memory touch:"+bus.NormText(terr.Error()), "memory access touch failed", "err", terr)
 				}
 			}
 			return result(msg, err)
@@ -645,7 +645,7 @@ func StartBackgroundLoops(ctx context.Context, b *bus.Bus, cfg config.Config, lo
 				return
 			case <-t.C:
 				if err := b.Heartbeat(); err != nil {
-					log.Warn("heartbeat failed", "err", err)
+					b.WarnLimited("heartbeat:"+bus.NormText(err.Error()), "heartbeat failed", "err", err)
 				}
 			}
 		}

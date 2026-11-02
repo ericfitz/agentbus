@@ -443,13 +443,13 @@ func (b *Bus) RegisterWithClient(name, parent, context string, resume, rename bo
 	// decision 3). A subagent name has a '/', which cannot be parked.
 	if parent == "" {
 		if err := b.Unpark(display); err != nil {
-			b.log.Warn("register: clearing park", "name", display, "err", err)
+			b.warnLimited("clear park:"+display+":"+normText(err.Error()), "register: clearing park", "name", display, "err", err)
 		}
 	}
 	// A rename's dropped names go too; none of them is a subagent name.
 	for _, d := range dropped {
 		if err := b.Unpark(d); err != nil {
-			b.log.Warn("register: clearing park", "name", d, "err", err)
+			b.warnLimited("clear park:"+d+":"+normText(err.Error()), "register: clearing park", "name", d, "err", err)
 		}
 	}
 	// Pending is bounded by the number of subscriptions, not by anything a
@@ -609,7 +609,7 @@ func (b *Bus) restoreOne(q execQuerier, name string) bool {
 	}
 	ok, err := b.restore(q, r)
 	if err != nil {
-		b.warnLimited("restore:"+name+":"+err.Error(), "restore session", "name", name, "err", err)
+		b.warnLimited("restore:"+name+":"+normText(err.Error()), "restore session", "name", name, "err", err)
 	}
 	return ok
 }
@@ -622,7 +622,7 @@ func (b *Bus) Heartbeat() error {
 	// First, so a wake is recorded before this process's own rows look fresh.
 	// A failed write stays pending for the next call; the heartbeat goes on.
 	if err := b.noteClock(b.db); err != nil {
-		b.warnLimited("record wake:"+err.Error(), "record wake", "err", err)
+		b.warnLimited("record wake:"+normText(err.Error()), "record wake", "err", err)
 	}
 	if _, err := b.db.Exec("UPDATE sessions SET heartbeat=? WHERE owner=?", b.nowMs(), b.owner); err != nil {
 		return internal(err)

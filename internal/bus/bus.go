@@ -235,6 +235,7 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 // closing the database, so that goroutine never runs its final query against
 // an already-closed *sql.DB.
 func (b *Bus) Close() error {
+	b.flushFailLog()
 	b.embedMu.Lock()
 	defer b.embedMu.Unlock()
 	return b.db.Close()

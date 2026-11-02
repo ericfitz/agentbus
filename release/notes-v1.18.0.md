@@ -27,19 +27,28 @@ supported. A malformed key file fails startup with an error naming the file.
 
 ## Background failures log what they need to be diagnosed
 
-A failed embedding pass now writes one `agentbus.log` warning, "embedding
-failed", with the endpoint, model, HTTP status, a response body excerpt (at
-most 300 bytes), the request's batch size and the affected row ids (#44).
-Rows the endpoint rejects on their own are logged once as "embedding rejected
-rows". The API key, the Authorization header, endpoint userinfo and endpoint
-query values never appear in the log or in the `status` embedding notice; an
-echoed key in a response body is removed before the excerpt is cut.
+A failed embedding pass now writes an `agentbus.log` warning, "embedding
+failed", with the endpoint, model, HTTP status (0 when the endpoint never
+answered), a response body excerpt (at most 300 bytes), the failed request's
+batch size and its row ids; when a batch is retried row by row, the failing
+row's id. Rows the endpoint rejects on their own are logged once, as
+"embedding rejected rows", with a count per reason (#44).
 
-Identical repeated failures (embedding, maintenance steps, wake and session
-restore, semantic search fallback) are logged once, then not again for ten
-minutes; the next line carries `suppressed=N`, the number held back. Maintenance
-step failures also record how long the step ran. Look in `agentbus.log` in the
-data directory.
+The endpoint is logged without userinfo, fragment or query string; the path
+is logged as written except for the API key, which is removed wherever it
+appears. The key and the Authorization header never reach the log or the
+`status` embedding notice, and a key echoed in a response body is removed
+before the excerpt is cut.
+
+Each agentbus process rate-limits identical background warnings (embedding,
+maintenance steps, wake and session restore, semantic search fallback,
+inspection hooks, task fix-up, park clearing, heartbeat, memory access): the
+first is logged, repeats are counted (digits in the error text are ignored,
+so request ids do not defeat this), and the next one more than ten minutes
+later carries `suppressed=N`. When the table of tracked failures is full the
+oldest is dropped with a summary line, and a process flushes pending counts
+as summary lines when it closes. Maintenance step failures also record
+`elapsed_ms`. Look in `agentbus.log` in the data directory.
 
 ## Breaking changes
 

@@ -48,7 +48,7 @@ func (b *Bus) inspect(kind, as string, payload any) error {
 	}
 	in, err := json.Marshal(map[string]any{"operation": kind, "sender": as, "payload": payload})
 	if err != nil {
-		b.log.Warn("inspection hook payload could not be marshaled", "operation", kind, "sender", as, "err", err)
+		b.warnLimited("inspect marshal:"+kind+":"+as, "inspection hook payload could not be marshaled", "operation", kind, "sender", as, "err", err)
 		return errf("inspection_unavailable", true, "failed to prepare inspection payload: %v", err)
 	}
 
@@ -78,13 +78,13 @@ func (b *Bus) inspect(kind, as string, payload any) error {
 
 	switch {
 	case startErr != nil:
-		b.log.Warn("inspection hook failed to start", "operation", kind, "sender", as, "err", startErr)
+		b.warnLimited("inspect start:"+kind+":"+as+":"+normText(startErr.Error()), "inspection hook failed to start", "operation", kind, "sender", as, "err", startErr)
 		return errf("inspection_unavailable", true, "inspection hook failed to start: %v", startErr)
 	case errors.Is(waitErr, context.DeadlineExceeded):
-		b.log.Warn("inspection hook timed out", "operation", kind, "sender", as)
+		b.warnLimited("inspect timeout:"+kind+":"+as, "inspection hook timed out", "operation", kind, "sender", as)
 		return errf("inspection_unavailable", true, "inspection hook timed out after %vs", b.cfg.InspectionTimeoutSeconds)
 	case waitErr != nil:
-		b.log.Warn("inspection hook failed", "operation", kind, "sender", as, "err", waitErr)
+		b.warnLimited("inspect fail:"+kind+":"+as+":"+normText(waitErr.Error()), "inspection hook failed", "operation", kind, "sender", as, "err", waitErr)
 		return errf("inspection_unavailable", true, "inspection hook failed: %v", waitErr)
 	}
 	var d struct {
@@ -92,7 +92,7 @@ func (b *Bus) inspect(kind, as string, payload any) error {
 		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.buf.Bytes()), &d); err != nil || d.Allow == nil {
-		b.log.Warn("inspection hook returned malformed output", "operation", kind, "sender", as)
+		b.warnLimited("inspect malformed:"+kind+":"+as, "inspection hook returned malformed output", "operation", kind, "sender", as)
 		return errf("inspection_unavailable", true, "inspection hook returned malformed output")
 	}
 	if !*d.Allow {

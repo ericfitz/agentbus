@@ -649,7 +649,7 @@ func (b *Bus) tryFixUpAbandoned(as, channel string, ids []int64) (reload bool, e
 		if errors.As(fuErr, &be) && be.Code == "not_registered" {
 			return false, fuErr
 		}
-		b.log.Warn("task fix-up failed; serving the snapshot already loaded", "channel", channel, "err", fuErr)
+		b.warnLimited("task fixup:"+channel+":"+normText(fuErr.Error()), "task fix-up failed; serving the snapshot already loaded", "channel", channel, "err", fuErr)
 		return false, nil
 	}
 	return true, nil

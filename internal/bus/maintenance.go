@@ -49,7 +49,7 @@ func (b *Bus) Tick(ctx context.Context) {
 	// the other steps run; the wake stays pending for the next sample.
 	cutoff, err := b.liveCutoff(b.db)
 	if err != nil {
-		b.warnLimited("maintenance:wake grace:"+err.Error(), "maintenance tick", "step", "wake grace", "err", err)
+		b.warnLimited("maintenance:wake grace:"+normText(err.Error()), "maintenance tick", "step", "wake grace", "err", err)
 	}
 	steps := []struct {
 		name string

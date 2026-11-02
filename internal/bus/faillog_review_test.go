@@ -71,6 +71,14 @@ func TestExcerptScrubsKeyAcrossWhitespaceAndCut(t *testing.T) {
 	if strings.Contains(got, "sk") || len(got) > embedBodyExcerpt {
 		t.Errorf("partial key kept (len %d): %q", len(got), got[len(got)-10:])
 	}
+	// the input itself ends in a key prefix (the read stopped mid-key)
+	got = e.excerpt(strings.Repeat("x", 50) + "sk-abc")
+	if strings.HasSuffix(got, "sk-abc") || strings.Contains(got, "sk-") {
+		t.Errorf("trailing key prefix kept: %q", got)
+	}
+	if len(got) > embedBodyExcerpt {
+		t.Errorf("partial key kept (len %d): %q", len(got), got[len(got)-10:])
+	}
 	// multibyte boundary: valid UTF-8, bounded
 	m := strings.Repeat("é", 400)
 	got = e.excerpt(m)
@@ -188,9 +196,7 @@ func TestLimiterKeysIgnoreDigitsInText(t *testing.T) {
 func TestEmbedFailureKeyKeepsStatusDistinct(t *testing.T) {
 	b, h, _ := failingEmbedBus(t, http.StatusInternalServerError, "boom", "")
 	_, _ = b.embedBatch(context.Background())
-	e := b.embedder
 	b.logEmbedFailure(context.Background(), &embedHTTPError{status: "401 Unauthorized", code: 401}, []int64{1})
-	_ = e
 	if n := len(h.records()); n != 2 {
 		t.Fatalf("500 then 401 must both log, got %d", n)
 	}
@@ -246,10 +252,17 @@ func TestLogEmbedRejectedDeterministicWithReasonCounts(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		b.logEmbedRejected(rej, []int64{10, 11, 12, 13})
 	}
+	found := 0
+	defer func() {
+		if found != 20 {
+			t.Errorf("found %d rejected-rows records, want 20", found)
+		}
+	}()
 	for _, r := range h.records() {
 		if r.Message != "embedding rejected rows" {
 			continue
 		}
+		found++
 		if v, _ := attrOf(r, "err"); v.String() != "zero reason" {
 			t.Fatalf("err not from lowest index: %v", v)
 		}
@@ -270,4 +283,76 @@ func TestInspectionHookFailureRateLimited(t *testing.T) {
 	if n := len(h.records()); n != 1 {
 		t.Fatalf("inspection failures logged %d times, want 1:\n%s", n, h.dump())
 	}
+}
+
+// A URL with a quote, backslash or control byte is escaped by url.Error's %q
+// rendering, so a plain replace of the URL misses it.
+func TestErrTextRedactsQuotedURL(t *testing.T) {
+	e := &embedder{endpoint: "http://127.0.0.1:1/v1/e?api_key=QS\"CRET\\x\x01", key: "KEYVAL", client: &http.Client{}}
+	_, err := e.embed(context.Background(), []string{"x"})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	got := e.errText(fmt.Errorf("pass failed: %w", err))
+	for _, s := range []string{"CRET", "QS", "x01", `\x`} {
+		if strings.Contains(got, s) {
+			t.Errorf("%q leaked: %s", s, got)
+		}
+	}
+	if !strings.HasPrefix(got, "pass failed: ") {
+		t.Errorf("wrapper lost: %s", got)
+	}
+}
+
+// Request ids in the body (hex, alphanumeric) must not defeat the limiter.
+func TestEmbedFailureLimiterIgnoresBodyRequestIDs(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		http.Error(w, fmt.Sprintf("overloaded request_id=req_%x%dabc", n*7919, n), 500)
+	}))
+	t.Cleanup(srv.Close)
+	b := newEmbedBus(t, srv.URL)
+	h := newCapHandler()
+	b.log = slog.New(h)
+	b.embedMu.Lock()
+	defer b.embedMu.Unlock()
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "mem", "memory")
+	_, _ = b.Send(sam, SendInput{Channel: "mem", Content: "one"})
+	for i := 0; i < 4; i++ {
+		_, _ = b.embedBatch(context.Background())
+	}
+	if c := len(h.records()); c != 1 {
+		t.Fatalf("body request ids defeated the limiter: %d records\n%s", c, h.dump())
+	}
+}
+
+// The key straddles the HTTP read cut (embedBodyExcerpt+len(key)).
+func TestEmbedFailureKeyAtReadCutNotLogged(t *testing.T) {
+	for off := embedBodyExcerpt - 8; off <= embedBodyExcerpt+10; off++ {
+		body := strings.Repeat("x", off) + "sk-test" + strings.Repeat("y", 100)
+		b, h, _ := failingEmbedBus(t, http.StatusUnauthorized, body, "")
+		_, _ = b.embedBatch(context.Background())
+		if out := h.dump(); strings.Contains(out, "sk-") || strings.Contains(out, "sk-t") {
+			t.Fatalf("offset %d leaked key bytes:\n%s", off, out)
+		}
+	}
+}
+
+func TestEmbedStoreFailureLoggedWithoutEndpointFields(t *testing.T) {
+	b, h, _ := failingEmbedBus(t, http.StatusInternalServerError, "boom", "")
+	b.logEmbedFailure(context.Background(), internal(fmt.Errorf("disk full")), nil)
+	for _, r := range h.records() {
+		if r.Message == "embedding store failed" {
+			if _, ok := attrOf(r, "status"); ok {
+				t.Fatalf("store failure carries status: %s", h.dump())
+			}
+			if _, ok := attrOf(r, "endpoint"); ok {
+				t.Fatalf("store failure carries endpoint: %s", h.dump())
+			}
+			return
+		}
+	}
+	t.Fatalf("no 'embedding store failed' record:\n%s", h.dump())
 }

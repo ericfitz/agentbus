@@ -46,8 +46,12 @@ func TestIdentityHookNamesHeldSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	setHarness(t, procs.Ref{Pid: 200, Start: 2}, nil)
-	if got := hook(&bad); got != identityLine(cwdName) {
-		t.Fatalf("bus cannot open: %q", got)
+	var badOut, badWarn bytes.Buffer
+	if err := identity(&bad, cwd, &badOut, &badWarn); err != nil || badOut.String() != identityLine(cwdName) {
+		t.Fatalf("bus cannot open: %q %v", badOut.String(), err)
+	}
+	if !strings.HasPrefix(badWarn.String(), "agentbus: ") {
+		t.Fatalf("bus Open failure must warn, got %q", badWarn.String())
 	}
 }
 

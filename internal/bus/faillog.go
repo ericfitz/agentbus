@@ -175,6 +175,7 @@ func (e *embedder) safeEndpoint() string {
 // a key in its query) from text bound for a log or the status notice.
 func (e *embedder) scrub(s string) string {
 	if e.endpoint != "" {
+		s = strings.ReplaceAll(s, strconv.Quote(e.endpoint), strconv.Quote(e.safeEndpoint()))
 		s = strings.ReplaceAll(s, e.endpoint, e.safeEndpoint())
 	}
 	if e.key != "" {
@@ -197,13 +198,23 @@ func (b *Bus) logEmbedFailure(ctx context.Context, err error, rows []int64) {
 	}
 	e := b.embedder
 	endpoint := e.safeEndpoint()
-	status, body := 0, ""
 	var he *embedHTTPError
-	if errors.As(err, &he) {
-		status, body = he.code, he.body
+	var be *Error
+	if !errors.As(err, &he) && errors.As(err, &be) && be.Code == "internal" {
+		// The local database failed, not the endpoint: no endpoint fields.
+		b.warnLimited("embed store|"+normText(be.Message), "embedding store failed",
+			"batch_size", len(rows), "row_ids", rows, "err", be.Message)
+		return
 	}
+	status, body := 0, ""
 	text := e.errText(err)
-	b.warnLimited("embed|"+endpoint+"|"+e.model+"|"+strconv.Itoa(status)+"|"+normText(text), "embedding failed",
+	// The limiter key leaves out the response body: request ids in it vary.
+	keyText := normText(text)
+	if he != nil {
+		status, body = he.code, he.body
+		keyText = he.status
+	}
+	b.warnLimited("embed|"+endpoint+"|"+e.model+"|"+strconv.Itoa(status)+"|"+keyText, "embedding failed",
 		"endpoint", endpoint, "model", e.model, "status", status, "body", body,
 		"batch_size", len(rows), "row_ids", rows, "err", text)
 }
@@ -245,7 +256,11 @@ func (e *embedder) errText(err error) string {
 	s := err.Error()
 	var ue *url.Error
 	if errors.As(err, &ue) && ue.URL != "" {
-		s = strings.ReplaceAll(s, ue.URL, e.safeEndpoint())
+		safe := e.safeEndpoint()
+		// url.Error renders the URL with %q, which escapes quotes,
+		// backslashes and control bytes; replace that spelling first.
+		s = strings.ReplaceAll(s, strconv.Quote(ue.URL), strconv.Quote(safe))
+		s = strings.ReplaceAll(s, ue.URL, safe)
 	}
 	return e.scrub(s)
 }

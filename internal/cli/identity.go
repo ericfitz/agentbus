@@ -45,7 +45,12 @@ func identity(cfg *config.Config, cwd string, out, warn io.Writer) error {
 // another harness (sessionIdentity returns "").
 func hookIdentityName(cfg *config.Config, cwd string, warn io.Writer) string {
 	if cfg != nil {
-		if b, err := bus.Open(*cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+		b, err := bus.Open(*cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			// Say why the hook is degrading (for example a malformed key
+			// file), then fall back as before.
+			_, _ = fmt.Fprintln(warn, "agentbus:", err)
+		} else {
 			defer func() { _ = b.Close() }()
 			// sessionIdentity already warned about a bad identity file.
 			if name, _ := sessionIdentity(b, cwd, warn); name != "" {

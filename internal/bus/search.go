@@ -280,7 +280,7 @@ func (b *Bus) rankedSearch(as string, in SearchInput) ([]SearchHit, bool, error)
 	sem, err := b.semanticSearch(ctx, as, in)
 	if err != nil {
 		b.warnLimited("semantic search:"+normText(b.embedder.errText(err)), "semantic search unavailable",
-			"endpoint", redactEndpoint(b.embedder.endpoint), "model", b.embedder.model, "mode", in.Mode, "err", b.embedder.errText(err))
+			"endpoint", b.embedder.safeEndpoint(), "model", b.embedder.model, "mode", in.Mode, "err", b.embedder.errText(err))
 		hits, terr := b.textSearch(as, in, searchPageMax)
 		return hits, true, terr
 	}

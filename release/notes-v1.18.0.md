@@ -43,8 +43,8 @@ before the excerpt is cut.
 Each agentbus process rate-limits identical background warnings (embedding,
 maintenance steps, wake and session restore, semantic search fallback,
 inspection hooks, task fix-up, park clearing, heartbeat, memory access): the
-first is logged, repeats are counted (digits in the error text are ignored,
-so request ids do not defeat this), and the next one more than ten minutes
+first is logged, repeats are counted (the response body and digits in the
+error text are not part of the match, so request ids do not defeat this), and the next one more than ten minutes
 later carries `suppressed=N`. When the table of tracked failures is full the
 oldest is dropped with a summary line, and a process flushes pending counts
 as summary lines when it closes. Maintenance step failures also record

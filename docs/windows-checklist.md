@@ -54,11 +54,15 @@ Passed 2026-10-20 (Eric, Windows 11 ARM VM).
 Park relies on three harness behaviors that no test can confirm. Run each
 on a host with that harness installed (any OS) and record the result.
 
-- [ ] Claude Code: does a background-task completion notification (the
+- [x] Claude Code: does a background-task completion notification (the
       wake from a background `agentbus wait`) fire `UserPromptSubmit`? Park a
       session, send it a DM, and watch whether the park file in the data
       directory's `park/` disappears. If it does, the first DM wake unparks
       the session and park only holds until then.
+      Result 2026-11-01 (Claude Code 2.1.316, macOS): yes. The session ran
+      `agentbus park`, then a background task finished with no other input,
+      and the park file was gone after the notification. A cross-session
+      message also unparks. So park holds only until the first wake.
 - [ ] Grok: does a `UserPromptSubmit` hook in `~/.grok/hooks/agentbus.json`
       run? Add a hook that writes a marker file, submit a prompt, check the
       file. If not, Grok sessions are never unparked by a prompt.

@@ -253,7 +253,10 @@ Agentbus's own embedding traffic makes no network calls (a configured
 its own). For a remote provider, set `embedding_endpoint` and
 `embedding_model` to that provider's values and add
 `"embedding_api_key_file": "~/.keys/VOYAGE_API_KEY"`. The file may be a bare
-key or a one-line `export NAME='value'`; its contents are never logged.
+key or an `export NAME=value` line (value bare, 'single-quoted' or
+"double-quoted"). Blank lines and `#` comments (whole-line, or after the
+value) are ignored; any other content, such as a second line or a value with
+whitespace, is an error that names the file. Its contents are never logged.
 `"embedding_api_key_env": "OPENAI_API_KEY"` names an environment variable to
 read the key from instead; it wins when set and non-empty, and the key file is
 the fallback for processes started without it (a harness-spawned MCP server

@@ -485,3 +485,86 @@ func TestEmbedBatchEmbedsSubjectWithContent(t *testing.T) {
 		t.Fatalf("embedded texts %q, want %q", inputs, want)
 	}
 }
+
+func TestReadKeyFileCommentLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "k")
+	if err := os.WriteFile(p, []byte("# OpenAI key\nexport OPENAI_API_KEY=\"example-placeholder\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	k, err := readKeyFile(p)
+	if err != nil || k != "example-placeholder" {
+		t.Fatalf("got %q, %v", k, err)
+	}
+}
+
+func TestReadKeyFileFormats(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"bare", "abc123\n", "abc123"},
+		{"bare padded with =", "abc123==\n", "abc123=="},
+		{"bare crlf", "abc123\r\n", "abc123"},
+		{"bare trailing comment", "abc123 # note\n", "abc123"},
+		{"export bare", "export K=abc\n", "abc"},
+		{"export single", "export K='abc'\n", "abc"},
+		{"export double", "export K=\"abc\"\n", "abc"},
+		{"export spaced", "  export   K = abc  \n", "abc"},
+		{"leading comment and blanks", "# c\n\n  # indented\nexport K=abc\n\n", "abc"},
+		{"comment after", "export K=abc\n# c\n", "abc"},
+		{"trailing comment unquoted", "export K=abc # c\n", "abc"},
+		{"trailing comment single", "export K='abc' # c\n", "abc"},
+		{"trailing comment double", "export K=\"abc\"   # c\n", "abc"},
+		{"hash in double", "export K=\"ab#c\" # c\n", "ab#c"},
+		{"hash in single", "export K='ab#c'\n", "ab#c"},
+		{"hash inside token", "export K=ab#c\n", "ab#c"},
+	}
+	for _, c := range cases {
+		p := filepath.Join(t.TempDir(), "k")
+		if err := os.WriteFile(p, []byte(c.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		k, err := readKeyFile(p)
+		if err != nil || k != c.want {
+			t.Errorf("%s: got %q, %v; want %q", c.name, k, err, c.want)
+		}
+	}
+}
+
+func TestReadKeyFileRejects(t *testing.T) {
+	const secret = "sEcReT9"
+	cases := map[string]string{
+		"empty":             "",
+		"only comments":     "# a\n  \n# b\n",
+		"two lines":         "export A=" + secret + "\nexport B=" + secret + "\n",
+		"bare two lines":    secret + "\n" + secret + "\n",
+		"unterminated dq":   "export K=\"" + secret + "\n",
+		"unterminated sq":   "export K='" + secret + "\n",
+		"mismatched quotes": "export K='" + secret + "\"\n",
+		"quote in bare":     "export K=" + secret + "'\n",
+		"space in quoted":   "export K=\"" + secret + " x\"\n",
+		"space in bare":     secret + " x\n",
+		"garbage after":     "export K='" + secret + "' x\n",
+		"control char":      "export K=\"" + secret + "\x01\"\n",
+		"empty value":       "export K=\n",
+		"empty quoted":      "export K=''\n",
+		"tab in quoted":     "export K='" + secret + "\tx'\n",
+	}
+	for name, body := range cases {
+		p := filepath.Join(t.TempDir(), "k")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		k, err := readKeyFile(p)
+		if err == nil {
+			t.Errorf("%s: accepted, key %q", name, k)
+			continue
+		}
+		if k != "" {
+			t.Errorf("%s: returned key %q with error", name, k)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("%s: error leaks the key: %v", name, err)
+		}
+		if !strings.Contains(err.Error(), p) {
+			t.Errorf("%s: error does not name the file: %v", name, err)
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ericfitz/agentbus/internal/config"
 )
@@ -30,19 +31,77 @@ type embedder struct {
 	queryTimeout         time.Duration // embedding_query_timeout_seconds; bounds the query embedding in Search
 }
 
-var exportLine = regexp.MustCompile(`^\s*export\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*'?"?([^'"\s]+)'?"?\s*$`)
+var exportLine = regexp.MustCompile(`^export\s+[A-Za-z_][A-Za-z0-9_]*\s*=(.*)$`)
 
-// readKeyFile accepts a bare key or a one-line `export NAME='value'` file.
+// readKeyFile reads an API key from a credential file. Blank lines and
+// shell-style comments are ignored (full-line, or ` # ...` after the value).
+// Exactly one other line must remain: a bare key, or `export NAME=value`
+// with the value bare, 'single-quoted' or "double-quoted" (a # inside quotes
+// is part of the value). The `NAME=value` form without `export` is not
+// accepted, because a bare key may legitimately contain `=` (base64 padding).
+// Anything else is an error that names the file and never the value.
 func readKeyFile(path string) (string, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	s := strings.TrimSpace(string(body))
-	if m := exportLine.FindStringSubmatch(s); m != nil {
-		return m[1], nil
+	var line string
+	n := 0
+	for _, l := range strings.Split(string(body), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		line = l
+		n++
 	}
-	return s, nil
+	switch n {
+	case 0:
+		return "", fmt.Errorf("key file %s: no key line found", path)
+	case 1:
+	default:
+		return "", fmt.Errorf("key file %s: %d non-comment lines; expected exactly one", path, n)
+	}
+	val := line
+	if m := exportLine.FindStringSubmatch(line); m != nil {
+		val = strings.TrimSpace(m[1])
+	}
+	key, rest, err := splitKeyValue(val)
+	if err != nil {
+		return "", fmt.Errorf("key file %s: %w", path, err)
+	}
+	if rest = strings.TrimSpace(rest); rest != "" && !strings.HasPrefix(rest, "#") {
+		return "", fmt.Errorf("key file %s: unexpected text after the key", path)
+	}
+	if key == "" {
+		return "", fmt.Errorf("key file %s: empty key", path)
+	}
+	for _, r := range key {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "", fmt.Errorf("key file %s: key contains whitespace or control characters", path)
+		}
+	}
+	return key, nil
+}
+
+// splitKeyValue returns the (possibly quoted) leading value of s and the
+// text after it.
+func splitKeyValue(s string) (value, rest string, err error) {
+	if s != "" && (s[0] == '\'' || s[0] == '"') {
+		end := strings.IndexByte(s[1:], s[0])
+		if end < 0 {
+			return "", "", errors.New("unterminated quote")
+		}
+		return s[1 : 1+end], s[2+end:], nil
+	}
+	end := strings.IndexFunc(s, unicode.IsSpace)
+	if end < 0 {
+		end = len(s)
+	}
+	if strings.ContainsAny(s[:end], `'"`) {
+		return "", "", errors.New("mismatched quote in key")
+	}
+	return s[:end], s[end:], nil
 }
 
 func newEmbedder(cfg config.Config) (*embedder, error) {

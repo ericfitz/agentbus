@@ -15,6 +15,15 @@ configured `tui_name`, with an error instead of silently registering the
 agent as `<name>2` beside the human (ADR 0025 decision 9). While no TUI is
 running, only the configured `tui_name` is reserved.
 
+## Key files may contain comments
+
+The embedding key file (`embedding_api_key_file`) parser now ignores blank
+lines and `#` comments. Before, a leading comment line became part of the key
+and every embedding request failed with `invalid header field value for
+"Authorization"`. Malformed files (no key, several key lines, unterminated
+quotes, whitespace in the value) are now an error that names the file and
+never shows the key (#45).
+
 ## Breaking changes
 
 - `register` under a second top-level name in one session needs

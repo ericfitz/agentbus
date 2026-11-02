@@ -80,6 +80,15 @@ calls and may be revisited.
    check stays the only protection while no TUI is running: an agent that
    takes a name before `agentbus tui -as <name>` starts still pushes the
    TUI to `<name>2`.
+10. **The SessionStart hook names the session the harness already holds**
+   (Eric, 2026-11-01). `agentbus identity` prints the name of the live
+   top-level session registered from the same harness process (the
+   `IdentityForHarness` lookup that `wait` and `park` already use), and
+   falls back to the configured or directory-derived name only when the
+   harness holds none. So after a resume, a clear or a deliberate rename,
+   the hook's register line matches the held name, and the agent does not
+   hit the decision 8 refusal by asking for the configured name. The hook
+   text still never mentions `rename: true` (forked subagents inherit it).
 
 ## Rulings (drafted by Claude)
 

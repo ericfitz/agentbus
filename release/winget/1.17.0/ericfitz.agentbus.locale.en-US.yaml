@@ -1,5 +1,5 @@
 # Written by hand from the komac v2.16.0 manifests for 1.14.2
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 
 PackageIdentifier: ericfitz.agentbus
 PackageVersion: 1.17.0
@@ -73,4 +73,4 @@ ReleaseNotes: |-
   The Windows binaries in this release are not Authenticode-signed; they are covered by the signed SHA256SUMS and by build attestations.
 ReleaseNotesUrl: https://github.com/ericfitz/agentbus/releases/tag/v1.17.0
 ManifestType: defaultLocale
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0

@@ -1,5 +1,5 @@
 # Written by hand from the komac v2.16.0 manifests for 1.14.2
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
 
 PackageIdentifier: ericfitz.agentbus
 PackageVersion: 1.17.0
@@ -20,4 +20,4 @@ Installers:
   InstallerUrl: https://github.com/ericfitz/agentbus/releases/download/v1.17.0/agentbus-v1.17.0-windows-arm64.zip
   InstallerSha256: 99B3C26E25B08B59DF9A872F7E492871E171054ACD2DE1B5DA6B57C91A7C430F
 ManifestType: installer
-ManifestVersion: 1.12.0
+ManifestVersion: 1.28.0

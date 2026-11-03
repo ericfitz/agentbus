@@ -151,7 +151,7 @@ func (b *Bus) Reset() error {
 		return internal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, t := range []string{"embeddings", "embed_failures", "message_tags", "tag_subscription_tags", "tag_subscriptions", "messages", "memory_access", "subscriptions", "sessions", "channels", "receipts", "notices"} {
+	for _, t := range []string{"embeddings", "embed_failures", "message_tags", "tag_subscription_tags", "tag_subscriptions", "messages", "memory_access", "subscriptions", "sessions", "channels", "receipts", "notices", "statuses"} {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 			return internal(err)
 		}

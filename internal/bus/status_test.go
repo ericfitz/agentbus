@@ -162,3 +162,17 @@ func TestShortAge(t *testing.T) {
 		}
 	}
 }
+
+func TestResetClearsStatuses(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	if _, err := b.SetStatus("Sam", "idle", "x", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := b.LatestStatus("Sam"); err != nil || l != nil {
+		t.Fatalf("latest after reset = %+v %v", l, err)
+	}
+}

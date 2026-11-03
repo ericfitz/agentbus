@@ -279,10 +279,12 @@ negative values are rejected.
 `set_status` keeps per identity; older ones are dropped, and the TUI's status
 history view (`enter` on a board row) and `status_history` show what is kept.
 `status_offline_hours` (default 24, range 0-720) is how long an identity
-with no live session stays on the status board as `offline`; 0 shows live
+with no live session stays on the status board as `offline`, counted from
+its last status (an identity that never set one is not shown); 0 shows live
 sessions only. `status_stale_minutes` (default 30, range 0-1440) is how old a
 planning, implementing or reviewing status may get before the Stop hook
-reminds the session to update it; 0 turns the reminder off.
+reminds the session to update it; 0 turns the reminder off, including the
+"you have no status" nudge.
 
 `tui_rail_width` (default 0, range 0-1000) is the channel rail's width in
 columns. The TUI writes it when you press `<` or `>`, rewriting the config

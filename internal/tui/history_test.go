@@ -193,3 +193,44 @@ func TestHistoryLoadError(t *testing.T) {
 		t.Fatal("stale history shown")
 	}
 }
+
+func TestHistoryClosesWhenBoardCloses(t *testing.T) {
+	f := historyFixture(t, 2)
+	f.key("enter")
+	f.key("tab") // compose
+	f.key("esc")
+	f.key("down")
+	f.key("down")
+	if f.m.boardActive() {
+		t.Fatalf("must leave the board: focus=%v pane=%v head=%d", f.m.boardState.focus, f.m.pane(), f.m.headSel)
+	}
+	f.key("b")
+	if f.m.boardState.history != "" || !strings.Contains(f.mainPane(), "waiting on review") {
+		t.Fatalf("history survived the board closing: %q\n%s", f.m.boardState.history, f.mainPane())
+	}
+}
+
+func TestHistorySurvivesTabAway(t *testing.T) {
+	f := historyFixture(t, 2)
+	f.key("enter")
+	f.key("tab") // compose
+	f.key("esc")
+	if f.m.boardState.history != "Sam" || !strings.Contains(f.mainPane(), "step 02") {
+		t.Fatalf("tab away and back lost the history: %q\n%s", f.m.boardState.history, f.mainPane())
+	}
+}
+
+func TestHistoryLateAnswerForOtherAgentDropped(t *testing.T) {
+	f := historyFixture(t, 2)
+	f.key("enter")
+	f.key("esc")
+	f.key("up") // Bob
+	f.key("enter")
+	if f.m.boardState.history != "Bob" {
+		t.Fatalf("history=%q", f.m.boardState.history)
+	}
+	f.send(statusHistoryMsg{name: "Sam", live: true, hist: []bus.AgentStatus{{Identity: "Sam", Revision: 7, Tag: "idle", Text: "late A"}}})
+	if got := f.mainPane(); strings.Contains(got, "late A") || !strings.HasPrefix(got, "Bob") {
+		t.Fatalf("late answer for A shown:\n%s", got)
+	}
+}

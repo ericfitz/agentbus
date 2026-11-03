@@ -384,6 +384,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if !m.boardActive() {
 		m.boardState.focus = false // focus never outlives the board
+		m.closeHistory()           // nor does the history view
 	}
 	if wasBoard != m.boardActive() {
 		// The main pane swaps between the board and the channel stream.

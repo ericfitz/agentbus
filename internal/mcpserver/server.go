@@ -94,6 +94,16 @@ type deleteIn struct {
 	ID             int64  `json:"id"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
+type setStatusIn struct {
+	As      string `json:"as,omitempty"`
+	Tag     string `json:"tag"`
+	Text    string `json:"text"`
+	Problem string `json:"problem,omitempty"`
+}
+type statusHistoryIn struct {
+	As   string `json:"as,omitempty"`
+	Name string `json:"name"`
+}
 type taskCreateIn struct {
 	As string `json:"as,omitempty"`
 	bus.TaskCreateInput
@@ -573,6 +583,21 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "task_list", Description: "Agentbus: list a task list's tasks in order (each task followed by its subtasks; depth gives the nesting), without descriptions. Optional status and owner filters. Subscribe to the tasks/<name> channel to be told about changes through receive: you get each task's latest revision, not every intermediate one, and deletions are not delivered. Check it before starting work to see what is claimed or blocked."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in taskListIn) (*mcp.CallToolResult, any, error) {
 			return result(b.TaskList(in.As, in.TaskListInput))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "set_status", Description: "Agentbus: set your one-line status: what you are doing now. tag is one of idle, planning, implementing, reviewing, waiting, blocked, needs-human (offline is set by the bus when you have no live session). text: one line, 1-200 characters. problem: optional, one line, up to 200 characters; pass it with blocked or needs-human. Every call is a new revision; the bus keeps the last status_history_count. Subagents do not set a status."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in setStatusIn) (*mcp.CallToolResult, any, error) {
+			return result(b.SetStatus(in.As, in.Tag, in.Text, in.Problem))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "status_history", Description: "Agentbus: an identity's last statuses, oldest first, and whether it is live."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in statusHistoryIn) (*mcp.CallToolResult, any, error) {
+			if err := b.Authorize(in.As); err != nil {
+				return result(nil, err)
+			}
+			sts, live, err := b.StatusHistory(in.Name)
+			if err != nil {
+				return result(nil, err)
+			}
+			return result(map[string]any{"name": in.Name, "live": live, "statuses": sts}, nil)
 		})
 	return s
 }

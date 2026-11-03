@@ -171,6 +171,83 @@ func (b *Bus) StatusHistory(name string) ([]AgentStatus, bool, error) {
 	return out, live, nil
 }
 
+// latestStatuses returns every identity's newest status.
+func latestStatuses(db dbOrTx) (map[string]AgentStatus, error) {
+	rows, err := db.Query(`SELECT s.identity, s.revision, s.tag, s.text, s.problem, s.set_at FROM statuses s
+JOIN (SELECT identity, MAX(revision) AS r FROM statuses GROUP BY identity) m ON s.identity=m.identity AND s.revision=m.r`)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]AgentStatus{}
+	for rows.Next() {
+		var s AgentStatus
+		if err := rows.Scan(&s.Identity, &s.Revision, &s.Tag, &s.Text, &s.Problem, &s.SetAt); err != nil {
+			return nil, internal(err)
+		}
+		out[s.Identity] = s
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return out, nil
+}
+
+// BoardEntry is one row of the status board: an identity's newest status,
+// with Live false (and Tag offline) when it has no live session. A live
+// identity that never set a status has Revision 0 and an empty Tag.
+type BoardEntry struct {
+	AgentStatus
+	Live bool `json:"live"`
+}
+
+// Board returns the live top-level sessions plus the non-live identities
+// whose newest status is within status_offline_hours (none when that is 0).
+// Subagents are excluded. The result is unsorted.
+func (b *Bus) Board() ([]BoardEntry, error) {
+	cutoff, err := b.liveCutoff(b.db)
+	if err != nil {
+		return nil, err
+	}
+	st, err := latestStatuses(b.db)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := b.db.Query("SELECT sender FROM sessions WHERE heartbeat >= ? AND instr(sender,'/')=0", cutoff)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []BoardEntry{}
+	live := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, internal(err)
+		}
+		live[n] = true
+		e := BoardEntry{AgentStatus: AgentStatus{Identity: n}, Live: true}
+		if s, ok := st[n]; ok {
+			e.AgentStatus = s
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	if b.cfg.StatusOfflineHours > 0 {
+		oldest := b.nowMs() - int64(b.cfg.StatusOfflineHours)*int64(time.Hour/time.Millisecond)
+		for n, s := range st {
+			if live[n] || strings.Contains(n, "/") || s.SetAt < oldest {
+				continue
+			}
+			s.Tag = StatusOffline
+			out = append(out, BoardEntry{AgentStatus: s})
+		}
+	}
+	return out, nil
+}
+
 // ShortAge formats d as <n>m, <n>h or <n>d, the largest whole unit; under a
 // minute is 0m.
 func ShortAge(d time.Duration) string {

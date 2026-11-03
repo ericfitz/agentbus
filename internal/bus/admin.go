@@ -51,6 +51,15 @@ func (b *Bus) liveSessions(db dbOrTx) ([]Session, error) {
 	if err := rows.Err(); err != nil {
 		return nil, internal(err)
 	}
+	st, err := latestStatuses(db)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if s, ok := st[out[i].Sender]; ok {
+			out[i].Status = &s
+		}
+	}
 	return out, nil
 }
 

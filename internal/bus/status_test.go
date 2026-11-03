@@ -176,3 +176,128 @@ func TestResetClearsStatuses(t *testing.T) {
 		t.Fatalf("latest after reset = %+v %v", l, err)
 	}
 }
+
+// ageStatus moves every stored status of name back by d.
+func ageStatus(t *testing.T, b *Bus, name string, d time.Duration) {
+	t.Helper()
+	if _, err := b.db.Exec("UPDATE statuses SET set_at = set_at - ? WHERE identity=?", d.Milliseconds(), name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func endSession(t *testing.T, b *Bus, name string) {
+	t.Helper()
+	if _, err := b.db.Exec("DELETE FROM sessions WHERE sender=?", name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func boardMap(t *testing.T, b *Bus) map[string]BoardEntry {
+	t.Helper()
+	es, err := b.Board()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := map[string]BoardEntry{}
+	for _, e := range es {
+		m[e.Identity] = e
+	}
+	return m
+}
+
+func TestBoard(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Live")
+	reg(t, b, "Quiet")
+	reg(t, b, "Recent")
+	reg(t, b, "Old")
+	if _, err := b.Register("sub", "Live", "repo", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"Live", "Recent", "Old"} {
+		if _, err := b.SetStatus(n, "blocked", "text "+n, "prob"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ageStatus(t, b, "Recent", 23*time.Hour)
+	ageStatus(t, b, "Old", 25*time.Hour)
+	endSession(t, b, "Recent")
+	endSession(t, b, "Old")
+
+	m := boardMap(t, b)
+	if e := m["Live"]; !e.Live || e.Tag != "blocked" || e.Text != "text Live" || e.Revision != 1 {
+		t.Fatalf("Live = %+v", e)
+	}
+	if e, ok := m["Quiet"]; !ok || !e.Live || e.Tag != "" || e.Revision != 0 {
+		t.Fatalf("Quiet = %+v ok=%v", e, ok)
+	}
+	if e := m["Recent"]; e.Live || e.Tag != StatusOffline || e.Text != "text Recent" {
+		t.Fatalf("Recent = %+v", e)
+	}
+	if _, ok := m["Old"]; ok {
+		t.Fatalf("Old (25h) present: %+v", m["Old"])
+	}
+	for n := range m {
+		if strings.Contains(n, "/") {
+			t.Fatalf("subagent %q on board", n)
+		}
+	}
+	if len(m) != 3 {
+		t.Fatalf("board = %v", m)
+	}
+
+	b.cfg.StatusOfflineHours = 0
+	m = boardMap(t, b)
+	if _, ok := m["Recent"]; ok || len(m) != 2 {
+		t.Fatalf("offline_hours=0 board = %v", m)
+	}
+}
+
+func TestBoardRename(t *testing.T) {
+	b := newTestBus(t)
+	reg(t, b, "Sam")
+	if _, err := b.SetStatus("Sam", "idle", "last words", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.RegisterWithClient("Pat", "", "repo", true, true, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	m := boardMap(t, b)
+	if e := m["Sam"]; e.Live || e.Tag != StatusOffline || e.Text != "last words" {
+		t.Fatalf("Sam = %+v", e)
+	}
+	if e, ok := m["Pat"]; !ok || !e.Live || e.Tag != "" || e.Revision != 0 {
+		t.Fatalf("Pat = %+v ok=%v", e, ok)
+	}
+}
+
+func TestDiscoverIncludesStatus(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	reg(t, b, "Pat")
+	reg(t, b, "Gone")
+	if _, err := b.SetStatus("Sam", "planning", "plan it", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.SetStatus("Gone", "idle", "bye", ""); err != nil {
+		t.Fatal(err)
+	}
+	endSession(t, b, "Gone")
+	ss, err := b.Discover(sam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Session{}
+	for _, s := range ss {
+		got[s.Sender] = s
+	}
+	if s := got["Sam"]; s.Status == nil || s.Status.Tag != "planning" || s.Status.Text != "plan it" {
+		t.Fatalf("Sam = %+v", s)
+	}
+	if s, ok := got["Pat"]; !ok || s.Status != nil {
+		t.Fatalf("Pat = %+v ok=%v", s, ok)
+	}
+	if _, ok := got["Gone"]; ok {
+		t.Fatal("offline name listed")
+	}
+}

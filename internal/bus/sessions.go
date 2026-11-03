@@ -57,6 +57,9 @@ type Session struct {
 	// register. Omitted when the client sent none.
 	Harness        string `json:"harness,omitempty"`
 	HarnessVersion string `json:"harness_version,omitempty"`
+	// Status is the session's latest status (issue #43); nil when it never
+	// set one.
+	Status *AgentStatus `json:"status,omitempty"`
 }
 
 // cleanClientField makes a clientInfo string safe to store and show: control

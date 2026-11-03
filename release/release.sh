@@ -19,6 +19,9 @@ TAP_DIR="${TAP_DIR:-$HOME/Projects/homebrew-tap}" # SSH clone of ericfitz/homebr
 SCOOP_DIR="${SCOOP_DIR:-$HOME/Projects/scoop-bucket}" # SSH clone of ericfitz/scoop-bucket
 KOMAC_KEY_FILE="$HOME/.keys/KOMAC_GITHUB_KEY"           # `export KOMAC_GITHUB_KEY='<PAT with public_repo>'`
 WINGET_ID="ericfitz.agentbus"
+# The oldest ManifestVersion winget-pkgs accepts: it deprecated 1.12.0 on
+# 2026-11-03, and komac 2.17.1 still writes 1.12.0 (winget-types 0.5.2).
+WINGET_MIN_MANIFEST_VERSION="1.28.0"
 SIGN_IDENTITY="Developer ID Application: Robert Fitzgerald (796T45968D)"
 NOTARY_PROFILE="sqdist-notary" # team-level credential, shared across projects
 VERSION_VAR="github.com/ericfitz/agentbus/internal/mcpserver.Version"
@@ -449,11 +452,45 @@ update_scoop() {
     git -C "$SCOOP_DIR" push
 }
 
+# version_at_least <have> <want>: both X.Y.Z (checked by the caller); exit 0
+# when have >= want.
+version_at_least() {
+    local -a h w
+    local i
+    IFS=. read -r -a h <<<"$1"
+    IFS=. read -r -a w <<<"$2"
+    for i in 0 1 2; do
+        ((10#${h[i]} > 10#${w[i]})) && return 0
+        ((10#${h[i]} < 10#${w[i]})) && return 1
+    done
+    return 0
+}
+
+# check_manifest_versions reads komac's dry-run output (the manifests it
+# would submit) on stdin. Exit 0 when it declares at least one ManifestVersion
+# and every one is $WINGET_MIN_MANIFEST_VERSION or later; 1 when any is older
+# (printed); 2 when none is found or one is not X.Y.Z.
+check_manifest_versions() {
+    local v found=0 old=0
+    while IFS= read -r v; do
+        found=1
+        [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "an unrecognized ManifestVersion '$v'"; return 2; }
+        if ! version_at_least "$v" "$WINGET_MIN_MANIFEST_VERSION"; then
+            echo "ManifestVersion $v"; old=1
+        fi
+    done < <(perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' | sed -n 's/^[[:space:]]*ManifestVersion:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' | sort -u)
+    ((found)) || { echo "no ManifestVersion"; return 2; }
+    return "$old"
+}
+
 # submit_winget opens the winget-pkgs pull request for this version with
-# komac. An open pull request for the version counts as done (rerun). A
-# komac failure does not fail the release: the exact rerun command is
-# printed. The token is scoped to the one command, because exporting
-# GITHUB_TOKEN would override gh's own auth for the rest of the run.
+# komac. An open pull request for the version counts as done (rerun). komac
+# first runs with --dry-run, and nothing is submitted unless every manifest it
+# would write declares ManifestVersion $WINGET_MIN_MANIFEST_VERSION or later
+# (winget-pkgs rejects older ones). A komac failure or an old ManifestVersion
+# does not fail the release: the exact rerun command is printed. The token is
+# scoped to each komac command, because exporting GITHUB_TOKEN would override
+# gh's own auth for the rest of the run.
 submit_winget() {
     echo "==> Submitting ${WINGET_ID} ${VERSION} to winget"
     local open
@@ -463,7 +500,22 @@ submit_winget() {
         echo "winget: an open pull request for ${VERSION} exists; nothing to do"; return
     fi
     local base="https://github.com/${GH_REPO}/releases/download/${TAG}"
-    local cmd=(komac update "$WINGET_ID" --version "$VERSION" --urls "$base/${BIN_NAME}-${TAG}-windows-amd64.zip" "$base/${BIN_NAME}-${TAG}-windows-arm64.zip" --submit)
+    local update=(komac update "$WINGET_ID" --version "$VERSION" --urls "$base/${BIN_NAME}-${TAG}-windows-amd64.zip" "$base/${BIN_NAME}-${TAG}-windows-arm64.zip")
+    local cmd=("${update[@]}" --submit)
+    local preview why rc=0
+    if ! preview="$(
+        # shellcheck disable=SC1090
+        source "$KOMAC_KEY_FILE"
+        GITHUB_TOKEN="$KOMAC_GITHUB_KEY" "${update[@]}" --dry-run </dev/null
+    )"; then
+        echo "warning: komac --dry-run failed; nothing was submitted and the release stands. Rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+        return 0
+    fi
+    why="$(check_manifest_versions <<<"$preview")" || rc=$?
+    if ((rc != 0)); then
+        echo "warning: not submitting to winget: komac ($(komac --version 2>/dev/null || echo 'version unknown')) would write ${why}, and winget-pkgs needs ManifestVersion ${WINGET_MIN_MANIFEST_VERSION} or later. The release stands. Submit by hand (docs/windows-checklist.md, Packaging), or upgrade komac and rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+        return 0
+    fi
     if ! (
         # shellcheck disable=SC1090
         source "$KOMAC_KEY_FILE"

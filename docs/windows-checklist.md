@@ -106,6 +106,16 @@ machine or a cloud Windows VM with nested virtualization.
       `powershell -ExecutionPolicy Bypass -File release\test-winget.ps1 -ManifestDir release\winget\<version>`
       passes (validate, install for x64 and arm64, bare run exits 0,
       version, Defender scan, uninstall with nothing left).
+- [ ] When `release.sh` prints "not submitting to winget" (komac would
+      write a ManifestVersion older than winget-pkgs accepts), submit by
+      hand: copy the previous `release\winget\<version>` folder to the new
+      version; update `PackageVersion`, the installer URLs and
+      `InstallerSha256` values (from the release's `SHA256SUMS`),
+      `ReleaseDate`, `ReleaseNotes` and `ReleaseNotesUrl`; run
+      `release\test-winget.ps1` on it as above; then commit the folder to a
+      branch of your winget-pkgs fork under
+      `manifests/e/ericfitz/agentbus/<version>/` and open the pull request
+      titled `New version: ericfitz.agentbus version <version>`.
 - [ ] `winget install ericfitz.agentbus` installs once the package is
       published.
 - [ ] On a release made with `--windows-signing=on`:

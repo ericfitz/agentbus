@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.ps1 text eol=lf
+# Recorded komac output keeps its CRLF line endings.
+release/testdata/komac/*.txt -text

@@ -267,6 +267,7 @@ gh() {
         "workflow run") [[ -n "${GH_RUNS_AFTER:-}" ]] && cp "$GH_RUNS_AFTER" "$GH_RUNS"; return "${GH_RC:-0}" ;;
         "release create"|"release edit"|"release download"|"run watch"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
         "attestation verify") return "${GH_RC_ATTEST:-${GH_RC:-0}}" ;;
+        "pr list") printf '%s' "${GH_PRS:-}"; return "${GH_RC_PR:-0}" ;;
         *) echo "gh stub: unexpected call: $*" >&2; return 99 ;;
     esac
 }
@@ -389,6 +390,69 @@ check dispatch-passes-signing 0 "" -- with_stub "WINDOWS_SIGNING=on; cp '$WORK/r
 check draft-reuse-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=true ensure_draft >/dev/null && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
 check draft-published-edits-notes 0 "" -- with_stub ": > '$WORK/gh.log'; GH_VIEW=false ensure_draft >/dev/null 2>&1 && grep -q 'gh release edit v1.2.3 --repo ericfitz/agentbus --notes-file $WORK/dist/notes.md' '$WORK/gh.log'"
 check draft-reuse-edit-failure-stops 1 "could not update the notes of release v1.2.3" -- with_stub "GH_VIEW=true GH_RC=1 ensure_draft"
+
+# --- winget: komac's ManifestVersion guard ----------------------------------
+check ver-equal 0 "" -- bash -c "source '$HERE/release.sh'; version_at_least 1.28.0 1.28.0"
+check ver-patch-newer 0 "" -- bash -c "source '$HERE/release.sh'; version_at_least 1.28.1 1.28.0"
+check ver-major-newer 0 "" -- bash -c "source '$HERE/release.sh'; version_at_least 2.0.0 1.28.0"
+check ver-minor-older 1 "" -- bash -c "source '$HERE/release.sh'; version_at_least 1.12.0 1.28.0"
+check ver-numeric-not-lexical 0 "" -- bash -c "source '$HERE/release.sh'; version_at_least 1.100.0 1.28.0"
+check ver-leading-zero 1 "" -- bash -c "source '$HERE/release.sh'; version_at_least 1.08.0 1.28.0"
+mv_check() { bash -c "source '$HERE/release.sh'; printf '%b' \"\$1\" | check_manifest_versions" _ "$1"; }
+check mv-current 0 "" -- mv_check 'PackageIdentifier: x\nManifestType: installer\nManifestVersion: 1.28.0\nManifestVersion: 1.28.0\n'
+check mv-newer 0 "" -- mv_check 'ManifestVersion: 1.29.0\nManifestVersion: 2.0.0\n'
+check mv-old 1 "ManifestVersion 1.12.0" -- mv_check 'ManifestVersion: 1.12.0\nManifestVersion: 1.12.0\n'
+check mv-mixed 1 "ManifestVersion 1.12.0" -- mv_check 'ManifestVersion: 1.28.0\nManifestVersion: 1.12.0\n'
+check mv-ansi 1 "ManifestVersion 1.12.0" -- mv_check '\e[34mManifestVersion\e[0m: \e[32m1.12.0\e[0m\n'
+check mv-ansi-current 0 "" -- mv_check '\e[34mManifestVersion\e[0m: 1.28.0\r\n'
+check mv-indented 0 "" -- mv_check '  ManifestVersion: 1.28.0  \n'
+check mv-none 2 "no ManifestVersion" -- mv_check 'PackageIdentifier: x\n'
+check mv-empty 2 "no ManifestVersion" -- mv_check ''
+check mv-two-part 2 "an unrecognized ManifestVersion '1.28'" -- mv_check 'ManifestVersion: 1.28\n'
+check mv-prerelease 2 "an unrecognized ManifestVersion '1.28.0-beta'" -- mv_check 'ManifestVersion: 1.28.0-beta\n'
+check mv-quoted 2 "an unrecognized ManifestVersion" -- mv_check 'ManifestVersion: \"1.28.0\"\n'
+
+# Recorded output of komac 2.17.1 `update jqlang.jq --version 9.9.9 --urls
+# <jq 1.8.1 exe> --dry-run` (stdout only; CRLF line endings, as komac prints
+# them). The same output with every 1.12.0 raised to 1.28.0 models a komac
+# built on winget-types 0.6.0.
+KOMAC_REC="$HERE/testdata/komac/update-dry-run-2.17.1.txt"
+sed 's/1\.12\.0/1.28.0/g' "$KOMAC_REC" > "$WORK/komac-1.28.txt"
+check mv-recorded-komac-2.17.1 1 "ManifestVersion 1.12.0" -- bash -c "source '$HERE/release.sh'; check_manifest_versions < '$KOMAC_REC'"
+check mv-recorded-has-three 0 "" -- bash -c "[[ \$(grep -c '^ManifestVersion: 1.12.0' '$KOMAC_REC') == 3 ]]"
+check mv-recorded-raised 0 "" -- bash -c "source '$HERE/release.sh'; check_manifest_versions < '$WORK/komac-1.28.txt'"
+
+# A stub komac records its arguments; --dry-run prints $KOMAC_PREVIEW_FILE or
+# $KOMAC_PREVIEW (or fails with $KOMAC_DRY_RC), --submit returns
+# $KOMAC_SUBMIT_RC.
+printf "export KOMAC_GITHUB_KEY='test-token'\n" > "$WORK/komac-key"
+cat > "$WORK/komac-stub.sh" <<'EOF'
+komac() {
+    [[ "$1" == --version ]] && { echo "komac 9.9.9"; return 0; }
+    printf '%s\n' "komac $* token=$GITHUB_TOKEN" >> "$KOMAC_LOG"
+    case " $* " in
+        *" --dry-run "*) ((${KOMAC_DRY_RC:-0} == 0)) || return "$KOMAC_DRY_RC"
+            if [[ -n "${KOMAC_PREVIEW_FILE:-}" ]]; then cat "$KOMAC_PREVIEW_FILE"; else printf '%b' "$KOMAC_PREVIEW"; fi ;;
+        *" --submit "*) return "${KOMAC_SUBMIT_RC:-0}" ;;
+        *) echo "komac stub: unexpected call: $*" >&2; return 99 ;;
+    esac
+}
+EOF
+winget_stub() { with_stub "source '$WORK/komac-stub.sh'; export KOMAC_LOG='$WORK/komac.log'; KOMAC_KEY_FILE='$WORK/komac-key'; : > '$WORK/komac.log'; $1"; }
+URLS="--urls https://github.com/ericfitz/agentbus/releases/download/v1.2.3/agentbus-v1.2.3-windows-amd64.zip https://github.com/ericfitz/agentbus/releases/download/v1.2.3/agentbus-v1.2.3-windows-arm64.zip"
+check winget-current-submits 0 "" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' submit_winget >/dev/null && diff '$WORK/komac.log' <(printf '%s\n' 'komac update ericfitz.agentbus --version 1.2.3 $URLS --dry-run token=test-token' 'komac update ericfitz.agentbus --version 1.2.3 $URLS --submit token=test-token')"
+check winget-old-skips-submit 0 "would write ManifestVersion 1.12.0, and winget-pkgs needs ManifestVersion 1.28.0 or later" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-recorded-skips-submit 0 "would write ManifestVersion 1.12.0" -- winget_stub "KOMAC_PREVIEW_FILE='$KOMAC_REC' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-recorded-raised-submits 0 "" -- winget_stub "KOMAC_PREVIEW_FILE='$WORK/komac-1.28.txt' submit_winget >/dev/null && grep -q -- '--submit token=test-token' '$WORK/komac.log'"
+check winget-old-names-komac 0 "komac (komac 9.9.9)" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget"
+check winget-old-prints-rerun 0 "upgrade komac and rerun: (source $WORK/komac-key" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget"
+check winget-mixed-skips-submit 0 "ManifestVersion 1.12.0" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\nManifestVersion: 1.12.0\n' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-no-version-skips-submit 0 "would write no ManifestVersion" -- winget_stub "KOMAC_PREVIEW='nothing\n' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-dry-run-fails 0 "komac --dry-run failed; nothing was submitted" -- winget_stub "KOMAC_DRY_RC=1 submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-submit-fails-release-stands 0 "warning: komac failed; the release stands" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' KOMAC_SUBMIT_RC=1 submit_winget"
+check winget-open-pr-skips-komac 0 "an open pull request for 1.2.3 exists" -- winget_stub "GH_PRS=448498 submit_winget && [[ ! -s '$WORK/komac.log' ]]"
+check winget-pr-list-fails 1 "could not list open pull requests" -- winget_stub "GH_RC_PR=1 submit_winget"
+check winget-token-not-exported 0 "" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' submit_winget >/dev/null && [[ -z \${GITHUB_TOKEN:-} && -z \${KOMAC_GITHUB_KEY:-} ]]"
 
 echo "test-release: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

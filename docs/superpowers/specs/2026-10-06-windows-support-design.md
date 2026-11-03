@@ -258,6 +258,15 @@ architecture.
 - If komac fails, the rest of the release stands; `release.sh` prints the
   exact command to rerun. On a rerun, an open winget-pkgs pull request for
   that version counts as done.
+- ManifestVersion guard (human decision, 2026-11-03): winget-pkgs
+  deprecated ManifestVersion 1.12.0, and komac 2.17.1 still writes it in
+  both `update` and `submit`. `release.sh` runs `komac update --dry-run`
+  first and submits only when every manifest it would write declares
+  `WINGET_MIN_MANIFEST_VERSION` (1.28.0) or later; otherwise it prints a
+  warning and the by-hand steps in `docs/windows-checklist.md`
+  (Packaging), and the release stands. Chosen over replacing komac or
+  building a patched komac; it starts submitting again on its own once a
+  komac release writes 1.28.0.
 - Upgrading with winget while agentbus runs can fail; the docs say to stop
   sessions first.
 

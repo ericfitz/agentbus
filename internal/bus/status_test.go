@@ -33,7 +33,7 @@ func TestSetStatusValidation(t *testing.T) {
 			t.Fatalf("tag %q: %v", tag, err)
 		}
 	}
-	for _, tag := range []string{"", "offline", "Idle", "done"} {
+	for _, tag := range []string{"", "offline", "Idle", "done", " idle", "idle "} {
 		_, err := b.SetStatus("Sam", tag, "ok", "")
 		wantMsg(t, err, "validation", wantTagText)
 	}

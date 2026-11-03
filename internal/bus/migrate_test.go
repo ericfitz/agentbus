@@ -1258,3 +1258,39 @@ func TestMigrate12To13(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrate12To13Leftovers (#43, failed-run leftovers): a version-12
+// database that already has the statuses table (a run that created it but
+// died before bumping user_version) migrates to 13 and keeps its row.
+func TestMigrate12To13Leftovers(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		"INSERT INTO statuses(identity,revision,tag,text,set_at) VALUES('a',1,'idle','x',1)",
+		"PRAGMA user_version = 12",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open with leftover statuses table: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	var uv, n int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 13 {
+		t.Fatalf("user_version = %d, %v", uv, err)
+	}
+	if err := b.db.QueryRow("SELECT count(*) FROM statuses").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("leftover row lost: %d %v", n, err)
+	}
+}

@@ -66,7 +66,6 @@ func (b *Bus) writeStatus(name string, owned bool, tag, text, problem string) (A
 	if strings.Contains(name, "/") {
 		return AgentStatus{}, errf("validation", false, "%s", errStatusSubagt)
 	}
-	tag = strings.TrimSpace(tag)
 	text, problem = strings.TrimSpace(text), strings.TrimSpace(problem)
 	if !validStatusTag(tag) {
 		return AgentStatus{}, errf("validation", false, "%s", errStatusTag)

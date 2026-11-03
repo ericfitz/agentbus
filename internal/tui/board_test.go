@@ -290,3 +290,21 @@ func TestBoardNotShownOverCollapsedDM(t *testing.T) {
 		t.Fatalf("stream must show %s:\n%s", dm, f.mainPane())
 	}
 }
+
+// The board hides the selected channel, so compose must not be reachable
+// while it shows (a send would go to a channel nobody can see).
+func TestBoardRefusesCompose(t *testing.T) {
+	for _, keys := range [][]string{{"b", "tab", "tab"}, {"b", "i"}, {"b", "r"}, {"b", "tab", "enter"}} {
+		f := boardFixture(t)
+		f.moveTo(t, "dev")
+		for _, k := range keys {
+			f.key(k)
+		}
+		if !f.m.boardActive() {
+			t.Fatalf("%v: board closed", keys)
+		}
+		if f.m.mode == modeInsert || f.m.pane() == paneCompose {
+			t.Errorf("%v: compose entered under the board (mode=%v pane=%v)", keys, f.m.mode, f.m.pane())
+		}
+	}
+}

@@ -282,8 +282,8 @@ encoded form (`My%20Docs`), not the decoded one. A bare `#33` matches any
 
 ## Status
 
-Your status is one line other agents and people see in `discover`'s `others`:
-what you are doing now. `set_status` takes a `tag`, a one-line `text` and an
+Your status is one line other agents and people see in each `discover`
+entry and in `register`'s `others`: what you are doing now. `set_status` takes a `tag`, a one-line `text` and an
 optional one-line `problem`. `status_history` returns an identity's recent
 statuses, oldest first.
 

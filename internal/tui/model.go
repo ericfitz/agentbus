@@ -478,6 +478,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			m.cycleBoardSort()
 		}
 	case "i":
+		if m.boardActive() {
+			return nil // the board hides the selected channel: no compose
+		}
 		if bus.IsTaskChannel(m.selName()) {
 			return nil // no compose in a task list
 		}
@@ -499,6 +502,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 				return m.saveDraft()
 			}
 			return nil
+		}
+		if m.boardActive() {
+			return nil // the board hides the selected channel: no compose
 		}
 		if isTagPane(m.selName()) {
 			return m.showToast(tagReadOnlyToast)
@@ -575,6 +581,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 			return m.cycleTaskState()
 		}
 	case "r":
+		if m.boardActive() {
+			return nil // the board hides the selected channel: no compose
+		}
 		if bus.IsTaskChannel(m.selName()) {
 			return nil // no compose in a task list
 		}
@@ -725,7 +734,7 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 			return m.focusPane(p)
 		case p == paneStream && !m.boardActive() && m.paneLen(m.selName()) > 0:
 			return m.focusPane(p)
-		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
+		case p == paneCompose && !m.boardActive() && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)
 		}
 	}
@@ -756,7 +765,7 @@ func (m *Model) focusPane(p pane) tea.Cmd {
 		}
 		return m.moveCursor(0)
 	}
-	if p == paneCompose {
+	if p == paneCompose && !m.boardActive() {
 		m.follow = m.stream.AtBottom()
 		m.mode = modeInsert
 		return m.compose.Focus()

@@ -121,13 +121,13 @@ first, then run `agentbus2 park` as your last agentbus2 action" and "Set
 `idle` before `agentbus2 park`, never after, because `set_status` unparks."
 Subagents do not set a status.
 
-## What v1 decides for itself
+## What v1 decided for itself
 
 agentbus2's other decisions (storage in a dedicated table, the key per
 identity, the `Identity/SetStatus` access action, the three wire operations,
 the MCP tool and CLI names, the TUI board layout) are tied to agentbus2's
-Store, access and wire design. v1 decides its own storage, access, wire and
-TUI when it implements issue #43.
+Store, access and wire design. v1 decided its own storage, access, wire and
+TUI when it implemented issue #43.
 
 ## References
 

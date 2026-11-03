@@ -141,6 +141,8 @@ type AgentStatus struct { // bus.Status is already the health report
   no newline and no control characters.
 - **`problem`.** It is trimmed, then must be 0 to 200 characters, under the
   same line rules.
+- (implementation ruling, 2026-11-03: `tag` is compared exactly, not
+  trimmed; `" idle"` and `"idle "` are rejected.)
 - **`as`.** A subagent name is rejected with: `subagents do not set a
   status; the top-level session's status covers them`.
 
@@ -186,6 +188,8 @@ or the harness or cwd identity).
 - **`agentbus statuses [-sort time|name|tag] [-json]`.** It prints the
   board: icon, tag, name, age, text and problem, tab-aligned, sorted by time
   (newest first) by default.
+  (implementation ruling, 2026-11-03: the table prints the tag word, not the
+  icon; terminal fonts vary and tag words are greppable)
 - **`agentbus statuses [-json] <name>`.** It prints that identity's history,
   oldest first.
 - **Names.** `agentbus status` stays the health command. The new commands
@@ -235,6 +239,12 @@ or the harness or cwd identity).
     first. Each line shows revision, local time, icon, tag, text and
     problem. It scrolls with pgup/pgdn and g/G. `esc` returns to the board
     with the same row selected.
+- (implementation ruling, 2026-11-03: time sort is newest first; agents that
+  never set a status sort last; ties in every mode break by name; tag sort
+  uses the displayed tag. This applies to the board and the CLI.)
+- (implementation ruling, 2026-11-03: history closes when the board stops
+  showing, that is, when another rail row is selected; a tab focus change
+  keeps it open.)
 - **State.** The sort and expansion state last only while the TUI runs,
   like section collapse state.
 - **Refresh.** Statuses load on the existing tick that refreshes sessions;

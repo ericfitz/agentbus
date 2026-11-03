@@ -179,7 +179,7 @@ subagent are never nudged.
   of a turn, keeps the agent working to `receive` when new messages are
   waiting for it.
 - `agentbus set-status [-as NAME] [-problem TEXT] <tag> <text...>` — record
-  this session's status (see Status below); `agentbus statuses [-sort
+  this session's status (see Status above); `agentbus statuses [-sort
   time|name|tag] [-json] [NAME]` — the status board, or with a name that
   identity's kept history, oldest first.
 - `agentbus park` / `agentbus unpark` — park this session (`-as` to name

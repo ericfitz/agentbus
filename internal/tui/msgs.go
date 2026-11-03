@@ -13,6 +13,10 @@ type (
 		st   bus.Status
 		tags [][]string
 		err  error
+		// board is the status board; boardErr (a failed Board call) leaves
+		// the previous board in place and does not discard the rest.
+		board    []bus.BoardEntry
+		boardErr error
 	}
 	historyMsg struct {
 		channel string

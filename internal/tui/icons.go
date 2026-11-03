@@ -16,6 +16,9 @@ var iconVars = map[string]*string{
 	"idle": &iconIdle, "tasks": &iconTasks, "arrow": &iconArrow, "error": &iconError,
 	"task_pending": &taskPending, "task_in_progress": &taskInProgress, "task_completed": &taskCompleted,
 	"collapsed": &markSel, "expanded": &markOpen,
+	"status_idle": &statusIcons[0], "status_planning": &statusIcons[1], "status_implementing": &statusIcons[2],
+	"status_reviewing": &statusIcons[3], "status_waiting": &statusIcons[4], "status_blocked": &statusIcons[5],
+	"status_needs-human": &statusIcons[6], "status_offline": &statusIcons[7],
 }
 
 // emojiIcons is the default set, captured from the variables' initial values.
@@ -33,19 +36,27 @@ var emojiIcons = func() map[string]string {
 // or solid form; the comment names the Nerd Font glyph where it differs
 // from the requested FA6 name.
 var nerdIcons = map[string]string{
-	"chat":             "",          // fa-message
-	"memory":           "",          // fa-floppy-disk (nf fa-save)
-	"tasks":            "",          // fa-list-check (nf fa-tasks, its FA5 name)
-	"agent":            "",          // fa-robot
-	"user":             "",          // fa-user (solid; no regular user in Nerd Fonts)
-	"idle":             "\U000f04b2", // md-sleep "zZ"; fa-face-sleeping is Pro-only
-	"task_pending":     "",          // fa-square regular (nf fa-square_o)
-	"task_in_progress": "",          // fa-square-caret-right regular (nf fa-toggle_right)
-	"task_completed":   "\uf14a",     // fa-square-check solid (nf fa-square_check); FA4's check_square_o U+F046 is drawn 20% smaller in Mono patches
-	"collapsed":        "",          // fa-caret-right
-	"expanded":         "",          // fa-caret-down
-	"error":            "",          // fa-circle-exclamation (nf fa-exclamation_circle)
-	"arrow":            "",          // fa-arrow-right
+	"chat":                "",          // fa-message
+	"memory":              "",          // fa-floppy-disk (nf fa-save)
+	"tasks":               "",          // fa-list-check (nf fa-tasks, its FA5 name)
+	"agent":               "",          // fa-robot
+	"user":                "",          // fa-user (solid; no regular user in Nerd Fonts)
+	"idle":                "\U000f04b2", // md-sleep "zZ"; fa-face-sleeping is Pro-only
+	"task_pending":        "",          // fa-square regular (nf fa-square_o)
+	"task_in_progress":    "",          // fa-square-caret-right regular (nf fa-toggle_right)
+	"task_completed":      "\uf14a",     // fa-square-check solid (nf fa-square_check); FA4's check_square_o U+F046 is drawn 20% smaller in Mono patches
+	"collapsed":           "",          // fa-caret-right
+	"expanded":            "",          // fa-caret-down
+	"error":               "",          // fa-circle-exclamation (nf fa-exclamation_circle)
+	"arrow":               "",          // fa-arrow-right
+	"status_idle":         "\uf186",     // fa-moon (nf fa-moon_o)
+	"status_planning":     "\uf040",     // fa-pencil
+	"status_implementing": "\uf0ad",     // fa-wrench
+	"status_reviewing":    "\uf002",     // fa-magnifying-glass (nf fa-search)
+	"status_waiting":      "\uf252",     // fa-hourglass-half
+	"status_blocked":      "\uf05e",     // fa-ban
+	"status_needs-human":  "\uf256",     // fa-hand (nf fa-hand_stop_o)
+	"status_offline":      "\uf011",     // fa-power-off
 }
 
 // padIcon pads a glyph to its emoji counterpart's layout: the wide icons

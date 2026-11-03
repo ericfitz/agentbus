@@ -243,6 +243,31 @@ var (
 	iconError = "\u2717 "           // ballot X, the toast and overlay-footer error prefix
 )
 
+// statusIcons are the agent status icons, in statusIconTags order; iconVars
+// points at them so LoadIcons and icon_map reach them as status_<tag>.
+var statusIcons = [8]string{
+	"\U0001F4A4\uFE0F ", // idle: sleeping sign
+	"\U0001F4DD\uFE0F ", // planning: memo
+	"\U0001F528\uFE0F ", // implementing: hammer
+	"\U0001F50D\uFE0F ", // reviewing: magnifying glass
+	"\u23F3\uFE0F ",     // waiting: hourglass with flowing sand
+	"\u26D4\uFE0F ",     // blocked: no entry
+	"\U0001F64B\uFE0F ", // needs-human: person raising hand
+	"\u23FB  ",          // offline: power symbol; narrow, so two spaces keep the 3-column layout
+}
+
+// statusIconTags names the statusIcons slots: the settable tags, then offline.
+var statusIconTags = append(append([]string{}, bus.SettableStatusTags...), bus.StatusOffline)
+
+// statusIcon is the icon for a status tag; "" (a live agent that never set
+// a status) and any unknown tag show the plain agent icon.
+func statusIcon(tag string) string {
+	if i := slices.Index(statusIconTags, tag); i >= 0 {
+		return statusIcons[i]
+	}
+	return iconAgent
+}
+
 // Task status marks. The stopwatch U+23F1 is text-presentation by default
 // (like the gear) and carries U+FE0F for the color glyph; if a terminal
 // font draws its own half-width stopwatch, give it the gear's CSI 2X/1C
@@ -317,15 +342,27 @@ func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
 func (m Model) renderHeader() string {
 	ch := m.selected()
 	if ch == nil {
+		// An offline identity may have no DM inbox yet: its row is still
+		// selectable, so title it from the name rather than as an empty bus.
+		if names := m.sessionNames(); m.sessSel >= 0 && m.sessSel < len(names) {
+			n := names[m.sessSel]
+			return cut("@"+n+" · direct"+m.statusSuffix(n), m.stream.Width, "…")
+		}
 		return m.theme.Style(m.theme.Dim).Render("no channels yet · c to create one")
 	}
 	var s string
+	tail := ""
 	switch {
 	case isTagPane(ch.Name):
 		s = m.tagChips(tagPaneSet(ch.Name)) + fmt.Sprintf(" · %d messages", len(m.rows(ch.Name)))
 	case strings.HasPrefix(ch.Name, bus.DMPrefix):
 		owner, _ := strings.CutPrefix(ch.Name, bus.DMPrefix)
-		s = fmt.Sprintf("%s · direct · %d unread · %d messages", m.senderIcon(owner)+m.chanStyle(*ch).Render("@"+owner), m.unread(ch.Name), ch.Messages)
+		st := ""
+		if m.sessSel >= 0 {
+			// The status leads the counts so a narrow header cuts the counts first.
+			st, tail = m.statusSuffix(owner), "…"
+		}
+		s = fmt.Sprintf("%s%s · direct · %d unread · %d messages", m.senderIcon(owner)+m.chanStyle(*ch).Render("@"+owner), st, m.unread(ch.Name), ch.Messages)
 	default:
 		s = fmt.Sprintf("%s · %d unread · %d messages", m.channelLabel(ch.Name), m.unread(ch.Name), ch.Messages)
 	}
@@ -335,7 +372,35 @@ func (m Model) renderHeader() string {
 	// Cut a long notice instead of Width's word-wrap, which would add a row
 	// and push the status bar off the bottom of the screen; cut, not
 	// MaxWidth, so a DM title's gear never leaves its cursor escape behind.
-	return cut(s, m.stream.Width, "")
+	return cut(s, m.stream.Width, tail)
+}
+
+// statusOf is the board entry for name; ok is false when the board does not
+// list it. A live agent that never set a status has an empty Tag.
+func (m *Model) statusOf(name string) (bus.BoardEntry, bool) {
+	for _, e := range m.board {
+		if e.Identity == name {
+			return e, true
+		}
+	}
+	return bus.BoardEntry{}, false
+}
+
+// statusSuffix is " · icon tag · text · problem" for name, or "" when it has
+// no status. Callers cut the result by display width.
+func (m *Model) statusSuffix(name string) string {
+	e, ok := m.statusOf(name)
+	if !ok || e.Tag == "" {
+		return ""
+	}
+	s := " · " + strings.TrimRight(statusIcon(e.Tag), " ") + " " + e.Tag
+	if e.Text != "" {
+		s += " · " + e.Text
+	}
+	if e.Problem != "" {
+		s += " · " + e.Problem
+	}
+	return s
 }
 
 // Rail sections, top to bottom. railTop holds each one's scroll offset.
@@ -692,14 +757,22 @@ func (m Model) renderRails() string {
 			if n == m.c.as {
 				ctx, name = "you", th.Style(th.User).Render(n)
 			}
-			row = m.senderIcon(n) + name
+			icon := m.senderIcon(n)
+			if e, ok := m.statusOf(n); ok && e.Tag != "" {
+				icon = m.theme.Style(m.theme.Agent).Render(statusIcon(e.Tag))
+			}
+			row = icon + name
 			// The repo is noise when the agent is named after it (#32).
 			if ctx != "" && ctx != n {
 				row += " " + dim.Render("("+ctx+")")
 			}
 		} else {
 			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
-			row = iconIdle + dim.Render(n+" "+shortDur(age))
+			icon := iconIdle
+			if _, ok := m.statusOf(n); ok {
+				icon = statusIcon(bus.StatusOffline)
+			}
+			row = icon + dim.Render(n+" "+shortDur(age))
 		}
 		if c := m.unread(bus.DMChannel(n)); c > 0 {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))

@@ -106,6 +106,7 @@ type Model struct {
 	status       bus.Status
 	statusErr    error
 	sessionsSeen map[string]time.Time
+	board        []bus.BoardEntry // agent statuses from the last status tick
 	lastBatchAt  time.Time
 	gapCount     int
 	receiveErr   error
@@ -1065,6 +1066,13 @@ func (m *Model) sessionNames() []string {
 	for n := range m.sessionsSeen {
 		names = append(names, n)
 	}
+	// Offline identities with a recent status keep a row, so their last
+	// status and DM stay reachable.
+	for _, e := range m.board {
+		if !e.Live && !slices.Contains(names, e.Identity) {
+			names = append(names, e.Identity)
+		}
+	}
 	sort.Strings(names)
 	return names
 }
@@ -1272,6 +1280,9 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 			selName = names[m.sessSel]
 		}
 	}
+	if msg.boardErr == nil {
+		m.board = msg.board
+	}
 	for name, at := range m.sessionsSeen {
 		if now.Sub(at) > idleSessionTTL {
 			delete(m.sessionsSeen, name)
@@ -1380,7 +1391,8 @@ func (m *Model) statusCmd() tea.Cmd {
 			return statusMsg{st: st, err: err}
 		}
 		tags, err := c.b.TagSubscriptions(c.as)
-		return statusMsg{st: st, tags: tags, err: err}
+		board, berr := c.b.Board()
+		return statusMsg{st: st, tags: tags, err: err, board: board, boardErr: berr}
 	}
 }
 

@@ -822,6 +822,9 @@ func (m *Model) renderStream() string {
 	ch := m.selName()
 	m.cursorLine = -1
 	if m.boardActive() {
+		if m.boardState.history != "" {
+			return m.renderHistory(m.stream.Width, m.stream.Height)
+		}
 		return m.renderBoard(m.stream.Width, m.stream.Height)
 	}
 	if ch == "" {

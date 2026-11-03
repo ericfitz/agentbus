@@ -218,6 +218,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.statusCmd(), statusTick())
 	case statusMsg:
 		cmds = append(cmds, m.onStatus(msg))
+	case statusHistoryMsg:
+		m.onStatusHistory(msg)
 	case subscribedMsg:
 		if msg.err != nil {
 			cmds = append(cmds, m.showToast("subscribe "+msg.channel+": "+errText(msg.err)))

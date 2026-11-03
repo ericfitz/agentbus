@@ -24,6 +24,13 @@ type (
 		prepend bool
 		err     error
 	}
+	// statusHistoryMsg answers a board history open for name.
+	statusHistoryMsg struct {
+		name string
+		hist []bus.AgentStatus
+		live bool
+		err  error
+	}
 	sentMsg struct {
 		channel string
 		err     error

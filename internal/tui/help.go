@@ -54,7 +54,7 @@ func (m Model) helpLines() []string {
 		{"tab (board)", "focus the board rows; esc returns to the rail"},
 		{"↑ / ↓ (board)", "previous / next agent while the board has focus"},
 		{"→ / ← (board)", "show / hide the selected agent's full text and problem"},
-		{"enter (board)", "agent history (not built yet)"},
+		{"enter (board)", "agent status history; esc returns to the board"},
 		{"h", "health and config"},
 		{"?", "this help"},
 		{"q", "quit"},

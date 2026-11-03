@@ -275,6 +275,15 @@ it tombstones a memory that no `get_memory` call or `search` hit has
 touched for `memory_expiry_hours`. 0 disables the corresponding rule;
 negative values are rejected.
 
+`status_history_count` (default 20, range 1-200) is how many statuses
+`set_status` keeps per identity; older ones are dropped, and the TUI's status
+history view (`enter` on a board row) and `status_history` show what is kept.
+`status_offline_hours` (default 24, range 0-720) is how long an identity
+with no live session stays on the status board as `offline`; 0 shows live
+sessions only. `status_stale_minutes` (default 30, range 0-1440) is how old a
+planning, implementing or reviewing status may get before the Stop hook
+reminds the session to update it; 0 turns the reminder off.
+
 `tui_rail_width` (default 0, range 0-1000) is the channel rail's width in
 columns. The TUI writes it when you press `<` or `>`, rewriting the config
 file with its keys sorted; 0 means a fifth of the screen. Each press steps

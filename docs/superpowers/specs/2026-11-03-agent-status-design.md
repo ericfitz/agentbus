@@ -82,8 +82,8 @@ CREATE TABLE IF NOT EXISTS statuses (
 );
 ```
 
-- The same DDL goes in `schema.go` for fresh databases, and in a `migrate.go`
-  step for existing ones.
+- The DDL goes in `schema.go`; migration step 12 is `addTables` (the schema DDL
+  runs after migrate and creates the table), as for other table-only steps.
 - `schemaVersion` becomes 13.
 - A second run of the migration does nothing (`IF NOT EXISTS`, and the
   `user_version` check).
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS statuses (
 ### Bus functions (`internal/bus/status.go`)
 
 ```go
-type Status struct {
+type AgentStatus struct { // bus.Status is already the health report
     Identity string `json:"identity"`
     Revision int64  `json:"revision"`
     Tag      string `json:"tag"`
@@ -103,7 +103,7 @@ type Status struct {
 }
 ```
 
-- **`SetStatus(as, tag, text, problem string) (Status, error)`.** One write
+- **`SetStatus(as, tag, text, problem string) (AgentStatus, error)`.** One write
   transaction:
   1. `auth(as)`.
   2. Reject a subagent name (it contains `/`).
@@ -114,7 +114,7 @@ type Status struct {
   Revisions only increase, and pruning leaves gaps. SQLite's write lock
   serializes two concurrent sets for one identity: both succeed, as
   consecutive revisions.
-- **`CurrentStatuses(as string) ([]BoardEntry, error)`.** It returns one
+- **`Board() ([]BoardEntry, error)`.** It returns one
   entry per identity, holding the latest status and `Live bool`. Live is true
   when the identity has a session row and the row is not expired, judged the
   same way as `liveSessions`. The entries are:
@@ -125,10 +125,10 @@ type Status struct {
     stored status is kept in the entry so the board can show its text.
 
   The result is unsorted; callers sort.
-- **`StatusHistory(as, name string) ([]Status, bool, error)`.** It returns
+- **`StatusHistory(name string) ([]AgentStatus, bool, error)`.** It returns
   up to `status_history_count` revisions, oldest first, plus whether `name`
   is live. An unknown name returns an empty list and no error.
-- **`Session`** gains `Status *Status \`json:"status,omitempty"\``, filled
+- **`Session`** gains `Status *AgentStatus \`json:"status,omitempty"\``, filled
   by `liveSessions` for `discover` and `register` `others`.
 
 ### Validation (all `validation` errors, not retryable)
@@ -166,7 +166,7 @@ keys.
 
 ### MCP (`internal/mcpserver`)
 
-- **`set_status {as, tag, text, problem?}`.** Returns the stored `Status`.
+- **`set_status {as, tag, text, problem?}`.** Returns the stored `AgentStatus`.
   Like every MCP call except `receive`, it unparks the session.
 - **`status_history {as, name}`.** Returns `{name, live, statuses: [...]}`,
   oldest first.

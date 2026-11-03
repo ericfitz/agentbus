@@ -104,6 +104,7 @@ func (m *Model) jumpTo(hit bus.Message) tea.Cmd {
 		if i := slices.Index(m.sessionNames(), owner); i >= 0 {
 			m.sessSel = i
 			m.headSel = m.headingFor(secSessions)
+			m.boardState.heading = false
 			cmds = append(cmds, m.showSelected())
 		}
 	} else {

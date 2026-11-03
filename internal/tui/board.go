@@ -15,7 +15,9 @@ import (
 // run (ADR 0024 amendment): nothing here is saved.
 type boardState struct {
 	sort     string          // "time", "name" or "tag"; "" is "time"
-	sel      int             // index into the sorted entries
+	sel      int             // index of the selected row in the sorted entries; the fallback when selID leaves the board
+	selID    string          // the selected agent: the selection follows it as the order changes
+	heading  bool            // the sessions heading itself was chosen (not a session row under a collapsed section)
 	expanded map[string]bool // identity -> its full text and problem are shown below its row
 	history  string          //nolint:unused // Task 8: the identity whose history view is open, "" when off
 	focus    bool            // the board holds keyboard focus (tab), not the rail
@@ -30,7 +32,7 @@ const (
 // boardActive is true while the sessions heading is selected: the main pane
 // then shows the status board. The other headings keep the last selected
 // content (ADR 0024 amendment, decision 8).
-func (m *Model) boardActive() bool { return m.headSel == secSessions }
+func (m *Model) boardActive() bool { return m.headSel == secSessions && m.boardState.heading }
 
 // boardFocused is true when keys go to the board rows.
 func (m *Model) boardFocused() bool { return m.boardActive() && m.boardState.focus }
@@ -50,8 +52,22 @@ func (m *Model) sortedBoard() []bus.BoardEntry {
 }
 
 // clampBoardSel keeps the board selection on a row.
-func (m *Model) clampBoardSel() {
-	m.boardState.sel = min(max(m.boardState.sel, 0), max(len(m.board)-1, 0))
+func (m *Model) clampBoardSel() { m.boardSelIndex(m.sortedBoard()) }
+
+// boardSelIndex is the selected row in entries: the selected agent's row,
+// else (it left the board) the row at its last index, clamped. It records
+// the result.
+func (m *Model) boardSelIndex(entries []bus.BoardEntry) int {
+	if len(entries) == 0 {
+		m.boardState.sel = 0
+		return 0
+	}
+	i := slices.IndexFunc(entries, func(e bus.BoardEntry) bool { return e.Identity == m.boardState.selID })
+	if i < 0 {
+		i = min(max(m.boardState.sel, 0), len(entries)-1)
+	}
+	m.boardState.sel, m.boardState.selID = i, entries[i].Identity
+	return i
 }
 
 // boardTagLabel is the tag as the board shows it: — for a live agent that
@@ -80,7 +96,7 @@ func (m *Model) renderBoard(width, height int) string {
 	if len(entries) == 0 {
 		return dim.Render(cut("no agents", width, "…"))
 	}
-	m.clampBoardSel()
+	sel := m.boardSelIndex(entries)
 	nameW := 0
 	for _, e := range entries {
 		nameW = max(nameW, ansi.StringWidth(e.Identity))
@@ -117,7 +133,7 @@ func (m *Model) renderBoard(width, height int) string {
 		if m.boardState.expanded[e.Identity] {
 			block = append(block, wrapBoardDetail(e, width, fixed)...)
 		}
-		if i == m.boardState.sel {
+		if i == sel {
 			selTop, selEnd = len(lines), len(lines)+len(block)
 			if m.boardFocused() {
 				block[0] = m.theme.Highlight(m.theme.Sel, row, width)
@@ -158,14 +174,21 @@ func wrapBoardDetail(e bus.BoardEntry, width, indent int) []string {
 // the key is not the board's and normal handling should go on.
 func (m *Model) updateBoardKey(k string) (tea.Cmd, bool) {
 	entries := m.sortedBoard()
+	sel := m.boardSelIndex(entries)
+	move := func(i int) {
+		if len(entries) > 0 {
+			i = min(max(i, 0), len(entries)-1)
+			m.boardState.sel, m.boardState.selID = i, entries[i].Identity
+		}
+	}
 	switch k {
 	case "up":
-		m.boardState.sel--
+		move(sel - 1)
 	case "down":
-		m.boardState.sel++
+		move(sel + 1)
 	case "right", "left":
-		if m.boardState.sel >= 0 && m.boardState.sel < len(entries) {
-			name := entries[m.boardState.sel].Identity
+		if sel < len(entries) {
+			name := entries[sel].Identity
 			if m.boardState.expanded == nil {
 				m.boardState.expanded = map[string]bool{}
 			}
@@ -178,7 +201,6 @@ func (m *Model) updateBoardKey(k string) (tea.Cmd, bool) {
 	default:
 		return nil, false
 	}
-	m.clampBoardSel()
 	m.refreshStream()
 	return nil, true
 }
@@ -186,17 +208,10 @@ func (m *Model) updateBoardKey(k string) (tea.Cmd, bool) {
 // cycleBoardSort moves the sort time -> name -> tag -> time, keeping the
 // selected agent selected.
 func (m *Model) cycleBoardSort() {
-	var name string
-	if e := m.sortedBoard(); m.boardState.sel >= 0 && m.boardState.sel < len(e) {
-		name = e[m.boardState.sel].Identity
-	}
+	m.clampBoardSel() // pin selID before the order changes
 	i := slices.Index(cli.StatusSortModes, m.boardSortMode())
 	m.boardState.sort = cli.StatusSortModes[(i+1)%len(cli.StatusSortModes)]
-	for j, e := range m.sortedBoard() {
-		if e.Identity == name {
-			m.boardState.sel = j
-		}
-	}
+	m.clampBoardSel()
 	m.refreshStream()
 }
 
@@ -206,6 +221,7 @@ func (m *Model) openBoard() {
 		return
 	}
 	m.headSel = secSessions
+	m.boardState.heading = true
 	m.cursor = -1
 	m.boardState.focus = false
 	m.refreshStream()

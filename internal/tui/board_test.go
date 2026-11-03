@@ -227,3 +227,66 @@ func TestHeadingLegacyUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func (f *fixture) selectedBoardAgent() string {
+	e := f.m.sortedBoard()
+	return e[f.m.boardState.sel].Identity
+}
+
+func TestBoardSelectionSurvivesRefresh(t *testing.T) {
+	f := boardFixture(t)
+	f.key("b")
+	f.key("tab")
+	f.key("down") // time order Cy, Bob, Ann: Bob
+	if got := f.selectedBoardAgent(); got != "Bob" {
+		t.Fatalf("selected %q, want Bob", got)
+	}
+	// Ann updates and jumps to the top; Bob shifts down a row.
+	f.send(statusMsg{st: f.m.status, board: []bus.BoardEntry{
+		boardEntry("Ann", "implementing", "now busy", "", true),
+		withAge(boardEntry("Bob", "blocked", "waiting on review", "", true), 40*time.Minute),
+		withAge(boardEntry("Cy", "blocked", "stuck on CI", "runner down", true), 5*time.Minute),
+	}})
+	if got := f.selectedBoardAgent(); got != "Bob" {
+		t.Fatalf("after refresh selected %q, want Bob", got)
+	}
+	f.key("right")
+	if !f.m.boardState.expanded["Bob"] || f.m.boardState.expanded["Ann"] {
+		t.Fatalf("right must expand Bob: %v", f.m.boardState.expanded)
+	}
+	// The selected agent disappears: the selection lands on a row.
+	f.send(statusMsg{st: f.m.status, board: []bus.BoardEntry{boardEntry("Ann", "implementing", "now busy", "", true)}})
+	if got := f.selectedBoardAgent(); got != "Ann" {
+		t.Fatalf("after Bob left selected %q, want Ann", got)
+	}
+}
+
+func TestBoardSortCycleKeepsSelection(t *testing.T) {
+	f := boardFixture(t)
+	f.key("b")
+	f.key("tab")
+	f.key("down") // Bob
+	for _, mode := range []string{"name", "tag", "time"} {
+		f.key("o")
+		if f.m.boardSortMode() != mode || f.selectedBoardAgent() != "Bob" {
+			t.Fatalf("sort %s: selected %q", f.m.boardSortMode(), f.selectedBoardAgent())
+		}
+	}
+}
+
+func TestBoardNotShownOverCollapsedDM(t *testing.T) {
+	f := boardFixture(t)
+	f.toSessions()
+	if f.m.sessSel < 0 {
+		t.Fatal("no session selected")
+	}
+	dm := f.m.selName()
+	f.m.toggleSection(secSessions, true) // collapse while viewing the DM
+	if f.m.boardActive() {
+		t.Fatal("board must not replace a DM selected under a collapsed section")
+	}
+	f.m.refreshStream()
+	if strings.Contains(f.mainPane(), "stuck on CI") || f.m.selName() != dm {
+		t.Fatalf("stream must show %s:\n%s", dm, f.mainPane())
+	}
+}

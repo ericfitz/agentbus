@@ -377,6 +377,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd := m.dropStaleDraft(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	if m.headSel != secSessions {
+		m.boardState.heading = false
+	}
 	if !m.boardActive() {
 		m.boardState.focus = false // focus never outlives the board
 	}
@@ -866,6 +869,7 @@ func (m *Model) selectRailPos(p railPos) tea.Cmd {
 	switch {
 	case p.item < 0:
 		m.headSel = p.sec
+		m.boardState.heading = p.sec == secSessions
 		return nil
 	case p.sec == secSessions:
 		return m.selectSession(p.item)
@@ -1158,6 +1162,7 @@ func (m *Model) selectSession(i int) tea.Cmd {
 	}
 	i = min(max(i, 0), len(names)-1)
 	m.headSel = m.headingFor(secSessions)
+	m.boardState.heading = false // a session row is selected, not the heading
 	if i == m.sessSel {
 		return nil
 	}

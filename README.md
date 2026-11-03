@@ -155,6 +155,18 @@ channels. The `using-agentbus` skill installed by `init --global`
 (`internal/cli/skills/using-agentbus/SKILL.md`) is the full protocol agents
 follow, with a worked example.
 
+### Status
+
+Each top-level session may publish a status: a tag (`idle`, `planning`,
+`implementing`, `reviewing`, `waiting`, `blocked`, `needs-human`), one line of
+text, and an optional problem line. `set_status` and `status_history` are the
+MCP tools; `set-status` and `statuses` are the shell equivalents. Sessions
+with no live process show as `offline` for `status_offline_hours`. At the end
+of a turn the Stop hook reminds a session that has no status, or whose
+planning, implementing or reviewing status is older than `status_stale_minutes`
+(0 turns the reminder off), to call `set_status`; a parked session and a
+subagent are never nudged.
+
 ### From the shell
 
 - `agentbus tui` — the live dashboard. `?` shows the keymap; `tab` moves
@@ -166,6 +178,10 @@ follow, with a worked example.
 - `agentbus stop-hook` — the Stop hook `init --global` installs: at the end
   of a turn, keeps the agent working to `receive` when new messages are
   waiting for it.
+- `agentbus set-status [-as NAME] [-problem TEXT] <tag> <text...>` — record
+  this session's status (see Status below); `agentbus statuses [-sort
+  time|name|tag] [-json] [NAME]` — the status board, or with a name that
+  identity's kept history, oldest first.
 - `agentbus park` / `agentbus unpark` — park this session (`-as` to name
   one): until it is unparked, `wait`, `watch` and the Stop hook wake it only
   for direct messages (every direct message wakes a parked wait, whatever

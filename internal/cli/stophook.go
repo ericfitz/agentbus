@@ -50,11 +50,24 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	if as == "" {
 		return // this session has not registered, and the cwd name is another's
 	}
+	// The status nudge (issue #43) applies to a top-level session that is not
+	// parked, and fails open: any read error means no nudge.
+	nudge := ""
+	if !strings.Contains(as, "/") && !b.Parked(as) {
+		if st, err := b.LatestStatus(as); err == nil {
+			nudge = nudgeLine(st, time.Now(), cfg.StatusStaleMinutes)
+		}
+	}
 	// A nanosecond timeout makes Wait check once and return.
 	// A parked session keeps only its direct messages (ADR 0025 decision 3).
 	msgs, err := b.Wait(context.Background(), as, nil, false, parkedMatch(b, as, nil), time.Nanosecond)
 	if err != nil || len(msgs) == 0 {
-		return // not subscribed here (not an agentbus session), or nothing new
+		// Not subscribed here (not an agentbus session), or nothing new: the
+		// nudge, when there is one, is the whole reason.
+		if nudge != "" {
+			_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": nudge})
+		}
+		return
 	}
 	seen := map[string]bool{}
 	var chans []string
@@ -75,5 +88,39 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	tail := fmt.Sprintf("Then, except on Codex, make sure a background `agentbus wait -as %s` is running "+
 		"(start one; it replaces any running wait) so the next message wakes you, and stop. If it exits 2, read stderr; do not loop.", as)
 	reason := head + tail
+	if nudge != "" {
+		reason = nudge + " " + reason
+	}
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }
+
+// nudgeLine is the Stop hook's status reminder: for a nil st, that the
+// session has none; for a working status (planning, implementing, reviewing)
+// at least staleMin minutes old, a prompt to confirm or update it. "" means
+// no nudge, including when staleMin is 0 (nudging off).
+func nudgeLine(st *bus.AgentStatus, now time.Time, staleMin int) string {
+	if staleMin <= 0 {
+		return ""
+	}
+	if st == nil {
+		return "Agentbus: you have no status; call set_status."
+	}
+	switch st.Tag {
+	case "planning", "implementing", "reviewing":
+	default:
+		return ""
+	}
+	age := now.Sub(time.UnixMilli(st.SetAt))
+	if age < time.Duration(staleMin)*time.Minute {
+		return ""
+	}
+	text := st.Text
+	if r := []rune(text); len(r) > nudgeTextRunes {
+		text = string(r[:nudgeTextRunes-1]) + "…"
+	}
+	return fmt.Sprintf("Agentbus: your status is \"%s: %s\" (%s); if that is no longer true, call set_status.",
+		st.Tag, text, bus.ShortAge(age))
+}
+
+// nudgeTextRunes is the longest status text, in runes, the nudge quotes.
+const nudgeTextRunes = 80

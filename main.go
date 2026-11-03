@@ -31,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -296,6 +296,57 @@ func run(cmd string, args []string) int {
 			return 0
 		}
 		if err := cli.Park(cfg, *as, cwd, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		return 0
+	case "set-status":
+		// agentbus set-status [-as NAME] [-problem TEXT] <tag> <text...>
+		fs := flag.NewFlagSet("agentbus set-status", flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		as := fs.String("as", "", "identity to set the status for (default: the session registered from the same harness)")
+		problem := fs.String("problem", "", "what is wrong, when blocked or needs-human")
+		if err := fs.Parse(args); err != nil {
+			return parseExit(err)
+		}
+		if fs.NArg() < 2 {
+			fmt.Fprintln(os.Stderr, "usage: agentbus set-status [-as NAME] [-problem TEXT] <tag> <text...>")
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		if err := cli.SetStatusCmd(cfg, *as, cwd, fs.Arg(0), strings.Join(fs.Args()[1:], " "), *problem, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		return 0
+	case "statuses":
+		// agentbus statuses [-sort time|name|tag] [-json] [NAME]
+		fs := flag.NewFlagSet("agentbus statuses", flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		sortBy := fs.String("sort", "time", "board order: "+strings.Join(cli.StatusSortModes, ", "))
+		asJSON := fs.Bool("json", false, "print JSON")
+		if err := fs.Parse(args); err != nil {
+			return parseExit(err)
+		}
+		if fs.NArg() > 1 {
+			fmt.Fprintf(os.Stderr, "agentbus statuses: unexpected argument %q; it takes at most one name\n", fs.Arg(1))
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		if err := cli.Statuses(cfg, fs.Arg(0), *sortBy, *asJSON, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 2
 		}

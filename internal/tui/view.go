@@ -340,6 +340,9 @@ func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
 }
 
 func (m Model) renderHeader() string {
+	if m.boardActive() {
+		return cut(fmt.Sprintf("sessions · %d agents · sort %s", len(m.board), m.boardSortMode()), m.stream.Width, "…")
+	}
 	ch := m.selected()
 	if ch == nil {
 		// An offline identity may have no DM inbox yet: its row is still
@@ -818,6 +821,9 @@ func (m *Model) renderStream() string {
 	dim := th.Style(th.Dim)
 	ch := m.selName()
 	m.cursorLine = -1
+	if m.boardActive() {
+		return m.renderBoard(m.stream.Width, m.stream.Height)
+	}
 	if ch == "" {
 		return ""
 	}

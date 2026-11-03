@@ -107,6 +107,7 @@ type Model struct {
 	statusErr    error
 	sessionsSeen map[string]time.Time
 	board        []bus.BoardEntry // agent statuses from the last status tick
+	boardState   boardState       // the status board shown under the sessions heading; lives only in this running TUI
 	lastBatchAt  time.Time
 	gapCount     int
 	receiveErr   error
@@ -190,6 +191,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	wasBoard := m.boardActive()
 	if k := keyString(msg); k != "" {
 		if m.toast != "" {
 			m.toast = ""
@@ -375,6 +377,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd := m.dropStaleDraft(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	if !m.boardActive() {
+		m.boardState.focus = false // focus never outlives the board
+	}
+	if wasBoard != m.boardActive() {
+		// The main pane swaps between the board and the channel stream.
+		m.refreshStream()
+		if wasBoard && m.follow {
+			m.stream.GotoBottom()
+		}
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -445,9 +457,20 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	if k != "" && !isVersionKey(k) {
 		m.mem = memView{} // any other key shows the latest version again
 	}
+	if m.boardFocused() {
+		if cmd, ok := m.updateBoardKey(k); ok {
+			return cmd
+		}
+	}
 	switch k {
 	case "q":
 		return tea.Quit
+	case "b":
+		m.openBoard()
+	case "o":
+		if m.boardActive() {
+			m.cycleBoardSort()
+		}
 	case "i":
 		if bus.IsTaskChannel(m.selName()) {
 			return nil // no compose in a task list
@@ -651,6 +674,8 @@ func (m *Model) pane() pane {
 	switch {
 	case m.mode == modeInsert:
 		return paneCompose
+	case m.boardFocused():
+		return paneStream // the board takes the stream's slot
 	case m.cursor >= 0:
 		return paneStream
 	case m.headSel >= 0:
@@ -690,7 +715,9 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 		switch {
 		case p == rail:
 			return m.focusPane(p)
-		case p == paneStream && m.paneLen(m.selName()) > 0:
+		case p == paneStream && m.boardActive() && len(m.board) > 0:
+			return m.focusPane(p)
+		case p == paneStream && !m.boardActive() && m.paneLen(m.selName()) > 0:
 			return m.focusPane(p)
 		case p == paneCompose && m.selName() != "" && !bus.IsTaskChannel(m.selName()) && !isTagPane(m.selName()):
 			return m.focusPane(p)
@@ -709,9 +736,15 @@ func (m *Model) paneKey(msg tea.Msg) tea.Cmd {
 // the lighter pre-existing reset instead, so it doesn't snap the stream to
 // the bottom or discard the "new" divider.
 func (m *Model) focusPane(p pane) tea.Cmd {
+	m.boardState.focus = p == paneStream && m.boardActive()
 	if p == paneStream {
 		m.mode = modeNormal
 		m.compose.Blur()
+		if m.boardActive() {
+			m.clampBoardSel()
+			m.refreshStream()
+			return nil
+		}
 		if n := m.paneLen(m.selName()); m.cursor < 0 || m.cursor >= n {
 			m.cursor = n - 1
 		}
@@ -1282,6 +1315,10 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 	}
 	if msg.boardErr == nil {
 		m.board = msg.board
+		if m.boardActive() {
+			m.clampBoardSel()
+			m.refreshStream()
+		}
 	}
 	for name, at := range m.sessionsSeen {
 		if now.Sub(at) > idleSessionTTL {
@@ -1473,4 +1510,9 @@ func (m *Model) fitCompose() {
 	}
 }
 
-func (m *Model) refreshStream() { m.stream.SetContent(m.renderStream()) }
+func (m *Model) refreshStream() {
+	m.stream.SetContent(m.renderStream())
+	if m.boardActive() {
+		m.stream.GotoTop() // renderBoard windows its own rows
+	}
+}

@@ -78,6 +78,9 @@ func Statuses(cfg config.Config, name, sortBy string, asJSON bool, out io.Writer
 	if sortBy == "" {
 		sortBy = "time"
 	}
+	if err := SortBoard(nil, sortBy); err != nil {
+		return err
+	}
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		return err

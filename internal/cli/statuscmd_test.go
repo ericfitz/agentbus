@@ -129,3 +129,12 @@ func TestStatusesHistory(t *testing.T) {
 		t.Fatalf("oldest first expected:\n%s", s)
 	}
 }
+
+func TestStatusesBadSortWithName(t *testing.T) {
+	cfg := statusEnv(t)
+	for _, name := range []string{"", "Al"} {
+		if err := Statuses(cfg, name, "age", false, io.Discard); err == nil || !strings.Contains(err.Error(), "time, name, tag") {
+			t.Fatalf("name %q: got %v", name, err)
+		}
+	}
+}

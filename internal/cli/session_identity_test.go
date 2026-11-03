@@ -62,7 +62,7 @@ func setHarness(t *testing.T, ref procs.Ref, err error) {
 // match it falls back to the cwd identity.
 func TestStopHookUsesSessionFromItsHarness(t *testing.T) {
 	cfg, cwd, first, second, _ := twoSessions(t)
-	cfg.StatusStaleMinutes = 0 // this test is about messages, not the status nudge
+	cfg.StatusStaleMinutes = 0 // both sessions are live with no status; this test is about messages
 	hook := func() string {
 		var out bytes.Buffer
 		StopHook(cfg, strings.NewReader(`{"cwd":`+strconvQuote(cwd)+`}`), &out, io.Discard)

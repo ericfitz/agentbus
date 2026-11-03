@@ -50,14 +50,7 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	if as == "" {
 		return // this session has not registered, and the cwd name is another's
 	}
-	// The status nudge (issue #43) applies to a top-level session that is not
-	// parked, and fails open: any read error means no nudge.
-	nudge := ""
-	if !strings.Contains(as, "/") && !b.Parked(as) {
-		if st, err := b.LatestStatus(as); err == nil {
-			nudge = nudgeLine(st, time.Now(), cfg.StatusStaleMinutes)
-		}
-	}
+	nudge := statusNudge(b, cfg, as, time.Now())
 	// A nanosecond timeout makes Wait check once and return.
 	// A parked session keeps only its direct messages (ADR 0025 decision 3).
 	msgs, err := b.Wait(context.Background(), as, nil, false, parkedMatch(b, as, nil), time.Nanosecond)
@@ -94,6 +87,24 @@ func StopHook(cfg config.Config, in io.Reader, out, warn io.Writer) {
 	_ = json.NewEncoder(out).Encode(map[string]string{"decision": "block", "reason": reason})
 }
 
+// statusNudge is the nudge for as: "" unless as is a top-level, unparked
+// name with a live registered session. A cwd-derived name that never
+// registered (an unrelated session on a global hook) gets none, and any read
+// error means none (fail open).
+func statusNudge(b *bus.Bus, cfg config.Config, as string, now time.Time) string {
+	if strings.Contains(as, "/") || b.Parked(as) {
+		return ""
+	}
+	if live, err := b.SessionLive(as); err != nil || !live {
+		return ""
+	}
+	st, err := b.LatestStatus(as)
+	if err != nil {
+		return ""
+	}
+	return nudgeLine(st, now, cfg.StatusStaleMinutes)
+}
+
 // nudgeLine is the Stop hook's status reminder: for a nil st, that the
 // session has none; for a working status (planning, implementing, reviewing)
 // at least staleMin minutes old, a prompt to confirm or update it. "" means
@@ -111,7 +122,7 @@ func nudgeLine(st *bus.AgentStatus, now time.Time, staleMin int) string {
 		return ""
 	}
 	age := now.Sub(time.UnixMilli(st.SetAt))
-	if age < time.Duration(staleMin)*time.Minute {
+	if age <= time.Duration(staleMin)*time.Minute {
 		return ""
 	}
 	text := st.Text

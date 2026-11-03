@@ -17,7 +17,6 @@ import (
 
 func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	cfg := config.Default()
-	cfg.StatusStaleMinutes = 0 // these tests are about messages, not the status nudge
 	cfg.DataDirectory = t.TempDir()
 	cwd := t.TempDir() // no .git: identity is the directory's basename
 	me := filepath.Base(cwd)
@@ -27,6 +26,9 @@ func TestStopHookBlocksOnlyForUnseenMessages(t *testing.T) {
 	}
 	defer func() { _ = b.Close() }()
 	if _, err := b.Register(me, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.SetStatus(me, "idle", "waiting for work", ""); err != nil { // idle: no nudge
 		t.Fatal(err)
 	}
 	sam := peerBus(t, cfg, "Sam")
@@ -225,6 +227,49 @@ func TestStopHookNudgeWithMessages(t *testing.T) {
 	}
 	if r := reasonOf(t, runHook(cfg, cwd, nil)); !strings.HasPrefix(r, "Agentbus: 1 new message(s)") {
 		t.Fatalf("parked reason %q", r)
+	}
+}
+
+// A cwd that never registered with agentbus gets no nudge (default config).
+func TestStopHookNudgeSkipsUnregistered(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	peerBus(t, cfg, "Sam") // the bus exists, but this cwd is not on it
+	if got := runHook(cfg, t.TempDir(), nil); got != "" {
+		t.Fatalf("unregistered cwd must get no output: %q", got)
+	}
+	if got := runHook(cfg, "/nonexistent/elsewhere", nil); got != "" {
+		t.Fatalf("unregistered cwd must get no output: %q", got)
+	}
+}
+
+// A subagent identity (contains "/") is never nudged, even live with no status.
+func TestStatusNudgeTopLevelOnly(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	p := peerBus(t, cfg, "Pat")
+	if _, err := p.Register("sub", "Pat", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusNudge(p, cfg, "Pat/sub", time.Now()); got != "" {
+		t.Fatalf("subagent nudged: %q", got)
+	}
+	if got := statusNudge(p, cfg, "Pat", time.Now()); got == "" {
+		t.Fatal("top-level live session with no status must be nudged")
+	}
+}
+
+// The nudge fires only when the status is strictly older than the threshold.
+func TestNudgeLineStrictBoundary(t *testing.T) {
+	now := time.UnixMilli(time.Now().UnixMilli()) // SetAt has millisecond resolution
+	at := func(age time.Duration) *bus.AgentStatus {
+		return &bus.AgentStatus{Tag: "implementing", Text: "x", SetAt: now.Add(-age).UnixMilli()}
+	}
+	if got := nudgeLine(at(30*time.Minute), now, 30); got != "" {
+		t.Fatalf("age == threshold must not nudge: %q", got)
+	}
+	if got := nudgeLine(at(30*time.Minute+time.Millisecond), now, 30); got == "" {
+		t.Fatal("age just over threshold must nudge")
 	}
 }
 

@@ -48,11 +48,18 @@ type Config struct {
 	EmbeddingQueryTimeoutSeconds float64           `json:"embedding_query_timeout_seconds"`
 	LogLevel                     string            `json:"log_level"`
 	TUIName                      string            `json:"tui_name"`
-	Theme                        string            `json:"theme"`          // name of the entry in Themes the TUI applies
-	Themes                       []Theme           `json:"themes"`         // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
-	Icons                        string            `json:"icons"`          // emoji (default), nerdfont, or custom
-	IconMap                      map[string]string `json:"icon_map"`       // custom: icon name -> glyph, overriding a subset of emoji
-	TUIRailWidth                 int               `json:"tui_rail_width"` // channel rail columns the TUI saves on < and >; 0 means the default
+	Theme                        string            `json:"theme"`    // name of the entry in Themes the TUI applies
+	Themes                       []Theme           `json:"themes"`   // named color sets; the TUI falls back to DefaultTheme per missing or invalid value
+	Icons                        string            `json:"icons"`    // emoji (default), nerdfont, or custom
+	IconMap                      map[string]string `json:"icon_map"` // custom: icon name -> glyph, overriding a subset of emoji
+	// StatusHistoryCount is how many statuses per identity are kept;
+	// StatusOfflineHours how long a non-live identity stays on the board;
+	// StatusStaleMinutes how old a working status may be before the nudge
+	// fires (0 disables it).
+	StatusHistoryCount int `json:"status_history_count"`
+	StatusOfflineHours int `json:"status_offline_hours"`
+	StatusStaleMinutes int `json:"status_stale_minutes"`
+	TUIRailWidth       int `json:"tui_rail_width"` // channel rail columns the TUI saves on < and >; 0 means the default
 
 	// Path is the config file that was loaded (or would have been). Not a setting.
 	Path string `json:"-"`
@@ -70,6 +77,9 @@ func Default() Config {
 		TaskIdleHours:                168,
 		TaskExpiryHours:              336,
 		MemoryExpiryHours:            8760,
+		StatusHistoryCount:           20,
+		StatusOfflineHours:           24,
+		StatusStaleMinutes:           30,
 		ReceiptRetentionMinutes:      60,
 		MaxMessageKiB:                64,
 		SendMessagesPerSecond:        100,
@@ -342,6 +352,9 @@ func (c *Config) validate() error {
 		{"task_idle_hours", c.TaskIdleHours, 0, 87600},
 		{"task_expiry_hours", c.TaskExpiryHours, 0, 87600},
 		{"memory_expiry_hours", c.MemoryExpiryHours, 0, 87600},
+		{"status_history_count", c.StatusHistoryCount, 1, 200},
+		{"status_offline_hours", c.StatusOfflineHours, 0, 720},
+		{"status_stale_minutes", c.StatusStaleMinutes, 0, 1440},
 		// 0 is unset; the TUI clamps any other value to the terminal.
 		{"tui_rail_width", c.TUIRailWidth, 0, 1000},
 	}

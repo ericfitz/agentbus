@@ -32,6 +32,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	9:  addTagRanges,                            // tag_subscription_tags.lo, .hi (#20, ADR 0009 amendment 2026-10-06)
 	10: foldRefs,                                // fold messages.refs into content and drop the column (ADR 0019)
 	11: addTables,                               // meta (reset generation, ADR 0022)
+	12: addTables,                               // statuses (issue #43)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL

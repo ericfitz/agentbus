@@ -423,3 +423,28 @@ func TestRejectsOutOfRangeRailWidth(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestStatusConfig (#43): defaults and bounds.
+func TestStatusConfig(t *testing.T) {
+	t.Setenv("AGENTBUS_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("AGENTBUS_DATA_DIR", "")
+	c, _, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.StatusHistoryCount != 20 || c.StatusOfflineHours != 24 || c.StatusStaleMinutes != 30 {
+		t.Fatalf("defaults wrong: %+v", c)
+	}
+	for _, body := range []string{
+		`{"status_history_count": 0}`, `{"status_history_count": 201}`,
+		`{"status_offline_hours": 721}`, `{"status_offline_hours": -1}`,
+		`{"status_stale_minutes": 1441}`,
+	} {
+		if _, _, err := Load(write(t, t.TempDir(), body)); err == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+	if _, _, err := Load(write(t, t.TempDir(), `{"status_offline_hours": 0, "status_stale_minutes": 0}`)); err != nil {
+		t.Errorf("zero rejected: %v", err)
+	}
+}

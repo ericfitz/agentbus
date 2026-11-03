@@ -242,7 +242,7 @@ func TestReRegisterAfterResetRestoresAfterSweep(t *testing.T) {
 }
 
 // TestMetaMigrationIdempotent opens a v11 file (no meta table) twice: the
-// first open creates meta and stamps 12, the second changes nothing.
+// first open creates meta and stamps schemaVersion, the second changes nothing.
 func TestMetaMigrationIdempotent(t *testing.T) {
 	b := newTestBus(t)
 	cfg := b.cfg
@@ -272,7 +272,7 @@ func TestMetaMigrationIdempotent(t *testing.T) {
 			t.Fatalf("open %d: %v", i, err)
 		}
 		var uv, has int
-		if err := o.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 12 {
+		if err := o.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
 			t.Fatalf("open %d: user_version=%d err=%v", i, uv, err)
 		}
 		if err := o.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='meta'").Scan(&has); err != nil || has != 1 {

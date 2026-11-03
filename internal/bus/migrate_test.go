@@ -1219,3 +1219,42 @@ func TestMigrateV10FoldRefsFailureLeavesPreviousVersion(t *testing.T) {
 		t.Fatalf("content after the retried step = %q, %v", content, err)
 	}
 }
+
+// TestMigrate12To13 (#43): a version-12 database gains statuses, and a
+// second Open changes nothing.
+func TestMigrate12To13(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"DROP TABLE statuses", "PRAGMA user_version = 12"} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		b, err = Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatalf("Open %d: %v", i, err)
+		}
+		var uv, n int
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 13 {
+			t.Fatalf("user_version = %d, %v", uv, err)
+		}
+		if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='statuses'").Scan(&n); err != nil || n != 1 {
+			t.Fatalf("statuses missing: %d %v", n, err)
+		}
+		if _, err := b.db.Exec("INSERT INTO statuses(identity,revision,tag,text,set_at) VALUES('a',1,'idle','x',1)"); i == 0 && err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

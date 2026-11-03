@@ -767,12 +767,19 @@ func (m Model) renderRails() string {
 				row += " " + dim.Render("("+ctx+")")
 			}
 		} else {
-			age := time.Since(m.sessionsSeen[n]).Round(time.Minute)
+			// A board-only offline identity was never seen live this run:
+			// age it from its last status instead of the zero time.
+			age := ""
+			if at, seen := m.sessionsSeen[n]; seen {
+				age = shortDur(time.Since(at).Round(time.Minute))
+			} else if e, ok := m.statusOf(n); ok {
+				age = bus.ShortAge(time.Since(time.UnixMilli(e.SetAt)))
+			}
 			icon := iconIdle
 			if _, ok := m.statusOf(n); ok {
 				icon = statusIcon(bus.StatusOffline)
 			}
-			row = icon + dim.Render(n+" "+shortDur(age))
+			row = icon + dim.Render(strings.TrimSpace(n+" "+age))
 		}
 		if c := m.unread(bus.DMChannel(n)); c > 0 {
 			row += " " + th.Style(th.Agent).Render(strconv.Itoa(c))

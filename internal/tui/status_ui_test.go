@@ -18,6 +18,11 @@ func boardEntry(name, tag, text, problem string, live bool) bus.BoardEntry {
 	}
 }
 
+func withAge(e bus.BoardEntry, d time.Duration) bus.BoardEntry {
+	e.SetAt = time.Now().Add(-d).UnixMilli()
+	return e
+}
+
 func TestStatusIconsMapped(t *testing.T) {
 	t.Cleanup(func() { setIcons(emojiIcons) })
 	tags := append(append([]string{}, bus.SettableStatusTags...), bus.StatusOffline)
@@ -66,7 +71,7 @@ func TestRailSessionStatusIcon(t *testing.T) {
 func TestRailOfflineRow(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
-	f.send(statusMsg{st: f.m.status, board: []bus.BoardEntry{boardEntry("Ghost", "offline", "was busy", "", false)}})
+	f.send(statusMsg{st: f.m.status, board: []bus.BoardEntry{withAge(boardEntry("Ghost", "offline", "was busy", "", false), 3*time.Hour+10*time.Minute)}})
 	if !contains(f.m.sessionNames(), "Ghost") {
 		t.Fatalf("names=%v", f.m.sessionNames())
 	}
@@ -78,6 +83,9 @@ func TestRailOfflineRow(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(row), statusIcon("offline")) {
 		t.Fatalf("offline row lacks the offline icon: %q", ansi.Strip(row))
+	}
+	if !strings.Contains(ansi.Strip(row), "Ghost 3h") {
+		t.Fatalf("board-only offline row must show the status age: %q", ansi.Strip(row))
 	}
 	f.key("esc")
 	f.toSessions()

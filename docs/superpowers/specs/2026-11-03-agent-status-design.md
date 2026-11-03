@@ -256,6 +256,9 @@ The checks run in this order:
    (fail open).
 4. It builds a nudge when all of these hold:
    - the session is not parked;
+   - the session is live, a registered session (`SessionLive`) (implementation
+     ruling, 2026-11-03: the hook is global, so an unregistered session is
+     never nudged);
    - `status_stale_minutes` is greater than 0;
    - the identity is top-level;
    - and either the latest tag is `planning`, `implementing` or `reviewing`

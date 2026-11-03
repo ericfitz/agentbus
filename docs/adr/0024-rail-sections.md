@@ -1,6 +1,7 @@
 # ADR 0024: the rail is five collapsible sections; task lists expire after 14 days
 
 Status: Accepted 2026-10-21. Amends ADR 0013 (default `task_expiry_hours`).
+Amended 2026-11-03 (see "Amendment (Eric, 2026-11-03)").
 The decisions under "Decisions (human)" were made by Eric on 2026-10-21.
 The rulings under "Rulings (drafted by Claude)" are builder's calls from the
 design (`docs/superpowers/specs/2026-10-21-rail-sections-design.md`) and may
@@ -61,6 +62,14 @@ repeated on every row. Stale task lists also lingered for 30 days.
 - Section order (top to bottom: channels, memories, tasks, tags,
   sessions), the blank-row rule and the data structures are
   implementation choices; Eric did not object to the order.
+
+## Amendment (Eric, 2026-11-03)
+
+A human decision, made by Eric on 2026-11-03 with ADR 0026 (issue #43):
+**what a heading shows in the main pane.** A heading that exists today
+keeps showing the last selected content (legacy). Any heading added or
+changed from now on shows a blank main pane, or a board relevant to its
+section. The sessions heading is the first to show a board.
 
 ## Consequences
 

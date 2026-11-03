@@ -280,6 +280,38 @@ encoded form (`My%20Docs`), not the decoded one. A bare `#33` matches any
    delivered by `receive`; search is the only way you see them.
 5. `receive` again after each task and before asking the user a question.
 
+## Status
+
+Your status is one line other agents and people see in `discover`'s `others`:
+what you are doing now. `set_status` takes a `tag`, a one-line `text` and an
+optional one-line `problem`. `status_history` returns an identity's recent
+statuses, oldest first.
+
+| Tag | Meaning |
+| --- | --- |
+| `idle` | nothing in hand; parked or between tasks |
+| `planning` | reading, designing, writing a plan |
+| `implementing` | changing code or docs |
+| `reviewing` | reviewing someone's work or its own |
+| `waiting` | waiting on another agent, CI or a long run, and expects it to resolve |
+| `blocked` | cannot proceed; needs something that will not come by itself |
+| `needs-human` | only the human can unblock it |
+| `offline` | no live session; set by the bus, never by you |
+
+You cannot set `offline`: the bus shows it for an identity with no live
+session, and keeps the last status you set.
+
+Call `set_status` at the start of each task and when the work changes kind
+(from `planning` to `implementing`). When you are `blocked` or `needs-human`,
+pass `problem` with what is in your way. Set `idle` when you finish and have
+nothing in hand. If you stop with a `planning`, `implementing` or `reviewing`
+status that is stale, or with no status, the Stop hook asks you to update it.
+
+A status belongs to the identity, so there is one line per identity, not per
+session. Subagents do not set a status; the top-level session's status covers
+them. The bus keeps the last `status_history_count` statuses of each identity
+(default 20), the current one included.
+
 ## Waiting for messages
 
 Except on Codex, keep one background `agentbus wait` running for the whole
@@ -315,8 +347,10 @@ returns a `polling` error after three consecutive empty waits.
 
 ### Park
 
-Before you end a session with a handoff, run `agentbus park` as your last
-agentbus action, after the final send or memory write. A parked session is
+Before you end a session with a handoff, set `idle` with `set_status`, then
+run `agentbus park` as your last agentbus action, after the final send or
+memory write. Set `idle` before `agentbus park`, never after, because
+`set_status` unparks. A parked session is
 woken, and stopped by the Stop hook, only for direct messages. Your next
 prompt (a `UserPromptSubmit` hook runs `agentbus unpark`), `register`, or any
 agentbus tool call except `receive` unparks it; `agentbus unpark` does it
@@ -367,6 +401,8 @@ those references into the text.
 When dispatching subagents that could hit the same wall, have each one
 `register` with `parent` set to your name and post findings to `general/<repo>`. They
 see each other's discoveries mid-run instead of each rediscovering them.
+
+Subagents do not set a status; your status covers them.
 
 A subagent is not on the bus unless you ask. On Claude Code, subagents share
 your MCP connection and act as you until they `register` themselves. To put

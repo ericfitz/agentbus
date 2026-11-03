@@ -4,8 +4,8 @@ Status: Accepted (Eric, 2026-10-27), shared with agentbus2 ADR 0014. The
 decisions below are Eric's, made on 2026-10-27 for issue #43
 (ericfitz/agentbus#43) and ericfitz/agentbus2#10, and copied verbatim from
 agentbus2 ADR 0014. They are the part of that design that is not specific to
-agentbus2. This record changes no v1 code; v1 implements them when it takes
-up issue #43.
+agentbus2. v1 implements them in issue #43; its own decisions are under "v1
+decisions" below.
 
 ## Context
 
@@ -38,6 +38,42 @@ The numbers are agentbus2 ADR 0014's.
 15. **`problem` with `blocked` or `needs-human`: optional** (option A), as
     Eric said; the protocol text asks for one. Not chosen: required for those
     two tags (B).
+
+## v1 decisions (Eric, 2026-11-03)
+
+These are human decisions, made by Eric on 2026-11-03 for issue #43 and
+recorded in `docs/superpowers/specs/2026-11-03-agent-status-design.md`
+(section 3, decisions 1 to 7). Decision 8, on ADR 0024, is recorded there.
+
+1. **Storage: a dedicated `statuses` table** (option A). Not chosen:
+   memory-style revisions in `messages` on `status/<name>` channels (B), and
+   columns on the `sessions` row (C).
+2. **Which agents the TUI shows** (option A): live sessions, plus offline
+   identities whose last status was set within `status_offline_hours`
+   (default 24). Not chosen: every identity that has ever set a status (B),
+   and live sessions only (C).
+3. **TUI: a status icon in the rail, plus a board in the main pane**
+   (option A). The board has two entry points: the `b` key, and selecting
+   the sessions heading with up/down. It sorts by time since last update
+   (the default, newest first), by name, or by tag. Not chosen: rail and
+   header only (B), and a board only (C).
+4. **Agent and CLI surface** (option A): the MCP tools `set_status` and
+   `status_history`, status in `discover`/`register` `others`, and the CLI
+   commands `set-status` and `statuses`. Not chosen: MCP only (B), and no
+   `status_history` over MCP (C).
+5. **Truncation and expansion.** One-line cells that do not fit are cut with
+   `…`. Left and right expand and collapse a board row's full text, the
+   builder's choice, made to match how the stream treats messages.
+6. **Stop hook nudge** (option B). When an agent stops with a stale working
+   status, or with no status at all, the Stop hook asks it to update the
+   status. The nudge quotes the current status so the agent never needs to
+   query its own status first. Not chosen: protocol text only (A), and
+   protocol text now with the nudge later (C).
+7. **API versus prompts.** The API enforces what the bus can check: tag
+   membership, the shape of `text` and `problem`, and top-level identities
+   only. The skill suggests what only the agent can judge: which tag fits and
+   when to change it. Transitions between tags are not enforced, and
+   `problem` is accepted with any tag.
 
 ## The tag table
 

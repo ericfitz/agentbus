@@ -61,3 +61,35 @@ func TestAgentFacingTextHasNoBannedPhrases(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentTextStatusProtocol pins the status protocol text (ADR 0026): the
+// skill's Status section, the park rule, and the SessionStart protocol lines.
+func TestAgentTextStatusProtocol(t *testing.T) {
+	skill := normWS(string(skillMD))
+	for _, want := range []string{
+		"## Status", "set_status", "status_history",
+		"Set `idle` before `agentbus park`",
+		"Subagents do not set a status",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Errorf("SKILL.md lacks %q", want)
+		}
+	}
+	for _, tag := range bus.SettableStatusTags {
+		if !strings.Contains(skill, "`"+tag+"`") {
+			t.Errorf("SKILL.md lacks tag %q", tag)
+		}
+	}
+	p := normWS(protocol)
+	for _, want := range []string{
+		"Call set_status (tag, one-line text, optional problem) at the start of each task and when the kind of work changes; set idle when you have nothing in hand.",
+		`set idle with set_status first, then run "agentbus park"`,
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("protocol lacks %q", want)
+		}
+	}
+	if strings.Index(p, "set idle with set_status") > strings.Index(p, `then run "agentbus park"`) {
+		t.Error("protocol: idle must come before agentbus park")
+	}
+}

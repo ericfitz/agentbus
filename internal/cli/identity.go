@@ -193,10 +193,13 @@ const protocol = `Then follow this protocol:
   error: read stderr, do not restart it in a loop, tell the user if it
   persists. Codex has no idle wake: rely on receive at the end of each task.
   Every subscribed message wakes an idle agent; a parked one wakes only for
-  DMs. Before ending a session with a handoff, run "agentbus park" as your
-  last agentbus action, after the final send or memory write; your next
+  DMs. Before ending a session with a handoff, set idle with set_status
+  first, then run "agentbus park" as your last agentbus action, after the final send or memory write; your next
   prompt, register, or any agentbus tool call except receive unparks. Never poll
   receive from model turns to wait.
+- Call set_status (tag, one-line text, optional problem) at the start of each
+  task and when the kind of work changes; set idle when you have nothing in
+  hand.
 - Post when you start, finish, or get blocked on a task, and when you change
   something other agents depend on. Post to your project chat channel: any
   subscribed chat channel other than general (for example general/<repo>, or

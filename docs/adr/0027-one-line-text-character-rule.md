@@ -1,8 +1,8 @@
 # ADR 0027: one character rule for one-line text fields
 
-Status: Accepted (Eric, 2026-11-04) for the scope; the character set and
-the per-field choices under "Implementation choices" are Claude's and
-await Eric's review.
+Status: Accepted (Eric, 2026-11-04). Claude proposed the character set and
+the per-field choices; Eric confirmed each of them on 2026-11-04 (see
+"Confirmed choices").
 
 ## Context
 
@@ -62,7 +62,10 @@ emoji sequences, so refusing all of Cf would refuse ordinary emoji.
 
 Each field keeps its own length limit; the rule covers characters only.
 
-## Implementation choices (Claude, 2026-11-04; for Eric's review)
+## Confirmed choices (proposed by Claude, confirmed by Eric, 2026-11-04)
+
+Each was offered with the alternatives listed; Eric chose the shipped
+option every time.
 
 1. **The character set above.** Not chosen: all of Unicode category Cf
    (refuses ZWJ emoji); controls plus separators only (leaves the bidi
@@ -71,13 +74,18 @@ Each field keeps its own length limit; the rule covers characters only.
    caller gets a validation error naming the field and can fix the text;
    silently changing a name or subject would hide what was stored. The one
    exception is clientInfo, which is advisory display text the harness
-   supplies, so a register must not fail on it (as before).
+   supplies, so a register must not fail on it (as before). Not chosen:
+   clean silently everywhere; refuse names but clean subjects and status
+   text.
 3. **Message subjects now refuse tabs and other controls**, not only CR and
-   LF. A subject is drawn as one aligned row in the rail and stream.
+   LF. A subject is drawn as one aligned row in the rail and stream. Not
+   chosen: replace a tab with a space; allow tabs again.
 4. **Names are tightened in place**, with no migration. An identity or
    channel whose stored name already holds one of these characters cannot be
    registered or subscribed under that name again; none is expected, since
-   names come from agents and config files that did not use them.
+   names come from agents and config files that did not use them. Not
+   chosen: a startup warning for stored names that break the rule; a schema
+   migration that renames them.
 
 ## Not covered
 

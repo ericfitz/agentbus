@@ -159,3 +159,33 @@ func TestBoardTextUsesTheWidth(t *testing.T) {
 		}
 	}
 }
+
+// A human on the board (the TUI's own identity, or another live session
+// registered from a TUI) never sets a status, so its row must show the
+// person icon, as the rail does, not the agent gear.
+func TestBoardHumansShowThePersonIcon(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.ab.Register("Kim", "", bus.TUIContext, true); err != nil {
+		t.Fatal(err)
+	}
+	f.setBoard(
+		boardEntry(f.m.c.as, "", "", "", true),
+		boardEntry("Kim", "", "", "", true),
+		boardEntry("Sam", "", "", "", true),
+	)
+	f.key("esc")
+	f.key("b")
+	person, gear := strings.TrimRight(ansi.Strip(iconUser), " "), strings.TrimRight(ansi.Strip(iconAgent), " ")
+	for _, name := range []string{f.m.c.as, "Kim"} {
+		if r := f.boardRow(t, name); !strings.Contains(r, person) || strings.Contains(r, gear) {
+			t.Errorf("%s is human: row must carry the person icon, not the gear: %q", name, r)
+		}
+	}
+	if r := f.boardRow(t, "Sam"); strings.Contains(r, person) {
+		t.Errorf("Sam is an agent: row must not carry the person icon: %q", r)
+	}
+	// The rail agrees about Kim.
+	if r := ansi.Strip(f.m.senderIcon("Kim")); !strings.Contains(r, person) {
+		t.Errorf("rail icon for a TUI session must be the person: %q", r)
+	}
+}

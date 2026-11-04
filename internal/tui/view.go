@@ -67,15 +67,34 @@ func (m Model) agentLabel(name string) string {
 	return m.senderIcon(name) + m.theme.Style(m.theme.Agent).Render(senderName(name))
 }
 
-// senderIcon is name's icon drawn in its color: the user color for the
-// TUI's own identity, the agent color for everyone else. The gear's CSI
-// erase/cursor escapes sit inside the styled run, which lipgloss and ansi
-// measure as zero width, so styling never shifts a column.
+// senderIcon is name's icon drawn in its color: the person icon for a
+// human (isHuman), the gear for an agent; the user color for the TUI's own
+// identity, the agent color for everyone else. The gear's CSI erase/cursor
+// escapes sit inside the styled run, which lipgloss and ansi measure as
+// zero width, so styling never shifts a column.
 func (m Model) senderIcon(name string) string {
 	if name == m.c.as {
 		return m.theme.Style(m.theme.User).Render(iconUser)
 	}
+	if m.isHuman(name) {
+		return m.theme.Style(m.theme.Agent).Render(iconUser)
+	}
 	return m.theme.Style(m.theme.Agent).Render(iconAgent)
+}
+
+// isHuman reports whether name is a person rather than an agent: the TUI's
+// own identity, or a live session registered from a TUI (context tui, which
+// MCP register refuses to agents).
+func (m Model) isHuman(name string) bool {
+	if name == m.c.as {
+		return true
+	}
+	for _, s := range m.status.Sessions {
+		if s.Sender == name && s.Context == bus.TUIContext {
+			return true
+		}
+	}
+	return false
 }
 
 // channelLabel is a message's recipient: the agent for a dm/ inbox, else

@@ -135,8 +135,11 @@ func (m *Model) renderBoard(width, height int) string {
 			age = bus.ShortAge(now.Sub(time.UnixMilli(e.SetAt)))
 		}
 		icon := statusIcon(e.Tag)
-		if !e.Live && e.Tag == "" {
+		switch {
+		case !e.Live && e.Tag == "":
 			icon = statusIcon(bus.StatusOffline)
+		case e.Tag == "" && m.isHuman(e.Identity):
+			icon = iconUser // humans set no status; the rail shows them this way
 		}
 		icon = fit(strings.TrimRight(icon, " "), 2)
 		name := fit(e.Identity, nameW)

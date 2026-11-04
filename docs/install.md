@@ -156,7 +156,9 @@ verify attestations, and `.github/workflows/release-build.yml` must be on the
 default branch and in the tag, because `gh workflow run --ref <tag>` only
 dispatches a workflow the default branch knows. The workflow builds and runs
 each Windows zip's binary on a native Windows runner. `--no-publish` stops with
-the signed draft for a dry run. Every release carries `SHA256SUMS` over all
+the signed draft for a dry run. `--skip-windows-packages` still ships the
+Windows zips but leaves the Scoop bucket and winget at the previous version
+(no `komac` or komac token needed). Every release carries `SHA256SUMS` over all
 archives, `install.sh` and `install.ps1`, signed with the Ed25519 release key.
 
 ## Before first run: bootstrap with `agentbus init`

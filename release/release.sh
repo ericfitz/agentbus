@@ -6,6 +6,8 @@
 # is listed in SHA256SUMS, signed with the Ed25519 release key.
 #   ./release/release.sh v0.1.1 --windows-signing=on                # full release
 #   ./release/release.sh v0.1.1 --windows-signing=off --no-publish  # stop with a draft release (dry run)
+#   ./release/release.sh v0.1.1 --windows-signing=off --skip-windows-packages
+#       # ship the Windows zips but leave Scoop and winget at the previous version
 # Builds the macOS binary from the tag, so HEAD may be anywhere. Reruns for the
 # same tag reuse the draft release and replace every asset.
 # One-time setup: a notarytool keychain profile named $NOTARY_PROFILE
@@ -34,6 +36,7 @@ TAG="" VERSION="" SRC=""
 ARCHIVES=() # archive file names under $DIST, in SHA256SUMS order
 MACOS_ARCHIVE=""   # file name of the macOS tarball under $DIST
 NO_PUBLISH=0       # --no-publish: stop after signing, leave the draft
+SKIP_WIN_PKGS=0    # --skip-windows-packages: no Scoop or winget update
 PUBLISHED=0        # set when the release for $TAG is already public (rerun)
 RUN_ID=""          # the release-build.yml run this release used
 WORKFLOW="release-build.yml"
@@ -43,7 +46,7 @@ SIGNING_VARS=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ARTIFACT_SIG
 FIND_RUN_TRIES="${FIND_RUN_TRIES:-30}"
 FIND_RUN_SLEEP="${FIND_RUN_SLEEP:-2}"
 
-usage() { echo "usage: release.sh <tag> --windows-signing=on|off [--no-publish]" >&2; exit 2; }
+usage() { echo "usage: release.sh <tag> --windows-signing=on|off [--no-publish] [--skip-windows-packages]" >&2; exit 2; }
 fail() { echo "error: $*" >&2; exit 1; }
 
 parse_args() {
@@ -51,6 +54,7 @@ parse_args() {
     for a in "$@"; do
         case "$a" in
             --no-publish) [[ "$NO_PUBLISH" == 0 ]] || usage; NO_PUBLISH=1 ;;
+            --skip-windows-packages) [[ "$SKIP_WIN_PKGS" == 0 ]] || usage; SKIP_WIN_PKGS=1 ;;
             --windows-signing=*)
                 [[ -z "$WINDOWS_SIGNING" ]] || usage
                 case "${a#*=}" in
@@ -71,13 +75,15 @@ parse_args() {
 # require_tools fails once, naming everything that is missing.
 require_tools() {
     local missing=() t prefix
-    for t in gh git go lipo codesign xcrun shasum komac; do
+    local tools=(gh git go lipo codesign xcrun shasum)
+    [[ "$SKIP_WIN_PKGS" == 1 ]] || tools+=(komac)
+    for t in "${tools[@]}"; do
         command -v "$t" >/dev/null 2>&1 || missing+=("$t")
     done
     prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
     if [[ -x "$prefix/bin/openssl" ]]; then OPENSSL="$prefix/bin/openssl"; else missing+=("openssl@3 (brew install openssl@3)"); fi
     [[ -r "$SIGNING_KEY" ]] || missing+=("signing key $SIGNING_KEY (see the spec's Key setup)")
-    [[ -r "$KOMAC_KEY_FILE" ]] || missing+=("komac token $KOMAC_KEY_FILE")
+    [[ "$SKIP_WIN_PKGS" == 1 || -r "$KOMAC_KEY_FILE" ]] || missing+=("komac token $KOMAC_KEY_FILE")
     [[ -r "$PUBKEY" ]] || missing+=("public key $PUBKEY (see the spec's Key setup)")
     (( ${#missing[@]} == 0 )) || fail "missing: $(printf '%s; ' "${missing[@]}")"
 }
@@ -381,8 +387,12 @@ publish_release() {
             || fail "could not publish $TAG; the draft stays"
     fi
     update_tap
-    update_scoop
-    submit_winget
+    if [[ "$SKIP_WIN_PKGS" == 1 ]]; then
+        echo "==> --skip-windows-packages: Scoop and winget not updated; the Windows zips are in the release"
+    else
+        update_scoop
+        submit_winget
+    fi
     echo "==> Released ${TAG}: brew install ericfitz/tap/${BIN_NAME}; curl -fsSL https://github.com/${GH_REPO}/releases/latest/download/install.sh | sh; irm https://github.com/${GH_REPO}/releases/latest/download/install.ps1 | iex"
 }
 

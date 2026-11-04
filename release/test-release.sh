@@ -78,6 +78,17 @@ check args-bad-tag 2 "tag must look like vX.Y.Z" -- parse_args 1.2.3
 check args-two 2 "usage" -- parse_args v1.2.3 extra
 check args-ok 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off && [[ \$VERSION == 1.2.3 ]]"
 check args-prerelease 2 "tag must look like vX.Y.Z, got 'v1.2.3-rc.1'" -- parse_args v1.2.3-rc.1
+check args-skip-win 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off --skip-windows-packages && [[ \$SKIP_WIN_PKGS == 1 ]]"
+check args-skip-win-default 0 "" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off && [[ \$SKIP_WIN_PKGS == 0 ]]"
+check args-skip-win-twice 2 "usage" -- bash -c "source '$HERE/release.sh'; parse_args v1.2.3 --windows-signing=off --skip-windows-packages --skip-windows-packages"
+# publish_release with the package steps stubbed: PUBLISHED=1 skips the gh edit.
+pub_stub="update_tap() { echo TAP; }; update_scoop() { echo SCOOP; }; submit_winget() { echo WINGET; }; NO_PUBLISH=0; PUBLISHED=1; TAG=v1.2.3"
+check publish-all-packages 0 "TAP
+SCOOP
+WINGET" -- bash -c "source '$HERE/release.sh'; $pub_stub; SKIP_WIN_PKGS=0; publish_release"
+check publish-skip-win 0 "TAP
+==> --skip-windows-packages: Scoop and winget not updated" -- bash -c "source '$HERE/release.sh'; $pub_stub; SKIP_WIN_PKGS=1; publish_release | grep -v Released"
+check publish-skip-win-no-scoop 1 "" -- bash -c "source '$HERE/release.sh'; $pub_stub; SKIP_WIN_PKGS=1; publish_release | grep -E 'SCOOP|WINGET'"
 
 git init -q "$WORK/repo" && git -C "$WORK/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init && git -C "$WORK/repo" tag v0.0.1
 check tag-exists 0 "" -- bash -c "source '$HERE/release.sh'; REPO_ROOT='$WORK/repo'; TAG=v0.0.1; check_tag_exists"

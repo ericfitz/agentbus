@@ -64,10 +64,10 @@ func TestUninstallReversesInstallForEveryHarness(t *testing.T) {
 		t.Run(h.name, func(t *testing.T) {
 			home := t.TempDir()
 			f := &fakeHarness{home: home}
-			io := initOpts(t, home, f)
-			io.Global, io.Harness = true, h.name
+			io2 := initOpts(t, home, f)
+			io2.Global, io2.Harness = true, h.name
 			var out bytes.Buffer
-			if err := Init(io, &out); err != nil {
+			if err := Init(io2, &out); err != nil {
 				t.Fatal(err, out.String())
 			}
 			uo := uninstallOpts(home, f)
@@ -76,8 +76,8 @@ func TestUninstallReversesInstallForEveryHarness(t *testing.T) {
 			if err := Uninstall(uo, &out); err != nil {
 				t.Fatal(err, out.String())
 			}
-			for _, fs := range h.files {
-				if p := filepath.Join(home, filepath.FromSlash(fs.path)); exists(p) {
+			for _, fl := range h.files {
+				if p := filepath.Join(home, filepath.FromSlash(fl.path)); exists(p) {
 					t.Errorf("%s still exists", p)
 				}
 			}
@@ -101,11 +101,11 @@ func TestUninstallReversesInstallForEveryHarness(t *testing.T) {
 			}
 			// Reinstalling restores everything.
 			out.Reset()
-			if err := Init(io, &out); err != nil {
+			if err := Init(io2, &out); err != nil {
 				t.Fatal(err, out.String())
 			}
-			for _, fs := range h.files {
-				if p := filepath.Join(home, filepath.FromSlash(fs.path)); !exists(p) {
+			for _, fl := range h.files {
+				if p := filepath.Join(home, filepath.FromSlash(fl.path)); !exists(p) {
 					t.Errorf("%s not restored", p)
 				}
 			}
@@ -229,10 +229,17 @@ func TestUninstallRemovesEmptyDirsButNotHarnessDirs(t *testing.T) {
 	if err := Uninstall(uninstallOpts(home, f), &out); err != nil {
 		t.Fatal(err, out.String())
 	}
-	for _, d := range []string{".claude/skills", ".agents/skills", ".grok/rules", ".grok/hooks"} {
+	for _, d := range []string{".claude/skills", ".agents/skills", ".grok/rules"} {
 		if p := filepath.Join(home, filepath.FromSlash(d)); exists(p) {
 			t.Errorf("%s should be gone", p)
 		}
+	}
+	// Uninstall never touches .bak files, so the Grok hooks directory stays.
+	if exists(filepath.Join(home, ".grok", "hooks", "agentbus.json")) {
+		t.Error("grok hook file should be gone")
+	}
+	if !exists(filepath.Join(home, ".grok", "hooks", "agentbus.json.bak")) {
+		t.Error("agentbus.json.bak should remain")
 	}
 	for _, d := range []string{".claude", ".codex", ".grok", ".agents"} {
 		if p := filepath.Join(home, d); !exists(p) {
@@ -277,5 +284,77 @@ func TestUninstallNoHarnessFound(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no harness found") {
 		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestUninstallKeepsNonObjectHookEntries(t *testing.T) {
+	home, f := installAll(t)
+	p := filepath.Join(home, ".claude", "settings.json")
+	const before = `{"hooks":{"Stop":[null,{"hooks":[{"type":"command","command":"agentbus stop-hook"}]}]}}`
+	if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uo := uninstallOpts(home, f)
+	uo.Harness = "claude"
+	var out bytes.Buffer
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	got := readJSON(t, p)
+	want := map[string]any{"hooks": map[string]any{"Stop": []any{nil}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("settings.json = %v, want %v", got, want)
+	}
+}
+
+func TestUninstallCleansDirLeftEmptyByInterruptedRun(t *testing.T) {
+	home, f := installAll(t)
+	skill := filepath.Join(home, ".claude", filepath.FromSlash(skillPath))
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	uo := uninstallOpts(home, f)
+	uo.Harness = "claude"
+	var out bytes.Buffer
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if d := filepath.Join(home, ".claude", "skills"); exists(d) {
+		t.Errorf("%s should be gone", d)
+	}
+}
+
+func TestUninstallContinuesWhenMCPRemoveFails(t *testing.T) {
+	home, f := installAll(t)
+	uo := uninstallOpts(home, f)
+	uo.Harness = "claude"
+	uo.Run = func(string, ...string) error { return os.ErrPermission }
+	var out bytes.Buffer
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if !strings.Contains(out.String(), "failed (agentbus may not have been registered)") {
+		t.Errorf("output lacks failure line:\n%s", out.String())
+	}
+	if exists(filepath.Join(home, ".claude", filepath.FromSlash(skillPath))) {
+		t.Error("skill file still exists")
+	}
+}
+
+func TestUninstallKeepsGrokHookFileWithUserKey(t *testing.T) {
+	home, f := installAll(t)
+	p := filepath.Join(home, ".grok", "hooks", "agentbus.json")
+	const before = `{"note":"mine","hooks":{"Stop":[{"hooks":[{"type":"command","command":"agentbus stop-hook"}]}]}}`
+	if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uo := uninstallOpts(home, f)
+	uo.Harness = "grok"
+	var out bytes.Buffer
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if got, want := readJSON(t, p), map[string]any{"note": "mine"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("hook file = %v, want %v", got, want)
 	}
 }

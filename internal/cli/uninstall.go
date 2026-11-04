@@ -79,6 +79,7 @@ func (in *initer) uninstall(h harness) error {
 		if _, err := os.Stat(p); err != nil {
 			if os.IsNotExist(err) {
 				in.say("  %s not present", p)
+				in.removeEmptyParents(p) // an interrupted run may have left it empty
 				continue
 			}
 			return err
@@ -140,9 +141,9 @@ func (in *initer) removeHooks(h harness, path string, root map[string]any, prese
 		}
 		var kept []any
 		for _, e := range entries {
-			left, removed := stripHookCommands(e, h.hooks)
+			left, removed, drop := stripHookCommands(e, h.hooks)
 			changed = changed || removed
-			if left != nil {
+			if !drop {
 				kept = append(kept, left)
 			}
 		}
@@ -160,14 +161,8 @@ func (in *initer) removeHooks(h harness, path string, root map[string]any, prese
 		delete(root, "hooks")
 	}
 	if h.ownHookFile && len(root) == 0 {
-		// init's own backups of the file (it rewrites the file per hook) go too.
-		for _, p := range []string{path, path + ".bak"} {
-			if _, err := os.Stat(p); err != nil {
-				continue
-			}
-			if err := in.remove(p); err != nil {
-				return err
-			}
+		if err := in.remove(path); err != nil {
+			return err
 		}
 		in.removeEmptyParents(path)
 		return nil
@@ -180,16 +175,17 @@ func (in *initer) removeHooks(h harness, path string, root map[string]any, prese
 }
 
 // stripHookCommands removes from one outer hook entry every inner hook that
-// runs one of specs' commands. It returns the entry to keep (nil when no inner
-// hook is left) and whether anything was removed.
-func stripHookCommands(entry any, specs []hookSpec) (kept any, removed bool) {
+// runs one of specs' commands. It returns the entry to keep, whether anything
+// was removed, and whether to drop the entry (no inner hook is left). An entry
+// that is not a hook object is kept unchanged.
+func stripHookCommands(entry any, specs []hookSpec) (kept any, removed, drop bool) {
 	m, ok := entry.(map[string]any)
 	if !ok {
-		return entry, false
+		return entry, false, false
 	}
 	inner, ok := m["hooks"].([]any)
 	if !ok {
-		return entry, false
+		return entry, false, false
 	}
 	var left []any
 	for _, ih := range inner {
@@ -207,13 +203,13 @@ func stripHookCommands(entry any, specs []hookSpec) (kept any, removed bool) {
 		}
 	}
 	if !removed {
-		return entry, false
+		return entry, false, false
 	}
 	if len(left) == 0 {
-		return nil, true
+		return nil, true, true
 	}
 	m["hooks"] = left
-	return m, true
+	return m, true, false
 }
 
 // removeEmptyParents removes the now-empty directories above path, going up

@@ -152,15 +152,36 @@ func (t Theme) SelBG(focused bool) lipgloss.TerminalColor {
 // RailSel renders a rail's selected row (channel or session). While its
 // pane has focus, the row's per-segment colors (cyan agent names, magenta
 // memory, yellow tasks) are unreadable on the Sel background, so the text
-// is stripped to plain and recolored in SelText before the background is
-// applied; glyphs and content are unchanged, only color. Without focus the
+// loses its colors (stripSGR; cursor escapes stay) and is recolored in
+// SelText before the background is applied; glyphs and content are
+// unchanged, only color. Without focus the
 // row keeps its original colors on SelInactive. The result is always one
 // row: the caller cuts line to width, so Highlight's word wrap has nothing
 // to break, and MaxHeight makes that structural (a wrapped second row would
 // be clipped from the rail's bottom or push the rows below it).
 func (t Theme) RailSel(focused bool, line string, width int) string {
 	if focused {
-		line = t.Style(t.SelText).Render(ansi.Strip(line))
+		line = t.Style(t.SelText).Render(stripSGR(line))
 	}
 	return lipgloss.NewStyle().MaxHeight(1).Render(t.Highlight(t.SelBG(focused), line, width))
+}
+
+// stripSGR drops s's SGR (color and attribute) sequences and keeps every
+// other escape. RailSel recolors a focused row this way rather than with
+// ansi.Strip, which also removed the Unix gear's CSI 2X / CSI 1C
+// (icons_unix.go): Terminal.app then advanced one cell for the gear while
+// lipgloss still counted two, so the rest of a selected agent's session row
+// sat one column left of every other row.
+func stripSGR(s string) string {
+	var b strings.Builder
+	state := byte(ansi.NormalState)
+	for rest := s; rest != ""; {
+		seq, _, n, next := ansi.DecodeSequence(rest, state, nil)
+		state, rest = next, rest[n:]
+		if strings.HasPrefix(seq, "\x1b[") && strings.HasSuffix(seq, "m") {
+			continue
+		}
+		b.WriteString(seq)
+	}
+	return b.String()
 }

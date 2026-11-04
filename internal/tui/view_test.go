@@ -858,3 +858,50 @@ func TestSessionRowShowsRepoOnlyWhenItDiffers(t *testing.T) {
 		}
 	}
 }
+
+// TestRailSelKeepsCursorEscapes: a focused selection recolors its row by
+// dropping SGR color runs, but keeps every other escape. The Unix gear's
+// CSI 2X / CSI 1C make Terminal.app's one-cell advance match lipgloss's
+// two-cell count; stripping them shifted the rest of a selected agent's
+// session row one column left.
+func TestRailSelKeepsCursorEscapes(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	th := LoadTheme(config.Default(), nil)
+	gear := "\x1b[2X⚙️\x1b[1C "
+	line := markSel + "\x1b[36m" + gear + "\x1b[0m\x1b[36mSam\x1b[0m"
+	got := th.RailSel(true, line, 20)
+	if !strings.Contains(got, gear+"Sam") {
+		t.Fatalf("focused selection lost the gear's cursor escapes: %q", got)
+	}
+	if strings.Contains(got, "36m") {
+		t.Fatalf("focused selection kept the agent color: %q", got)
+	}
+}
+
+// TestSelectedSessionRowKeepsAgentIcon: the selected live agent's session
+// row, with the sessions pane focused, carries the agent icon byte for
+// byte (escapes included), like an unselected row.
+func TestSelectedSessionRowKeepsAgentIcon(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd())
+	f.key("esc")
+	f.toSessions()
+	names := f.m.sessionNames()
+	for f.m.sessSel < len(names)-1 && names[f.m.sessSel] != "Sam" {
+		f.key("down")
+	}
+	if f.m.selName() != "dm/Sam" || f.m.pane() != paneSessions {
+		t.Fatalf("selected=%q pane=%v", f.m.selName(), f.m.pane())
+	}
+	for _, l := range strings.Split(f.m.renderRails(), "\n") {
+		if strings.Contains(l, markSel) {
+			if !strings.Contains(l, iconAgent+"Sam") {
+				t.Fatalf("selected row %q lacks %q", l, iconAgent+"Sam")
+			}
+			return
+		}
+	}
+	t.Fatal("no selected row")
+}

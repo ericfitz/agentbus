@@ -31,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <init|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <init|uninstall|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -125,6 +125,19 @@ func run(cmd string, args []string) int {
 		}
 		o.Config = cfg
 		if err := cli.Init(o, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "uninstall":
+		fs := flag.NewFlagSet("agentbus uninstall", flag.ContinueOnError)
+		var o cli.UninstallOptions
+		fs.StringVar(&o.Harness, "harness", "", "remove only this harness ("+cli.HarnessNameList()+"), even if it is not detected")
+		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would be removed without changing anything")
+		if err := parseFlags(fs, args); err != nil {
+			return parseExit(err)
+		}
+		if err := cli.Uninstall(o, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}

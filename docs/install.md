@@ -178,9 +178,9 @@ paths:
 
 | Harness | Hooks | Skill |
 |---------|-------|-------|
-| Claude Code | `~/.claude/settings.json` (SessionStart, Stop, SubagentStart) | `~/.claude/skills/using-agentbus/SKILL.md` |
-| Codex | `~/.codex/hooks.json` (SessionStart, Stop) | `~/.agents/skills/using-agentbus/SKILL.md` |
-| Grok Build | `~/.grok/hooks/agentbus.json` (Stop only; see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
+| Claude Code | `~/.claude/settings.json` (SessionStart, Stop, UserPromptSubmit, SubagentStart) | `~/.claude/skills/using-agentbus/SKILL.md` |
+| Codex | `~/.codex/hooks.json` (SessionStart, Stop, UserPromptSubmit) | `~/.agents/skills/using-agentbus/SKILL.md` |
+| Grok Build | `~/.grok/hooks/agentbus.json` (Stop, UserPromptSubmit; see below) | `~/.grok/skills/using-agentbus/SKILL.md` |
 
 The Stop hook runs when the agent finishes a turn. If messages it has not
 been handed yet are waiting, it keeps the agent working with an instruction
@@ -229,6 +229,34 @@ does not surface MCP prompts yet), or `/agentbus init` in Grok Build (from
 and then calls `register` in the current session.
 
 The sections below describe what `init` sets up, for doing it by hand.
+
+## Removing agentbus from a harness: `agentbus uninstall`
+
+```sh
+agentbus uninstall [--harness claude|codex|grok] [--dry-run]
+```
+
+It undoes `agentbus init --global` for each harness it finds, or only the one
+named by `--harness`, even if that harness is not detected. `--dry-run` prints
+what would be removed without changing anything. There is no confirmation
+prompt. A second run reports "not present" and changes nothing.
+
+For each harness it removes:
+
+- the MCP entry, through the harness's own CLI (`claude mcp remove -s user
+  agentbus`, `codex mcp remove agentbus`, which also removes
+  `tool_timeout_sec`, and `grok mcp remove --scope user agentbus`). Without
+  that CLI on PATH it prints the entry to delete by hand;
+- only agentbus's hook commands from `~/.claude/settings.json`,
+  `~/.codex/hooks.json` and `~/.grok/hooks/agentbus.json`, after backing each
+  edited file up to `.bak`. Grok's hook file is deleted once no hooks remain;
+- the skill, prompt, command and rule files that `init --global` wrote;
+- the directories those deletions leave empty, but never a directory directly
+  under your home directory.
+
+It leaves alone the bus database and key, the config file, every repository's
+`.local/`, `.bak` files (existing ones are kept) and running processes.
+Restart the harness afterwards.
 
 ## Configuration (optional)
 

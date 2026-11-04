@@ -106,6 +106,9 @@ harness it finds (`~/.claude`, `~/.codex`, `~/.grok`):
 agentbus init --global
 ```
 
+`agentbus uninstall` removes those integrations again; see the
+[install guide](docs/install.md#removing-agentbus-from-a-harness-agentbus-uninstall).
+
 And once inside each repository, to write its identity file and create its
 `general/<repo>` and `memory/<repo>` channels:
 

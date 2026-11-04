@@ -105,6 +105,12 @@ func TestVersionFlags(t *testing.T) {
 
 // TestNoArgsUsageExit0: bare agentbus prints usage like help and exits 0;
 // winget validation runs the executable with no arguments and needs 0.
+func TestUsageListsUninstall(t *testing.T) {
+	if !strings.Contains(usage, "uninstall") {
+		t.Errorf("usage %q does not list uninstall", usage)
+	}
+}
+
 func TestNoArgsUsageExit0(t *testing.T) {
 	r := execBin(t)
 	if r.code != 0 {
@@ -123,7 +129,7 @@ func TestUnknownCommandExit2(t *testing.T) {
 }
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
-	cmds := []string{"mcp", "init", "tui", "wait", "watch", "status", "reset", "delete-channel",
+	cmds := []string{"mcp", "init", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel",
 		"subscribe", "unsubscribe", "stop-hook", "subagent-hook", "identity", "park", "unpark"}
 	for _, c := range cmds {
 		for _, h := range []string{"-h", "--help"} {
@@ -141,7 +147,7 @@ func TestSubcommandHelpExitsZero(t *testing.T) {
 }
 
 func TestUnknownFlagStillFails(t *testing.T) {
-	for _, c := range []string{"init", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe", "park"} {
+	for _, c := range []string{"init", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe", "park"} {
 		t.Run(c, func(t *testing.T) {
 			r := execBin(t, c, "-bogus")
 			if r.code == 0 {
@@ -164,6 +170,7 @@ func TestExtraArgumentsRejected(t *testing.T) {
 	}{
 		{[]string{"mcp", "extra"}, 1, `agentbus mcp: unexpected argument "extra"`},
 		{[]string{"init", "extra"}, 2, `agentbus init: unexpected argument "extra"`},
+		{[]string{"uninstall", "extra"}, 2, `agentbus uninstall: unexpected argument "extra"`},
 		{[]string{"tui", "extra"}, 2, `agentbus tui: unexpected argument "extra"`},
 		{[]string{"wait", "-as", "Pat", "extra"}, 2, `agentbus wait: unexpected argument "extra"`},
 		{[]string{"watch", "-as", "Pat", "extra"}, 2, `agentbus watch: unexpected argument "extra"`},

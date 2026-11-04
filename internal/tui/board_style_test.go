@@ -133,3 +133,29 @@ func TestBoardFocusedSelectionRecolored(t *testing.T) {
 		}
 	}
 }
+
+// Text runs to the right margin when no row has a problem, and the problem
+// column is only as wide as the longest problem (up to its 40% cap), so
+// text is not cut early.
+func TestBoardTextUsesTheWidth(t *testing.T) {
+	long := strings.Repeat("word ", 80)
+	f := newFixture(t)
+	f.setBoard(boardEntry("Ann", "planning", long, "", true))
+	f.key("esc")
+	f.key("b")
+	w := f.m.stream.Width
+	for _, l := range strings.Split(f.m.renderBoard(w, f.m.stream.Height), "\n") {
+		if p := ansi.Strip(l); strings.Contains(p, "Ann") && ansi.StringWidth(strings.TrimRight(p, " ")) != w {
+			t.Errorf("no problems: text must reach the margin (%d columns), got %d: %q", w, ansi.StringWidth(strings.TrimRight(p, " ")), p)
+		}
+	}
+
+	f.setBoard(boardEntry("Ann", "planning", long, "", true), boardEntry("Bob", "blocked", long, "CI down", true))
+	for _, l := range strings.Split(ansi.Strip(f.m.renderBoard(w, f.m.stream.Height)), "\n") {
+		if strings.Contains(l, "Bob") {
+			if !strings.HasSuffix(strings.TrimRight(l, " "), "…  CI down") || ansi.StringWidth(strings.TrimRight(l, " ")) != w {
+				t.Errorf("short problem: text must fill up to it and it must end at the margin: %q", l)
+			}
+		}
+	}
+}

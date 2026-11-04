@@ -114,8 +114,17 @@ func (m *Model) renderBoard(width, height int) string {
 	// icon (2 columns) + name + tag + age, each followed by a gap.
 	fixed := 2 + gap + nameW + gap + boardTagWidth + gap + boardAgeWidth + gap
 	rest := max(width-fixed, 0)
-	textW := rest * 6 / 10
-	probW := max(rest-textW-gap, 0)
+	// The problem column is as wide as the longest problem, at most 40% of
+	// the room; the text gets the rest, all of it when no row has one.
+	probW := 0
+	for _, e := range entries {
+		probW = max(probW, ansi.StringWidth(e.Problem))
+	}
+	probW = min(probW, rest*4/10)
+	textW := rest
+	if probW > 0 {
+		textW = max(rest-probW-gap, 0)
+	}
 	now := time.Now()
 
 	var lines []string

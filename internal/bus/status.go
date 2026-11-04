@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -116,27 +115,9 @@ func validStatusTag(tag string) bool {
 	return false
 }
 
-// unsafeLineRune reports whether r must not appear in one-line display
-// text: C0/C1 controls, the line and paragraph separators U+2028/U+2029,
-// and the bidi formatting characters (embeddings, overrides, isolates and
-// marks), which can make text display differently from what was sent.
-// Other format characters, such as the zero-width joiner in emoji
-// sequences, are allowed.
-func unsafeLineRune(r rune) bool {
-	switch {
-	case unicode.IsControl(r),
-		r == '\u2028', r == '\u2029',
-		r >= '\u202A' && r <= '\u202E',
-		r >= '\u2066' && r <= '\u2069',
-		r == '\u200E', r == '\u200F', r == '\u061C':
-		return true
-	}
-	return false
-}
-
 func validStatusLine(field, s string, min int) error {
-	if !utf8.ValidString(s) {
-		return errf("validation", false, "%s must be valid UTF-8", field)
+	if err := lineRule(s); err != nil {
+		return errf("validation", false, "%s %v", field, err)
 	}
 	n := utf8.RuneCountInString(s)
 	if n < min {
@@ -144,9 +125,6 @@ func validStatusLine(field, s string, min int) error {
 	}
 	if n > maxStatusRunes {
 		return errf("validation", false, "%s must be at most %d characters", field, maxStatusRunes)
-	}
-	if strings.IndexFunc(s, unsafeLineRune) >= 0 {
-		return errf("validation", false, "%s must be a single line without control, line separator or bidi formatting characters", field)
 	}
 	return nil
 }

@@ -117,14 +117,14 @@ func validateSendShape(as string, in SendInput) error {
 // maxSubjectRunes bounds a message subject (ADR 0010).
 const maxSubjectRunes = 200
 
-// normalizeSubject trims s; an empty result means no subject. A line break
-// or more than maxSubjectRunes characters is a validation error naming the
+// normalizeSubject trims s; an empty result means no subject. A character
+// lineRule refuses or more than maxSubjectRunes characters is a validation error naming the
 // field, like the tag checks. Task subjects never come through here: task
 // documents keep their own rule (validateTaskSubject).
 func normalizeSubject(s string) (string, error) {
 	s = strings.TrimSpace(s)
-	if strings.ContainsAny(s, "\r\n") {
-		return "", errf("validation", false, "subject must be a single line")
+	if err := lineRule(s); err != nil {
+		return "", errf("validation", false, "subject %v", err)
 	}
 	if utf8.RuneCountInString(s) > maxSubjectRunes {
 		return "", errf("validation", false, "subject must be at most %d characters", maxSubjectRunes)

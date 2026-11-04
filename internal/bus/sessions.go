@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/ericfitz/agentbus/internal/procs"
 )
@@ -62,24 +61,24 @@ type Session struct {
 	Status *AgentStatus `json:"status,omitempty"`
 }
 
-// cleanClientField makes a clientInfo string safe to store and show: control
-// characters are dropped and the result is cut to 128 bytes on a rune
+// cleanClientField makes a clientInfo string safe to store and show:
+// invalid UTF-8 and every unsafeLineRune are dropped and the result is cut to 128 bytes on a rune
 // boundary. clientInfo is advisory display text, so it is cleaned, never
 // rejected (an odd client must still register).
 func cleanClientField(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unsafeLineRune(r) {
 			return -1
 		}
 		return r
-	}, strings.TrimSpace(s))
+	}, strings.TrimSpace(strings.ToValidUTF8(s, "")))
 	if len(s) > 128 {
 		s = strings.ToValidUTF8(s[:128], "")
 	}
 	return s
 }
 
-// validateName enforces 1–128 UTF-8 bytes, no control characters, no '/'.
+// validateName enforces NameRule as a validation error.
 func validateName(name string) error {
 	if err := NameRule(name); err != nil {
 		return errf("validation", false, "name %v", err)
@@ -88,7 +87,8 @@ func validateName(name string) error {
 }
 
 // NameRule is the identity name rule shared by Register and the CLI: 1-128
-// UTF-8 bytes, no control characters, no '/'. The error is a plain
+// UTF-8 bytes, no '/', and lineRule (no control, line separator or bidi
+// formatting characters). The error is a plain
 // sentence without the "name" subject so callers can supply their own.
 func NameRule(name string) error {
 	if len(name) == 0 || len(name) > 128 {
@@ -97,31 +97,22 @@ func NameRule(name string) error {
 	if strings.ContainsRune(name, '/') {
 		return errors.New("must not contain '/'")
 	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return errors.New("must not contain control characters")
-		}
-	}
-	return nil
+	return lineRule(name)
 }
 
-// validateParent bounds parent to 512 UTF-8 bytes with no control
-// characters. Unlike name, parent MAY contain '/': it is itself a display
+// validateParent bounds parent to 512 UTF-8 bytes under lineRule. Unlike name, parent MAY contain '/': it is itself a display
 // name such as "Sam/impl".
 func validateParent(parent string) error {
 	if len(parent) > 512 {
 		return errf("validation", false, "parent must be at most 512 bytes")
 	}
-	for _, r := range parent {
-		if unicode.IsControl(r) {
-			return errf("validation", false, "parent must not contain control characters")
-		}
+	if err := lineRule(parent); err != nil {
+		return errf("validation", false, "parent %v", err)
 	}
 	return nil
 }
 
-// validateContext bounds context to 1024 UTF-8 bytes with no control
-// characters. The spec does not set a bound on context; this cap is a
+// validateContext bounds context to 1024 UTF-8 bytes under lineRule. The spec does not set a bound on context; this cap is a
 // controller ruling (M12.2) so a single register call cannot make
 // discover/list results exceed the 4 MiB hard ceiling — recorded here as
 // human-visible per the review process.
@@ -129,10 +120,8 @@ func validateContext(context string) error {
 	if len(context) > 1024 {
 		return errf("validation", false, "context must be at most 1024 bytes")
 	}
-	for _, r := range context {
-		if unicode.IsControl(r) {
-			return errf("validation", false, "context must not contain control characters")
-		}
+	if err := lineRule(context); err != nil {
+		return errf("validation", false, "context %v", err)
 	}
 	return nil
 }

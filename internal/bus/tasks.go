@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 )
 
 // TaskPrefix starts the name of every task-list channel: tasks/<name>, one
@@ -126,15 +125,13 @@ func isTaskStatus(s string) bool {
 	return s == "pending" || s == "in_progress" || s == "completed"
 }
 
-// validateTaskSubject enforces subject 1-256 bytes, no control characters.
+// validateTaskSubject enforces subject 1-256 bytes under lineRule.
 func validateTaskSubject(s string) error {
 	if len(s) == 0 || len(s) > 256 {
 		return errf("validation", false, "subject must be 1-256 bytes")
 	}
-	for _, r := range s {
-		if unicode.IsControl(r) {
-			return errf("validation", false, "subject must not contain control characters")
-		}
+	if err := lineRule(s); err != nil {
+		return errf("validation", false, "subject %v", err)
 	}
 	return nil
 }

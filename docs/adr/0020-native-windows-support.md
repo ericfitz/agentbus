@@ -26,6 +26,9 @@ Agents now run on Windows, both natively and under WSL.
    them, and `bus.Open` refuses a database across the Windows-WSL boundary.
 4. Paths: config in `%AppData%\agentbus`, data in `%LocalAppData%\agentbus`.
 5. Packaging: `install.ps1`, a Scoop bucket and winget.
+   Releases do not wait on winget review (Eric, 2026-11-03): a release ships
+   on every other channel, and winget catches up once its pull request is
+   accepted.
 
 Rejected: WSL only; one shared bus over a new IPC mechanism; a warning
 instead of a refusal for a cross-boundary database. See the design for the

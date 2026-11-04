@@ -130,10 +130,8 @@ func Init(o InitOptions, out io.Writer) error {
 	if o.Executable == nil {
 		o.Executable = os.Executable
 	}
-	switch o.Harness {
-	case "", "claude", "codex", "grok":
-	default:
-		return fmt.Errorf("--harness must be claude, codex, or grok, got %q", o.Harness)
+	if err := validHarness(o.Harness); err != nil {
+		return err
 	}
 	if o.OS == "windows" {
 		if err := requireOnPath(o.LookPath, o.Executable); err != nil {
@@ -235,109 +233,22 @@ func (in *initer) wants(h, dir string) bool {
 }
 
 func (in *initer) global() error {
-	claudeDir := filepath.Join(in.Home, ".claude")
-	codexDir := filepath.Join(in.Home, ".codex")
-	grokDir := filepath.Join(in.Home, ".grok")
 	did := false
-	if in.wants("claude", claudeDir) {
-		did = true
-		if err := in.claude(claudeDir); err != nil {
-			return err
+	for _, h := range harnesses {
+		if !in.wants(h.name, in.home(h.dir)) {
+			continue
 		}
-	}
-	if in.wants("codex", codexDir) {
 		did = true
-		if err := in.codex(codexDir); err != nil {
-			return err
-		}
-	}
-	if in.wants("grok", grokDir) {
-		did = true
-		if err := in.grok(grokDir); err != nil {
+		if err := in.install(h); err != nil {
 			return err
 		}
 	}
 	if !did {
-		in.say("no harness found (no %s, %s, or %s); use --harness claude|codex|grok to force one", claudeDir, codexDir, grokDir)
+		in.say("%s", in.noHarnessMessage())
 		return nil
 	}
 	in.say("done: restart the harness, then run `agentbus init` inside each repository")
 	return nil
-}
-
-func (in *initer) claude(dir string) error {
-	in.say("Claude Code:")
-	if err := in.mcpEntry("claude", []string{"mcp", "remove", "-s", "user", "agentbus"}, []string{"mcp", "add", "-s", "user", "agentbus", "--", "agentbus", "mcp"},
-		`{ "mcpServers": { "agentbus": { "command": "agentbus", "args": ["mcp"] } } }`+" in ~/.claude.json"); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "settings.json"), "SessionStart", hookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "settings.json"), "Stop", stopHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "settings.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "settings.json"), "SubagentStart", subagentHookCommand, ""); err != nil {
-		return err
-	}
-	return in.write(filepath.Join(dir, skillPath), skillMD)
-}
-
-func (in *initer) codex(dir string) error {
-	in.say("Codex:")
-	if err := in.mcpEntry("codex", []string{"mcp", "remove", "agentbus"}, []string{"mcp", "add", "agentbus", "--", "agentbus", "mcp"},
-		"[mcp_servers.agentbus]\n  command = \"agentbus\"\n  args = [\"mcp\"]\n  tool_timeout_sec = 300\n  in ~/.codex/config.toml"); err != nil {
-		return err
-	}
-	if err := in.codexTimeout(filepath.Join(dir, "config.toml")); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "hooks.json"), "SessionStart", hookCommand, "startup|resume|clear"); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "hooks.json"), "Stop", stopHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "hooks.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.write(filepath.Join(dir, "prompts", "agentbus.md"), []byte(codexPrompt)); err != nil {
-		return err
-	}
-	if err := in.write(filepath.Join(in.Home, ".agents", skillPath), skillMD); err != nil {
-		return err
-	}
-	in.say("  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them")
-	return nil
-}
-
-func (in *initer) grok(dir string) error {
-	in.say("Grok Build:")
-	// Default tool_timeout_sec is 6000, already above receive_max_wait_seconds.
-	if err := in.mcpEntry("grok",
-		[]string{"mcp", "remove", "--scope", "user", "agentbus"},
-		[]string{"mcp", "add", "--scope", "user", "agentbus", "--", "agentbus", "mcp"},
-		"[mcp_servers.agentbus]\n  command = \"agentbus\"\n  args = [\"mcp\"]\n  in ~/.grok/config.toml"); err != nil {
-		return err
-	}
-	// No SessionStart hook: Grok ignores its stdout, so grokRule does that job.
-	// Grok does read Stop hook stdout, and ~/.grok/hooks/*.json is trusted.
-	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), "Stop", stopHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.hook(filepath.Join(dir, "hooks", "agentbus.json"), "UserPromptSubmit", unparkHookCommand, ""); err != nil {
-		return err
-	}
-	if err := in.write(filepath.Join(dir, skillPath), skillMD); err != nil {
-		return err
-	}
-	if err := in.write(filepath.Join(dir, "commands", "agentbus.md"), []byte(codexPrompt)); err != nil {
-		return err
-	}
-	return in.write(filepath.Join(dir, "rules", "agentbus.md"), []byte(grokRule))
 }
 
 // mcpEntry registers the MCP server through the harness's own CLI so the
@@ -553,11 +464,8 @@ func (in *initer) gitignore(path string) error {
 
 // mcpConfigured is a cheap check that some harness knows about agentbus.
 func (in *initer) mcpConfigured() bool {
-	for _, p := range []string{
-		filepath.Join(in.Home, ".claude.json"),
-		filepath.Join(in.Home, ".codex", "config.toml"),
-		filepath.Join(in.Home, ".grok", "config.toml"),
-	} {
+	for _, h := range harnesses {
+		p := in.home(h.mcp.configFile)
 		if body, err := os.ReadFile(p); err == nil && strings.Contains(string(body), "agentbus") {
 			return true
 		}

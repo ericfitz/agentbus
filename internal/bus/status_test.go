@@ -48,7 +48,28 @@ func TestSetStatusValidation(t *testing.T) {
 		_, err := b.SetStatus("Sam", "idle", "ok", p)
 		wantCode(t, err, "validation")
 	}
-	_, err := b.SetStatus("Sam/helper", "idle", "ok", "")
+	// Line and paragraph separators, bidi formatting characters and
+	// invalid UTF-8 are rejected in text and problem alike (#46).
+	for _, bad := range []string{"a\u2028b", "a\u2029b", "a\u202eb", "a\u202ab", "a\u2066b", "a\u2069b", "a\u200eb", "a\u200fb", "a\u061cb", "a\xffb"} {
+		if _, err := b.SetStatus("Sam", "idle", bad, ""); err == nil {
+			t.Fatalf("text %q accepted", bad)
+		} else {
+			wantCode(t, err, "validation")
+		}
+		if _, err := b.SetStatus("Sam", "idle", "ok", bad); err == nil {
+			t.Fatalf("problem %q accepted", bad)
+		} else {
+			wantCode(t, err, "validation")
+		}
+	}
+	_, err := b.SetStatus("Sam", "idle", "a\xffb", "")
+	wantMsg(t, err, "validation", "text must be valid UTF-8")
+	// A zero-width joiner (also a format character) is kept: emoji
+	// sequences use it.
+	if _, err := b.SetStatus("Sam", "idle", "deploy \U0001F469\u200D\U0001F4BB done", ""); err != nil {
+		t.Fatalf("ZWJ emoji: %v", err)
+	}
+	_, err = b.SetStatus("Sam/helper", "idle", "ok", "")
 	wantMsg(t, err, "validation", wantSubText)
 	_, err = b.SetStatusFor("Sam/helper", "idle", "ok", "")
 	wantMsg(t, err, "validation", wantSubText)

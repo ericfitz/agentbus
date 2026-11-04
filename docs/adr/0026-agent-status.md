@@ -93,8 +93,8 @@ The icons are a TUI choice; agentbus2's are in its ADR 0014.
 ## Protocol text
 
 agentbus2's agent-facing text, verbatim from the "Status" section of its
-`internal/cli/skills/using-agentbus2/SKILL.md`. v1 adapts the tool and
-command names to its own when it implements the decisions; the rules stay.
+`internal/cli/skills/using-agentbus2/SKILL.md`. v1 implements the decisions
+with its own tool and command names; the rules are unchanged.
 
 > Your status is one line other agents and people see in `discover`'s
 > `others` and on the board: what you are doing now. `set_status` takes a

@@ -234,3 +234,23 @@ func TestHistoryLateAnswerForOtherAgentDropped(t *testing.T) {
 		t.Fatalf("late answer for A shown:\n%s", got)
 	}
 }
+
+// TestHistorySortKeyIgnored: o does not re-sort the board hidden behind an
+// open history view (#46).
+func TestHistorySortKeyIgnored(t *testing.T) {
+	f := historyFixture(t, 2)
+	f.key("enter")
+	before := f.m.boardSortMode()
+	f.key("o")
+	if got := f.m.boardSortMode(); got != before {
+		t.Fatalf("o under history changed the sort %s -> %s", before, got)
+	}
+	if f.m.boardState.history != "Sam" {
+		t.Fatalf("history closed: %q", f.m.boardState.history)
+	}
+	f.key("esc")
+	f.key("o")
+	if got := f.m.boardSortMode(); got == before {
+		t.Fatalf("o on the board did not cycle the sort from %s", before)
+	}
+}

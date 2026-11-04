@@ -12,4 +12,4 @@ claude mcp add -s user agentbus -- agentbus mcp
 --- files
 .claude/settings.json 25ff45a11d38
 .claude/settings.json.bak 8a413cbdf579
-.claude/skills/using-agentbus/SKILL.md abb16effef3e
+.claude/skills/using-agentbus/SKILL.md 5412bf34398a

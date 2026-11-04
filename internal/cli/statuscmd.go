@@ -95,11 +95,7 @@ func Statuses(cfg config.Config, name, sortBy string, asJSON bool, out io.Writer
 		if asJSON {
 			return json.NewEncoder(out).Encode(hist)
 		}
-		entries := make([]bus.BoardEntry, len(hist))
-		for i, h := range hist {
-			entries[i] = bus.BoardEntry{AgentStatus: h}
-		}
-		return writeStatusTable(out, entries, now, false)
+		return writeStatusHistory(out, hist)
 	}
 	board, err := b.Board()
 	if err != nil {
@@ -111,15 +107,26 @@ func Statuses(cfg config.Config, name, sortBy string, asJSON bool, out io.Writer
 	if asJSON {
 		return json.NewEncoder(out).Encode(board)
 	}
-	return writeStatusTable(out, board, now, true)
+	return writeStatusTable(out, board, now)
+}
+
+// writeStatusHistory prints h, oldest first, as columns revision, local
+// time set, tag, text, problem. The time carries the date because a kept
+// history can span days.
+func writeStatusHistory(out io.Writer, h []bus.AgentStatus) error {
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "REV\tTIME\tTAG\tTEXT\tPROBLEM")
+	for _, s := range h {
+		at := time.UnixMilli(s.SetAt).Local().Format("2006-01-02 15:04:05")
+		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", s.Revision, at, s.Tag, s.Text, s.Problem)
+	}
+	return tw.Flush()
 }
 
 // writeStatusTable prints e as columns tag, name, age, text, problem.
-func writeStatusTable(out io.Writer, e []bus.BoardEntry, now time.Time, header bool) error {
+func writeStatusTable(out io.Writer, e []bus.BoardEntry, now time.Time) error {
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if header {
-		_, _ = fmt.Fprintln(tw, "TAG\tNAME\tAGE\tTEXT\tPROBLEM")
-	}
+	_, _ = fmt.Fprintln(tw, "TAG\tNAME\tAGE\tTEXT\tPROBLEM")
 	for _, x := range e {
 		tag, age := tagLabel(x), "-"
 		if x.SetAt > 0 {

@@ -774,7 +774,7 @@ func (m Model) renderRails() string {
 			// age it from its last status instead of the zero time.
 			age := ""
 			if at, seen := m.sessionsSeen[n]; seen {
-				age = shortDur(time.Since(at).Round(time.Minute))
+				age = bus.ShortAge(time.Since(at))
 			} else if e, ok := m.statusOf(n); ok {
 				age = bus.ShortAge(time.Since(time.UnixMilli(e.SetAt)))
 			}

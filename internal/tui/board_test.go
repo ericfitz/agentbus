@@ -308,3 +308,21 @@ func TestBoardRefusesCompose(t *testing.T) {
 		}
 	}
 }
+
+// TestFocusPaneComposeGuardUnderBoard: focusPane itself refuses compose
+// while the board is active, whichever path asks for it (#46).
+func TestFocusPaneComposeGuardUnderBoard(t *testing.T) {
+	f := boardFixture(t)
+	f.moveTo(t, "dev")
+	f.key("b")
+	if !f.m.boardActive() {
+		t.Fatal("board not open")
+	}
+	f.m.focusPane(paneCompose)
+	if f.m.mode == modeInsert || f.m.compose.Focused() {
+		t.Fatalf("compose focused under the board (mode=%v)", f.m.mode)
+	}
+	if !f.m.boardActive() {
+		t.Fatal("board closed")
+	}
+}

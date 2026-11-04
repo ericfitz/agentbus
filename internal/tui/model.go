@@ -474,7 +474,9 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 	case "b":
 		m.openBoard()
 	case "o":
-		if m.boardActive() {
+		// The history view has no sort: o there would silently re-sort
+		// the board hidden behind it.
+		if m.boardActive() && m.boardState.history == "" {
 			m.cycleBoardSort()
 		}
 	case "i":

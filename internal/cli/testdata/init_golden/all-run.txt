@@ -30,10 +30,10 @@ codex mcp add agentbus -- agentbus mcp
 grok mcp remove --scope user agentbus
 grok mcp add --scope user agentbus -- agentbus mcp
 --- files
-.agents/skills/using-agentbus/SKILL.md abb16effef3e
+.agents/skills/using-agentbus/SKILL.md 5412bf34398a
 .claude/settings.json 25ff45a11d38
 .claude/settings.json.bak 8a413cbdf579
-.claude/skills/using-agentbus/SKILL.md abb16effef3e
+.claude/skills/using-agentbus/SKILL.md 5412bf34398a
 .codex/config.toml dbc67e010973
 .codex/config.toml.bak 97d1bb60bb7a
 .codex/hooks.json 62f84ff43b6a
@@ -43,4 +43,4 @@ grok mcp add --scope user agentbus -- agentbus mcp
 .grok/hooks/agentbus.json f92df386a73b
 .grok/hooks/agentbus.json.bak 2c23b4899fab
 .grok/rules/agentbus.md bce77ffd26f3
-.grok/skills/using-agentbus/SKILL.md abb16effef3e
+.grok/skills/using-agentbus/SKILL.md 5412bf34398a

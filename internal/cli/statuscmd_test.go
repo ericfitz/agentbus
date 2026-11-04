@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,21 @@ func TestStatusesHistory(t *testing.T) {
 	s := out.String()
 	if i, j := strings.Index(s, "first"), strings.Index(s, "second"); i < 0 || j < i {
 		t.Fatalf("oldest first expected:\n%s", s)
+	}
+	// Each entry shows its revision and when it was set (#46).
+	hist, _, err := p.StatusHistory("Pat")
+	if err != nil || len(hist) != 2 {
+		t.Fatalf("history %+v %v", hist, err)
+	}
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "REV") || !strings.Contains(lines[0], "TIME") {
+		t.Fatalf("want header plus two rows:\n%s", s)
+	}
+	for i, h := range hist {
+		at := time.UnixMilli(h.SetAt).Local().Format("2006-01-02 15:04:05")
+		if f := strings.Fields(lines[i+1]); len(f) < 4 || f[0] != strconv.FormatInt(h.Revision, 10) || f[1]+" "+f[2] != at {
+			t.Fatalf("row %d = %q, want revision %d at %s", i, lines[i+1], h.Revision, at)
+		}
 	}
 }
 

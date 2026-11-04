@@ -128,6 +128,12 @@ func TestIdleSessionShowsAge(t *testing.T) {
 	if !strings.Contains(rail, iconIdle+"codex 14m") {
 		t.Fatalf("rail:\n%s", rail)
 	}
+	// One age format across the rail (#46): bus.ShortAge's days, as the
+	// board-only offline rows use, not shortDur's hours.
+	f.m.sessionsSeen["codex"] = time.Now().Add(-50 * time.Hour)
+	if rail := f.m.renderRails(); !strings.Contains(rail, iconIdle+"codex 2d") {
+		t.Fatalf("rail:\n%s", rail)
+	}
 }
 
 // setChannelLastActivity overwrites a channel's LastActivity (ADR 0013) in

@@ -228,8 +228,6 @@ does not surface MCP prompts yet), or `/agentbus init` in Grok Build (from
 `~/.grok/commands/agentbus.md`). Either way the agent runs `agentbus init`
 and then calls `register` in the current session.
 
-The sections below describe what `init` sets up, for doing it by hand.
-
 ## Removing agentbus from a harness: `agentbus uninstall`
 
 ```sh
@@ -239,7 +237,10 @@ agentbus uninstall [--harness claude|codex|grok] [--dry-run]
 It undoes `agentbus init --global` for each harness it finds, or only the one
 named by `--harness`, even if that harness is not detected. `--dry-run` prints
 what would be removed without changing anything. There is no confirmation
-prompt. A second run reports "not present" and changes nothing.
+prompt. A second run still calls each harness's `mcp remove`: Claude and Grok
+then print `... failed (agentbus may not have been registered)` and Codex
+exits 0. Everything else is reported "not present", and nothing on disk
+changes.
 
 For each harness it removes:
 
@@ -249,14 +250,19 @@ For each harness it removes:
   that CLI on PATH it prints the entry to delete by hand;
 - only agentbus's hook commands from `~/.claude/settings.json`,
   `~/.codex/hooks.json` and `~/.grok/hooks/agentbus.json`, after backing each
-  edited file up to `.bak`. Grok's hook file is deleted once no hooks remain;
+  edited file up to `.bak`. Grok's hook file is deleted only once nothing else
+  is left in it (no hooks and no other keys);
 - the skill, prompt, command and rule files that `init --global` wrote;
 - the directories those deletions leave empty, but never a directory directly
   under your home directory.
 
 It leaves alone the bus database and key, the config file, every repository's
-`.local/`, `.bak` files (existing ones are kept) and running processes.
+`.local/` and running processes. It never deletes a `.bak` file; each hook
+file it edits is backed up to `<file>.bak` first, which replaces any older
+backup.
 Restart the harness afterwards.
+
+The sections below describe what `init` sets up, for doing it by hand.
 
 ## Configuration (optional)
 

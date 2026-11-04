@@ -103,14 +103,23 @@ func TestVersionFlags(t *testing.T) {
 	}
 }
 
-// TestNoArgsUsageExit0: bare agentbus prints usage like help and exits 0;
-// winget validation runs the executable with no arguments and needs 0.
 func TestUsageListsUninstall(t *testing.T) {
 	if !strings.Contains(usage, "uninstall") {
 		t.Errorf("usage %q does not list uninstall", usage)
 	}
 }
 
+// TestUninstallRejectsUnknownHarness: execBin points HOME at a temp dir, so
+// the run cannot touch the real home.
+func TestUninstallRejectsUnknownHarness(t *testing.T) {
+	r := execBin(t, "uninstall", "--harness", "bogus")
+	if r.code != 1 || !strings.Contains(r.stderr, `--harness must be claude, codex, or grok, got "bogus"`) {
+		t.Errorf("exit %d stderr %q", r.code, r.stderr)
+	}
+}
+
+// TestNoArgsUsageExit0: bare agentbus prints usage like help and exits 0;
+// winget validation runs the executable with no arguments and needs 0.
 func TestNoArgsUsageExit0(t *testing.T) {
 	r := execBin(t)
 	if r.code != 0 {

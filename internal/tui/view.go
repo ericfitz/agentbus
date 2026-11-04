@@ -341,7 +341,8 @@ func (m Model) chanStyle(c bus.Channel) lipgloss.Style {
 
 func (m Model) renderHeader() string {
 	if m.boardActive() {
-		return cut(fmt.Sprintf("sessions · %d agents · sort %s", len(m.board), m.boardSortMode()), m.stream.Width, "…")
+		// "sessions" in the agent color, as other headers color their channel.
+		return cut(m.theme.Style(m.theme.Agent).Render("sessions")+fmt.Sprintf(" · %d agents · sort %s", len(m.board), m.boardSortMode()), m.stream.Width, "…")
 	}
 	ch := m.selected()
 	if ch == nil {

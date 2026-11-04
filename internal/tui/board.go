@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 	"github.com/ericfitz/agentbus/internal/cli"
@@ -33,6 +34,7 @@ const (
 	boardTagWidth = 12 // "implementing"
 	boardAgeWidth = 4
 	boardNameMax  = 24
+	boardGap      = "  " // between every two board columns, and in the history view
 )
 
 // boardActive is true while the sessions heading is selected: the main pane
@@ -108,11 +110,12 @@ func (m *Model) renderBoard(width, height int) string {
 		nameW = max(nameW, ansi.StringWidth(e.Identity))
 	}
 	nameW = min(nameW, boardNameMax)
-	// icon (2 columns) + name + tag + age, each followed by a space.
-	fixed := 2 + 1 + nameW + 1 + boardTagWidth + 1 + boardAgeWidth + 1
+	gap := len(boardGap)
+	// icon (2 columns) + name + tag + age, each followed by a gap.
+	fixed := 2 + gap + nameW + gap + boardTagWidth + gap + boardAgeWidth + gap
 	rest := max(width-fixed, 0)
 	textW := rest * 6 / 10
-	probW := max(rest-textW-1, 0)
+	probW := max(rest-textW-gap, 0)
 	now := time.Now()
 
 	var lines []string
@@ -127,11 +130,17 @@ func (m *Model) renderBoard(width, height int) string {
 			icon = statusIcon(bus.StatusOffline)
 		}
 		icon = fit(strings.TrimRight(icon, " "), 2)
-		row := icon + " " + fit(e.Identity, nameW) + " " + fit(boardTagLabel(e), boardTagWidth) + " " + fit(age, boardAgeWidth)
+		name := fit(e.Identity, nameW)
+		if style, live := m.boardNameStyle(e); live {
+			icon, name = style.Render(icon), style.Render(name)
+		} else {
+			name = style.Render(name)
+		}
+		row := icon + boardGap + name + boardGap + fit(boardTagLabel(e), boardTagWidth) + boardGap + fit(age, boardAgeWidth)
 		if rest > 0 {
-			row += " " + fit(e.Text, textW)
+			row += boardGap + fit(e.Text, textW)
 			if probW > 0 {
-				row += " " + fit(e.Problem, probW)
+				row += boardGap + fit(e.Problem, probW)
 			}
 		}
 		row = strings.TrimRight(cut(row, width, "…"), " ")
@@ -141,11 +150,9 @@ func (m *Model) renderBoard(width, height int) string {
 		}
 		if i == sel {
 			selTop, selEnd = len(lines), len(lines)+len(block)
-			if m.boardFocused() {
-				block[0] = m.theme.Highlight(m.theme.Sel, row, width)
-			} else {
-				block[0] = m.theme.Highlight(m.theme.SelInactive, row, width)
-			}
+			// Focused, the row is recolored in selection_text like a
+			// focused rail row: the agent color does not read on Sel.
+			block[0] = m.theme.RailSel(m.boardFocused(), row, width)
 		}
 		lines = append(lines, block...)
 	}
@@ -155,6 +162,21 @@ func (m *Model) renderBoard(width, height int) string {
 		lines = lines[top : top+height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// boardNameStyle is the color of e's name, as the rail draws it: the TUI's
+// own identity in the user color, other live agents in the agent color, an
+// offline identity dim. live reports whether the icon takes the color too
+// (the rail leaves an offline identity's icon plain).
+func (m *Model) boardNameStyle(e bus.BoardEntry) (style lipgloss.Style, live bool) {
+	switch {
+	case !e.Live:
+		return m.theme.Style(m.theme.Dim), false
+	case e.Identity == m.c.as:
+		return m.theme.Style(m.theme.User), true
+	default:
+		return m.theme.Style(m.theme.Agent), true
+	}
 }
 
 // wrapBoardDetail is the expanded text and problem of e, wrapped to fit
@@ -309,7 +331,8 @@ func (m *Model) historyKey(k string) bool {
 func (m *Model) renderHistory(width, height int) string {
 	b := &m.boardState
 	dim := m.theme.Style(m.theme.Dim)
-	head := b.history
+	style, _ := m.boardNameStyle(bus.BoardEntry{AgentStatus: bus.AgentStatus{Identity: b.history}, Live: true})
+	head := style.Render(b.history)
 	if b.histLoad && b.histErr == nil && !b.histLive {
 		head += " · offline"
 	}
@@ -326,7 +349,7 @@ func (m *Model) renderHistory(width, height int) string {
 		b.histTop = min(max(b.histTop, 0), max(len(b.hist)-body, 0))
 		for _, s := range b.hist[b.histTop:min(b.histTop+body, len(b.hist))] {
 			icon := fit(strings.TrimRight(statusIcon(s.Tag), " "), 2)
-			line := fmt.Sprintf("%4d %s %s %s %s", s.Revision, time.UnixMilli(s.SetAt).Local().Format("15:04"), icon, s.Tag, flatten(s.Text))
+			line := fmt.Sprintf("%4d"+boardGap+"%s"+boardGap+"%s"+boardGap+"%s"+boardGap+"%s", s.Revision, time.UnixMilli(s.SetAt).Local().Format("15:04"), icon, s.Tag, flatten(s.Text))
 			if s.Problem != "" {
 				line += " · " + flatten(s.Problem)
 			}

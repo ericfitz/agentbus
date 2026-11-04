@@ -73,7 +73,7 @@ const (
 var skillMD []byte
 
 // skillPath is where the skill goes under a skills directory.
-var skillPath = filepath.Join("skills", "using-agentbus", "SKILL.md")
+var skillPath = "skills/using-agentbus/SKILL.md" // slash-separated, like the table paths
 
 // InitOptions configures Init. Zero values mean "detect".
 type InitOptions struct {
@@ -118,11 +118,7 @@ func Init(o InitOptions, out io.Writer) error {
 		o.LookPath = exec.LookPath
 	}
 	if o.Run == nil {
-		o.Run = func(name string, args ...string) error {
-			cmd := exec.Command(name, args...)
-			cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
-			return cmd.Run()
-		}
+		o.Run = execRun
 	}
 	if o.OS == "" {
 		o.OS = runtime.GOOS
@@ -143,6 +139,13 @@ func Init(o InitOptions, out io.Writer) error {
 		return in.repo(root)
 	}
 	return in.global()
+}
+
+// execRun runs a harness CLI, discarding its stdout.
+func execRun(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout, cmd.Stderr = io.Discard, os.Stderr
+	return cmd.Run()
 }
 
 // requireOnPath refuses unless the agentbus that PATH resolves is this
@@ -210,6 +213,19 @@ func (in *initer) write(path string, data []byte) error {
 	} else {
 		in.say("wrote %s", path)
 	}
+	return nil
+}
+
+// remove deletes path, or only reports it under DryRun.
+func (in *initer) remove(path string) error {
+	if in.DryRun {
+		in.say("  would remove %s", path)
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	in.say("  removed %s", path)
 	return nil
 }
 
@@ -360,7 +376,7 @@ func hasHookCommand(entry any, cmd string) bool {
 // .local/ is git-ignored, then prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
-		in.say("warning: no agentbus MCP entry found in ~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml; run `agentbus init --global` first")
+		in.say("warning: no agentbus MCP entry found in %s; run `agentbus init --global` first", mcpConfigList())
 	}
 	idPath := filepath.Join(root, ".local", "agentbus.json")
 	if _, err := os.Stat(idPath); err == nil {

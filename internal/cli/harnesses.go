@@ -19,7 +19,7 @@ type hookSpec struct{ event, command, matcher string }
 
 // fileSpec is a file init writes under the home directory.
 type fileSpec struct {
-	path    string // relative to home
+	path    string // relative to home, slash-separated
 	content []byte
 }
 
@@ -54,7 +54,7 @@ var harnesses = []harness{
 			{"UserPromptSubmit", unparkHookCommand, ""},
 			{"SubagentStart", subagentHookCommand, ""},
 		},
-		files: []fileSpec{{filepath.Join(".claude", skillPath), skillMD}},
+		files: []fileSpec{{".claude/" + skillPath, skillMD}},
 	},
 	{
 		name: "codex", title: "Codex", dir: ".codex",
@@ -78,8 +78,8 @@ var harnesses = []harness{
 		files: []fileSpec{
 			// Codex does not surface MCP prompts (openai/codex issue 5059), so the
 			// in-session command is a custom prompt file (/prompts:agentbus).
-			{filepath.Join(".codex", "prompts", "agentbus.md"), []byte(codexPrompt)},
-			{filepath.Join(".agents", skillPath), skillMD},
+			{".codex/prompts/agentbus.md", []byte(codexPrompt)},
+			{".agents/" + skillPath, skillMD},
 		},
 		notes: []string{"Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them"},
 	},
@@ -102,9 +102,9 @@ var harnesses = []harness{
 			{"UserPromptSubmit", unparkHookCommand, ""},
 		},
 		files: []fileSpec{
-			{filepath.Join(".grok", skillPath), skillMD},
-			{filepath.Join(".grok", "commands", "agentbus.md"), []byte(codexPrompt)},
-			{filepath.Join(".grok", "rules", "agentbus.md"), []byte(grokRule)},
+			{".grok/" + skillPath, skillMD},
+			{".grok/commands/agentbus.md", []byte(codexPrompt)},
+			{".grok/rules/agentbus.md", []byte(grokRule)},
 		},
 	},
 }
@@ -116,6 +116,19 @@ func harnessNames() []string {
 		names[i] = h.name
 	}
 	return names
+}
+
+// mcpConfigList renders the MCP config files for messages, joined like
+// harnessNameList: "~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml".
+func mcpConfigList() string {
+	f := make([]string, len(harnesses))
+	for i, h := range harnesses {
+		f[i] = "~/" + h.mcp.configFile
+	}
+	if len(f) < 2 {
+		return strings.Join(f, "")
+	}
+	return strings.Join(f[:len(f)-1], ", ") + ", or " + f[len(f)-1]
 }
 
 // harnessNameList renders the names for messages: "claude, codex, or grok".

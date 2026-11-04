@@ -148,6 +148,9 @@ func (in *initer) removeHooks(h harness, path string, root map[string]any, prese
 			}
 		}
 		if len(kept) == 0 {
+			if len(entries) == 0 {
+				continue // the user's own empty list; this run did not empty it
+			}
 			delete(hooks, hk.event)
 		} else {
 			hooks[hk.event] = kept
@@ -221,7 +224,10 @@ func (in *initer) removeEmptyParents(path string) {
 	}
 	home := filepath.Clean(in.Home)
 	for dir := filepath.Dir(path); dir != home && filepath.Dir(dir) != home && filepath.Dir(dir) != dir; dir = filepath.Dir(dir) {
-		if os.Remove(dir) != nil { // not empty, or already gone
+		if fi, err := os.Lstat(dir); err != nil || !fi.Mode().IsDir() {
+			return // gone, or a symlink: never unlink the user's link
+		}
+		if os.Remove(dir) != nil { // not empty
 			return
 		}
 	}

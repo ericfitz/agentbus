@@ -248,7 +248,10 @@ For each harness it removes:
   agentbus`, `codex mcp remove agentbus`, which also removes
   `tool_timeout_sec`, and `grok mcp remove --scope user agentbus`). Without
   that CLI on PATH it prints the entry to delete by hand;
-- only agentbus's hook commands from `~/.claude/settings.json`,
+- the hook commands that contain `agentbus identity`, `agentbus stop-hook`,
+  `agentbus unpark` or `agentbus subagent-hook` (a substring match, so a
+  hook whose command merely contains one of these, such as a wrapper script
+  line, is removed too), from `~/.claude/settings.json`,
   `~/.codex/hooks.json` and `~/.grok/hooks/agentbus.json`, after backing each
   edited file up to `.bak`. Grok's hook file is deleted only once nothing else
   is left in it (no hooks and no other keys);

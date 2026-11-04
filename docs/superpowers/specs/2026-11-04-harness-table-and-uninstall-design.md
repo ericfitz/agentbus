@@ -77,7 +77,7 @@ change in how a hook must reply under it.
 
 ## Section 2: `agentbus uninstall`
 
-`agentbus uninstall [--harness X] [--dry-run] [--config path]` works at
+`agentbus uninstall [--harness X] [--dry-run]` works at
 machine level wherever it runs. Inside a repository it does nothing to that
 repository. Detection is the same as for `init --global`. An unknown
 `--harness` value is rejected with the same message `init` uses. With no
@@ -90,7 +90,9 @@ For each harness to act on, it works in this order:
 1. **MCP entry.** If the harness CLI is on PATH, it runs the harness's
    remove command (`claude mcp remove -s user agentbus`,
    `codex mcp remove agentbus`, `grok mcp remove --scope user agentbus`).
-   If the server is not registered, that counts as done. If the CLI is not
+   If the remove fails (Claude Code and Grok exit nonzero when the server
+   is absent), it prints `<cli> ... failed (agentbus may not have been
+   registered)` and the uninstall continues. If the CLI is not
    on PATH, it prints the entry to delete by hand: the same snippet that
    install prints.
 2. **Hooks.** For each `hookSpec` it removes every inner hook whose command
@@ -120,13 +122,18 @@ absent it prints `<item> not present`. Under `--dry-run` each line reads
 `done: restart the harness`.
 
 **Never touched:** the bus database and key, the config file, any
-repository's `.local/`, running agentbus processes, and `.bak` files.
+repository's `.local/`, and running agentbus processes. It never deletes
+a `.bak` file; each hook file it edits is backed up to `<file>.bak` first,
+which replaces an older backup.
 There is no confirmation prompt; `--dry-run` and the backups cover that.
 
 **Second runs and partial failures:**
 
 - **A second run** finds nothing to remove, prints "not present" lines, and
-  changes nothing.
+  changes nothing on disk. The MCP step runs each harness's remove command
+  again: Claude Code and Grok then print `<cli> ... failed (agentbus may not
+  have been registered)` because their CLIs exit nonzero when the server is
+  absent; Codex exits 0.
 - **A failed run** stops at the first error. Each step only removes what it
   finds, so the next run continues from the leftovers.
 - **Overlapping `init` and `uninstall` runs** take no lock, the same as

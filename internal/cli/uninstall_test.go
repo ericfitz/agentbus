@@ -358,3 +358,67 @@ func TestUninstallKeepsGrokHookFileWithUserKey(t *testing.T) {
 		t.Errorf("hook file = %v, want %v", got, want)
 	}
 }
+
+func TestUninstallKeepsSymlinkedParentDir(t *testing.T) {
+	home := t.TempDir()
+	f := &fakeHarness{home: home}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(filepath.Join(target, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "other", "SKILL.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, ".claude", "skills")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("cannot create symlink:", err)
+	}
+	o := initOpts(t, home, f)
+	o.Global = true
+	o.Harness = "claude"
+	var out bytes.Buffer
+	if err := Init(o, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if !exists(filepath.Join(target, "using-agentbus", "SKILL.md")) {
+		t.Fatal("install did not write through the symlink")
+	}
+	uo := uninstallOpts(home, f)
+	uo.Harness = "claude"
+	out.Reset()
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	fi, err := os.Lstat(link)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("symlink should remain: %v %v", fi, err)
+	}
+	if !exists(filepath.Join(target, "other", "SKILL.md")) {
+		t.Error("other/SKILL.md should remain")
+	}
+	if exists(filepath.Join(target, "using-agentbus", "SKILL.md")) {
+		t.Error("using-agentbus/SKILL.md should be gone")
+	}
+}
+
+func TestUninstallKeepsPreExistingEmptyEvent(t *testing.T) {
+	home, f := installAll(t)
+	p := filepath.Join(home, ".claude", "settings.json")
+	const before = `{"hooks":{"PreToolUse":[],"Stop":[],"SessionStart":[{"hooks":[{"type":"command","command":"agentbus identity"}]}]}}`
+	if err := os.WriteFile(p, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uo := uninstallOpts(home, f)
+	uo.Harness = "claude"
+	var out bytes.Buffer
+	if err := Uninstall(uo, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	want := map[string]any{"hooks": map[string]any{"PreToolUse": []any{}, "Stop": []any{}}}
+	if got := readJSON(t, p); !reflect.DeepEqual(got, want) {
+		t.Errorf("settings.json = %v, want %v", got, want)
+	}
+}

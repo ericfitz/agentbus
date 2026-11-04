@@ -1,0 +1,28 @@
+Claude Code:
+would have run claude mcp remove -s user agentbus
+would have run claude mcp add -s user agentbus -- agentbus mcp
+would write ~/.claude/settings.json
+would write ~/.claude/settings.json
+would write ~/.claude/settings.json
+would write ~/.claude/settings.json
+would write ~/.claude/skills/using-agentbus/SKILL.md
+Codex:
+would have run codex mcp remove agentbus
+would have run codex mcp add agentbus -- agentbus mcp
+would write ~/.codex/hooks.json
+would write ~/.codex/hooks.json
+would write ~/.codex/hooks.json
+would write ~/.codex/prompts/agentbus.md
+would write ~/.agents/skills/using-agentbus/SKILL.md
+  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them
+Grok Build:
+would have run grok mcp remove --scope user agentbus
+would have run grok mcp add --scope user agentbus -- agentbus mcp
+would write ~/.grok/hooks/agentbus.json
+would write ~/.grok/hooks/agentbus.json
+would write ~/.grok/skills/using-agentbus/SKILL.md
+would write ~/.grok/commands/agentbus.md
+would write ~/.grok/rules/agentbus.md
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+--- files

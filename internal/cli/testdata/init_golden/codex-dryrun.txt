@@ -1,0 +1,12 @@
+Codex:
+would have run codex mcp remove agentbus
+would have run codex mcp add agentbus -- agentbus mcp
+would write ~/.codex/hooks.json
+would write ~/.codex/hooks.json
+would write ~/.codex/hooks.json
+would write ~/.codex/prompts/agentbus.md
+would write ~/.agents/skills/using-agentbus/SKILL.md
+  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+--- files

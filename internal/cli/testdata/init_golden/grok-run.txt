@@ -1,0 +1,17 @@
+Grok Build:
+  registered the agentbus MCP server via grok mcp add --scope user agentbus -- agentbus mcp
+wrote ~/.grok/hooks/agentbus.json
+updated ~/.grok/hooks/agentbus.json (backup at ~/.grok/hooks/agentbus.json.bak)
+wrote ~/.grok/skills/using-agentbus/SKILL.md
+wrote ~/.grok/commands/agentbus.md
+wrote ~/.grok/rules/agentbus.md
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+grok mcp remove --scope user agentbus
+grok mcp add --scope user agentbus -- agentbus mcp
+--- files
+.grok/commands/agentbus.md 35ad9707016f
+.grok/hooks/agentbus.json f92df386a73b
+.grok/hooks/agentbus.json.bak 2c23b4899fab
+.grok/rules/agentbus.md bce77ffd26f3
+.grok/skills/using-agentbus/SKILL.md abb16effef3e

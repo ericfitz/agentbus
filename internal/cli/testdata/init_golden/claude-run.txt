@@ -1,0 +1,15 @@
+Claude Code:
+  registered the agentbus MCP server via claude mcp add -s user agentbus -- agentbus mcp
+wrote ~/.claude/settings.json
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+wrote ~/.claude/skills/using-agentbus/SKILL.md
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+claude mcp remove -s user agentbus
+claude mcp add -s user agentbus -- agentbus mcp
+--- files
+.claude/settings.json 25ff45a11d38
+.claude/settings.json.bak 8a413cbdf579
+.claude/skills/using-agentbus/SKILL.md abb16effef3e

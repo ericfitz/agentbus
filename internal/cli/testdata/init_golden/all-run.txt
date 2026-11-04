@@ -1,0 +1,46 @@
+Claude Code:
+  registered the agentbus MCP server via claude mcp add -s user agentbus -- agentbus mcp
+wrote ~/.claude/settings.json
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
+wrote ~/.claude/skills/using-agentbus/SKILL.md
+Codex:
+  registered the agentbus MCP server via codex mcp add agentbus -- agentbus mcp
+updated ~/.codex/config.toml (backup at ~/.codex/config.toml.bak)
+wrote ~/.codex/hooks.json
+updated ~/.codex/hooks.json (backup at ~/.codex/hooks.json.bak)
+updated ~/.codex/hooks.json (backup at ~/.codex/hooks.json.bak)
+wrote ~/.codex/prompts/agentbus.md
+wrote ~/.agents/skills/using-agentbus/SKILL.md
+  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them
+Grok Build:
+  registered the agentbus MCP server via grok mcp add --scope user agentbus -- agentbus mcp
+wrote ~/.grok/hooks/agentbus.json
+updated ~/.grok/hooks/agentbus.json (backup at ~/.grok/hooks/agentbus.json.bak)
+wrote ~/.grok/skills/using-agentbus/SKILL.md
+wrote ~/.grok/commands/agentbus.md
+wrote ~/.grok/rules/agentbus.md
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+claude mcp remove -s user agentbus
+claude mcp add -s user agentbus -- agentbus mcp
+codex mcp remove agentbus
+codex mcp add agentbus -- agentbus mcp
+grok mcp remove --scope user agentbus
+grok mcp add --scope user agentbus -- agentbus mcp
+--- files
+.agents/skills/using-agentbus/SKILL.md abb16effef3e
+.claude/settings.json 25ff45a11d38
+.claude/settings.json.bak 8a413cbdf579
+.claude/skills/using-agentbus/SKILL.md abb16effef3e
+.codex/config.toml dbc67e010973
+.codex/config.toml.bak 97d1bb60bb7a
+.codex/hooks.json 62f84ff43b6a
+.codex/hooks.json.bak 8f0cae331357
+.codex/prompts/agentbus.md 35ad9707016f
+.grok/commands/agentbus.md 35ad9707016f
+.grok/hooks/agentbus.json f92df386a73b
+.grok/hooks/agentbus.json.bak 2c23b4899fab
+.grok/rules/agentbus.md bce77ffd26f3
+.grok/skills/using-agentbus/SKILL.md abb16effef3e

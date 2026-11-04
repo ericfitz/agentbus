@@ -1,0 +1,11 @@
+Grok Build:
+would have run grok mcp remove --scope user agentbus
+would have run grok mcp add --scope user agentbus -- agentbus mcp
+would write ~/.grok/hooks/agentbus.json
+would write ~/.grok/hooks/agentbus.json
+would write ~/.grok/skills/using-agentbus/SKILL.md
+would write ~/.grok/commands/agentbus.md
+would write ~/.grok/rules/agentbus.md
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+--- files

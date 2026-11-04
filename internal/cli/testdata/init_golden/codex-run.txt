@@ -1,0 +1,20 @@
+Codex:
+  registered the agentbus MCP server via codex mcp add agentbus -- agentbus mcp
+updated ~/.codex/config.toml (backup at ~/.codex/config.toml.bak)
+wrote ~/.codex/hooks.json
+updated ~/.codex/hooks.json (backup at ~/.codex/hooks.json.bak)
+updated ~/.codex/hooks.json (backup at ~/.codex/hooks.json.bak)
+wrote ~/.codex/prompts/agentbus.md
+wrote ~/.agents/skills/using-agentbus/SKILL.md
+  Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them
+done: restart the harness, then run `agentbus init` inside each repository
+--- calls
+codex mcp remove agentbus
+codex mcp add agentbus -- agentbus mcp
+--- files
+.agents/skills/using-agentbus/SKILL.md abb16effef3e
+.codex/config.toml dbc67e010973
+.codex/config.toml.bak 97d1bb60bb7a
+.codex/hooks.json 62f84ff43b6a
+.codex/hooks.json.bak 8f0cae331357
+.codex/prompts/agentbus.md 35ad9707016f

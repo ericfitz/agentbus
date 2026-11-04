@@ -868,7 +868,7 @@ func TestRailSelKeepsCursorEscapes(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-	th := LoadTheme(config.Default(), nil)
+	th := newFixture(t).m.theme
 	gear := "\x1b[2X⚙️\x1b[1C "
 	line := markSel + "\x1b[36m" + gear + "\x1b[0m\x1b[36mSam\x1b[0m"
 	got := th.RailSel(true, line, 20)

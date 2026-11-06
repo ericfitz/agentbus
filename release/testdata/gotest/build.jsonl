@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/fx/nobuild [example.com/fx/nobuild.test]","Action":"build-output","Output":"# example.com/fx/nobuild [example.com/fx/nobuild.test]\n"}
+{"ImportPath":"example.com/fx/nobuild [example.com/fx/nobuild.test]","Action":"build-output","Output":"nobuild/nb_test.go:5:28: undefined: undefinedThing\n"}
+{"ImportPath":"example.com/fx/nobuild [example.com/fx/nobuild.test]","Action":"build-fail"}
+{"Time":"2026-11-06T17:16:27.73651-05:00","Action":"start","Package":"example.com/fx/nobuild"}
+{"Time":"2026-11-06T17:16:27.736656-05:00","Action":"output","Package":"example.com/fx/nobuild","Output":"FAIL\texample.com/fx/nobuild [build failed]\n","OutputType":"frame"}
+{"Time":"2026-11-06T17:16:27.736675-05:00","Action":"fail","Package":"example.com/fx/nobuild","Elapsed":0,"FailedBuild":"example.com/fx/nobuild [example.com/fx/nobuild.test]"}

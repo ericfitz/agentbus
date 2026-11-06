@@ -31,6 +31,12 @@ jobs:
       - name: install.ps1 harness (PowerShell 7)
         shell: pwsh
         run: ./release/test-install.ps1
+      - name: go-test-summary.ps1 self-test (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\release\go-test-summary.ps1 -SelfTest
+      - name: go-test-summary.ps1 self-test (PowerShell 7)
+        shell: pwsh
+        run: ./release/go-test-summary.ps1 -SelfTest
       - name: test-winget.ps1 self-test (Windows PowerShell 5.1)
         shell: powershell
         run: .\release\test-winget.ps1 -SelfTest

@@ -1102,9 +1102,15 @@ func TestDeleteLastChannelBeforeCollapsedSection(t *testing.T) {
 	}
 	f.m.selectChannel(idx)
 	f.key("d")
+	if f.m.mode != modeConfirmChannel {
+		t.Fatalf("d did not open the delete prompt: mode=%v sel=%q headSel=%d sessSel=%d toast=%q", f.m.mode, f.m.selName(), f.m.headSel, f.m.sessSel, f.m.toast)
+	}
 	f.key("y")
+	if slices.ContainsFunc(f.m.channels, func(c bus.Channel) bool { return c.Name == "tasks/work" }) {
+		t.Fatalf("y did not delete tasks/work: toast=%q", f.m.toast)
+	}
 	if f.m.headSel != secTags {
-		t.Fatalf("headSel = %d, want the collapsed tags heading %d", f.m.headSel, secTags)
+		t.Fatalf("headSel = %d, want the collapsed tags heading %d (sel=%q toast=%q)", f.m.headSel, secTags, f.m.selName(), f.m.toast)
 	}
 	var marked []string
 	for _, l := range strings.Split(f.m.renderRails(), "\n") {

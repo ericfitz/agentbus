@@ -7,3 +7,6 @@ package tui
 // line with a gear one cell past the width: a full-width line wrapped, the
 // alt screen scrolled, and redraws left stale rows behind.
 const gearIcon = "\u2699\uFE0F "
+
+// stopwatchIcon is the in-progress task mark, plain for the same reason.
+const stopwatchIcon = "\u23F1\uFE0F "

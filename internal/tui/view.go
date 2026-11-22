@@ -181,9 +181,9 @@ func (m Model) header(x bus.Message, viewed, rev string, stampStyle lipgloss.Sty
 
 // cut is ansi.Truncate(s, w, tail) for one line, except that past the cut
 // only SGR escapes are kept. ansi.Truncate keeps the escapes of every glyph
-// it drops, and with the gear's glyph gone its CSI 1C would move the cursor
-// a column past w, which lipgloss counts as zero width. SGR stays so styles
-// still close.
+// it drops, and with the gear's or stopwatch's glyph gone its CSI 1C would
+// move the cursor a column past w, which lipgloss counts as zero width. SGR
+// stays so styles still close.
 func cut(s string, w int, tail string) string {
 	if ansi.StringWidth(s) <= w {
 		return s
@@ -288,13 +288,12 @@ func statusIcon(tag string) string {
 }
 
 // Task status marks. The stopwatch U+23F1 is text-presentation by default
-// (like the gear) and carries U+FE0F for the color glyph; if a terminal
-// font draws its own half-width stopwatch, give it the gear's CSI 2X/1C
-// treatment.
+// (like the gear) and carries U+FE0F for the color glyph; per OS like the
+// gear, see icons_unix.go and icons_windows.go.
 var (
-	taskPending    = "\u274E "       // negative squared cross mark
-	taskInProgress = "\u23F1\uFE0F " // stopwatch
-	taskCompleted  = "\u2705 "       // white heavy check mark
+	taskPending    = "\u274E "     // negative squared cross mark
+	taskInProgress = stopwatchIcon // stopwatch
+	taskCompleted  = "\u2705 "     // white heavy check mark
 )
 
 func (m Model) View() string {

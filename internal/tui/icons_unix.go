@@ -11,3 +11,8 @@ package tui
 // the user row) the old glyph's half stays on screen. CSI 2X (erase two
 // cells, cursor stays, also uncounted) blanks both cells first.
 const gearIcon = "\x1b[2X\u2699\uFE0F\x1b[1C "
+
+// stopwatchIcon is the in-progress task mark. U+23F1 is Neutral width like
+// the gear, and Terminal.app advances one cell for it with U+FE0F too
+// (measured with CSI 6n, 2026-11-21), so it gets the same CSI 2X / CSI 1C.
+const stopwatchIcon = "\x1b[2X\u23F1\uFE0F\x1b[1C "

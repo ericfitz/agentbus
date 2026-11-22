@@ -65,7 +65,7 @@ func TestTaskChannelRendersTree(t *testing.T) {
 	if !strings.HasPrefix(lines[0], markOpen+" "+taskPending+"#") || !strings.Contains(lines[0], "a") {
 		t.Fatalf("line0 = %q", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "  "+"  "+taskInProgress+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
+	if !strings.HasPrefix(lines[1], "  "+"  "+ansi.Strip(taskInProgress)+"#") || !strings.Contains(lines[1], ansi.Strip(iconAgent)+"Sam") {
 		t.Fatalf("line1 = %q", lines[1])
 	}
 	// "b" is blocked, so it has details and shows the collapsed triangle.
@@ -559,7 +559,7 @@ func TestTaskChannelNeverShowsMessageHeaders(t *testing.T) {
 	}
 	for _, l := range strings.Split(ansi.Strip(f.m.renderStream()), "\n") {
 		l = strings.TrimLeft(l, " ")
-		if !strings.HasPrefix(l, taskPending) && !strings.HasPrefix(l, taskInProgress) && !strings.HasPrefix(l, taskCompleted) {
+		if !strings.HasPrefix(l, taskPending) && !strings.HasPrefix(l, ansi.Strip(taskInProgress)) && !strings.HasPrefix(l, taskCompleted) {
 			t.Fatalf("non-task row in task pane: %q", l)
 		}
 	}
@@ -626,7 +626,8 @@ func TestTaskInProgressOwnedBySelfUsesUserIcon(t *testing.T) {
 // A long subject pushes an in-progress row's owner icon to the cut. The cut
 // must not keep the gear's CSI 1C (cursor forward) once its glyph is gone:
 // lipgloss counts the escape as zero width, so the row would draw a column
-// wider than the pane. Only the bytes show it: every 1C must follow a gear.
+// wider than the pane. Only the bytes show it: every 1C must follow a gear
+// or the in-progress stopwatch, which carries the same escapes on Unix.
 func TestTaskRowCutDropsOrphanedCursorEscape(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
@@ -646,8 +647,8 @@ func TestTaskRowCutDropsOrphanedCursorEscape(t *testing.T) {
 	f.run(f.m.statusCmd())
 	f.selectTaskChannel(t, "tasks/work")
 	for _, line := range strings.Split(f.m.renderStream(), "\n") {
-		if strings.Count(line, "\x1b[1C") != strings.Count(line, "⚙️\x1b[1C") {
-			t.Fatalf("cursor-forward escape without its gear: %q", line)
+		if strings.Count(line, "\x1b[1C") != strings.Count(line, "⚙️\x1b[1C")+strings.Count(line, "⏱️\x1b[1C") {
+			t.Fatalf("cursor-forward escape without its gear or stopwatch: %q", line)
 		}
 	}
 }

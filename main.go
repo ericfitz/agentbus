@@ -31,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <init|uninstall|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <install|config|uninstall|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -109,10 +109,24 @@ func run(cmd string, args []string) int {
 		}
 		return 0
 	case "init":
-		fs := flag.NewFlagSet("agentbus init", flag.ContinueOnError)
+		fmt.Fprintln(os.Stderr, cli.InitSplitMessage)
+		return 2
+	case "install":
+		fs := flag.NewFlagSet("agentbus install", flag.ContinueOnError)
 		var o cli.InitOptions
-		fs.BoolVar(&o.Global, "global", false, "configure the harnesses on this machine even when inside a git repository")
 		fs.StringVar(&o.Harness, "harness", "", "configure only this harness ("+cli.HarnessNameList()+"), even if it is not detected")
+		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
+		if err := parseFlags(fs, args); err != nil {
+			return parseExit(err)
+		}
+		if err := cli.Install(o, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 1
+		}
+		return 0
+	case "config":
+		fs := flag.NewFlagSet("agentbus config", flag.ContinueOnError)
+		var o cli.InitOptions
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
 		path := fs.String("config", "", "configuration file")
 		if err := parseFlags(fs, args); err != nil {
@@ -124,7 +138,11 @@ func run(cmd string, args []string) int {
 			return 1
 		}
 		o.Config = cfg
-		if err := cli.Init(o, os.Stdout); err != nil {
+		if err := cli.Config(o, os.Stdout); err != nil {
+			if errors.Is(err, cli.ErrNotInRepo) {
+				fmt.Fprintln(os.Stderr, "agentbus config:", err)
+				return 2
+			}
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1
 		}
@@ -365,7 +383,7 @@ func run(cmd string, args []string) int {
 		}
 		return 0
 	case "stop-hook":
-		// Installed as a Stop hook by init --global. Always exits 0 so a
+		// Installed as a Stop hook by agentbus install. Always exits 0 so a
 		// broken bus never keeps a harness from stopping.
 		cfg, err := loadConfig(cmd, args)
 		if errors.Is(err, flag.ErrHelp) {
@@ -378,7 +396,7 @@ func run(cmd string, args []string) int {
 		cli.StopHook(cfg, os.Stdin, os.Stdout, os.Stderr)
 		return 0
 	case "subagent-hook":
-		// Installed as a Claude Code SubagentStart hook by init --global
+		// Installed as a Claude Code SubagentStart hook by agentbus install
 		// (ADR 0016). Always exits 0 and prints nothing on any failure.
 		cfg, err := loadConfig(cmd, args)
 		if errors.Is(err, flag.ErrHelp) {

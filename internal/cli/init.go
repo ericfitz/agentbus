@@ -34,7 +34,7 @@ const InitPrompt = `Set up Agentbus for this repository:
 user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
 
 // codexPrompt is the in-session agentbus command. Codex does not surface
-// MCP prompts (openai/codex issue 5059), so init writes it to
+// MCP prompts (openai/codex issue 5059), so install writes it to
 // ~/.codex/prompts/agentbus.md (/prompts:agentbus). Grok Build gets the same
 // text at ~/.grok/commands/agentbus.md, the /agentbus slash command; its
 // command files follow Claude's $ARGUMENTS placeholder.
@@ -63,7 +63,7 @@ const (
 	subagentHookCommand = "agentbus subagent-hook"
 )
 
-// skillMD is the using-agentbus skill, installed by `init --global` into
+// skillMD is the using-agentbus skill, installed by `agentbus install` into
 // each harness's personal skills directory so it ships with the binary it
 // describes: ~/.claude/skills for Claude Code, ~/.agents/skills for Codex
 // (also read by Copilot CLI, Gemini CLI, and Grok), and ~/.grok/skills for
@@ -75,9 +75,8 @@ var skillMD []byte
 // skillPath is where the skill goes under a skills directory.
 var skillPath = "skills/using-agentbus/SKILL.md" // slash-separated, like the table paths
 
-// InitOptions configures Init. Zero values mean "detect".
+// InitOptions configures Install and Config. Zero values mean "detect".
 type InitOptions struct {
-	Global  bool          // force the machine-level bootstrap even inside a repo
 	Harness string        // "", "claude", "codex", or "grok": force one harness
 	DryRun  bool          // print actions, write nothing
 	Home    string        // home directory; defaults to os.UserHomeDir
@@ -96,21 +95,28 @@ type InitOptions struct {
 // user PATH.
 const installPS1 = "irm https://github.com/ericfitz/agentbus/releases/latest/download/install.ps1 | iex"
 
-// Init bootstraps Agentbus for the harnesses on this machine (global) or
-// for the repository containing cwd. Inside a git repository the repo step
-// runs unless Global is set; outside one the global step runs.
-func Init(o InitOptions, out io.Writer) error {
+// ErrNotInRepo is returned by Config outside a git repository.
+var ErrNotInRepo = errors.New("not inside a git repository; to configure the harnesses on this machine, run agentbus install")
+
+// InitSplitMessage is what the retired `agentbus init` prints to stderr.
+const InitSplitMessage = `agentbus init was split into two commands:
+  agentbus install   configure the harnesses on this machine (was: init --global)
+  agentbus config    set up the current repository (was: init inside a repository)`
+
+// prepare fills the option defaults and runs the checks Install and Config
+// share, returning the initer to run.
+func prepare(o InitOptions, out io.Writer, again string) (*initer, error) {
 	if o.Home == "" {
 		h, err := os.UserHomeDir()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		o.Home = h
 	}
 	if o.Cwd == "" {
 		c, err := os.Getwd()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		o.Cwd = c
 	}
@@ -127,18 +133,38 @@ func Init(o InitOptions, out io.Writer) error {
 		o.Executable = os.Executable
 	}
 	if err := validHarness(o.Harness); err != nil {
-		return err
+		return nil, err
 	}
 	if o.OS == "windows" {
-		if err := requireOnPath(o.LookPath, o.Executable); err != nil {
-			return err
+		if err := requireOnPath(o.LookPath, o.Executable, again); err != nil {
+			return nil, err
 		}
 	}
-	in := &initer{InitOptions: o, out: out}
-	if root := gitRoot(o.Cwd); root != "" && !o.Global {
-		return in.repo(root)
+	return &initer{InitOptions: o, out: out}, nil
+}
+
+// Install bootstraps Agentbus for the harnesses on this machine. It does not
+// depend on the working directory.
+func Install(o InitOptions, out io.Writer) error {
+	in, err := prepare(o, out, "agentbus install")
+	if err != nil {
+		return err
 	}
 	return in.global()
+}
+
+// Config sets up the git repository containing the working directory. It
+// returns ErrNotInRepo outside one.
+func Config(o InitOptions, out io.Writer) error {
+	in, err := prepare(o, out, "agentbus config")
+	if err != nil {
+		return err
+	}
+	root := gitRoot(in.Cwd)
+	if root == "" {
+		return ErrNotInRepo
+	}
+	return in.repo(root)
 }
 
 // execRun runs a harness CLI, discarding its stdout.
@@ -150,19 +176,19 @@ func execRun(name string, args ...string) error {
 
 // requireOnPath refuses unless the agentbus that PATH resolves is this
 // binary. The harness configs and hooks start "agentbus" by name, and an
-// unzipped agentbus.exe is on no PATH, so on Windows init would otherwise
+// unzipped agentbus.exe is on no PATH, so on Windows install and config would otherwise
 // configure harnesses that cannot start it (or that start an older copy).
-func requireOnPath(lookPath func(string) (string, error), executable func() (string, error)) error {
+func requireOnPath(lookPath func(string) (string, error), executable func() (string, error), again string) error {
 	found, err := lookPath("agentbus")
 	if err != nil {
-		return fmt.Errorf("agentbus.exe is not on your PATH, so the harnesses could not start it. Install it with:\n  %s\nthen open a new terminal and run agentbus init again", installPS1)
+		return fmt.Errorf("agentbus.exe is not on your PATH, so the harnesses could not start it. Install it with:\n  %s\nthen open a new terminal and run %s again", installPS1, again)
 	}
 	self, err := executable()
 	if err != nil {
 		return fmt.Errorf("finding this agentbus.exe: %w", err)
 	}
 	if !sameFile(found, self) {
-		return fmt.Errorf("the agentbus.exe on your PATH (%s) is not this agentbus.exe (%s), so the harnesses would start that one. Install with:\n  %s\nor put this one's directory first on PATH, then open a new terminal and run agentbus init again", found, self, installPS1)
+		return fmt.Errorf("the agentbus.exe on your PATH (%s) is not this agentbus.exe (%s), so the harnesses would start that one. Install with:\n  %s\nor put this one's directory first on PATH, then open a new terminal and run %s again", found, self, installPS1, again)
 	}
 	return nil
 }
@@ -263,7 +289,7 @@ func (in *initer) global() error {
 		in.say("%s", in.noHarnessMessage())
 		return nil
 	}
-	in.say("done: restart the harness, then run `agentbus init` inside each repository")
+	in.say("done: restart the harness, then run agentbus config inside each repository")
 	return nil
 }
 
@@ -376,7 +402,7 @@ func hasHookCommand(entry any, cmd string) bool {
 // .local/ is git-ignored, then prints the registration line.
 func (in *initer) repo(root string) error {
 	if !in.mcpConfigured() {
-		in.say("warning: no agentbus MCP entry found in %s; run `agentbus init --global` first", mcpConfigList())
+		in.say("warning: no agentbus MCP entry found in %s; run `agentbus install` first", mcpConfigList())
 	}
 	idPath := filepath.Join(root, ".local", "agentbus.json")
 	if _, err := os.Stat(idPath); err == nil {
@@ -408,7 +434,7 @@ func (in *initer) repo(root string) error {
 // channel (<identity>, <identity>-memory) is renamed to its prefixed name,
 // history included, and dropped from the list. It no longer creates
 // tasks/<identity> (ADR 0013): task lists are per effort, created as
-// needed, not by init. Any "tasks" or "tasks/..." entry already in the
+// needed, not by config. Any "tasks" or "tasks/..." entry already in the
 // persistent list — a pre-ADR-0013 tasks/<identity>, or the old
 // machine-wide default — is removed and reported; the channel itself stays
 // on the bus until it expires.

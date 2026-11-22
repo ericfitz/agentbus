@@ -6,6 +6,6 @@ would write ~/.claude/settings.json
 would write ~/.claude/settings.json
 would write ~/.claude/settings.json
 would write ~/.claude/skills/using-agentbus/SKILL.md
-done: restart the harness, then run `agentbus init` inside each repository
+done: restart the harness, then run agentbus config inside each repository
 --- calls
 --- files

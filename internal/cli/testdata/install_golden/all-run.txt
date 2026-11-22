@@ -21,7 +21,7 @@ updated ~/.grok/hooks/agentbus.json (backup at ~/.grok/hooks/agentbus.json.bak)
 wrote ~/.grok/skills/using-agentbus/SKILL.md
 wrote ~/.grok/commands/agentbus.md
 wrote ~/.grok/rules/agentbus.md
-done: restart the harness, then run `agentbus init` inside each repository
+done: restart the harness, then run agentbus config inside each repository
 --- calls
 claude mcp remove -s user agentbus
 claude mcp add -s user agentbus -- agentbus mcp

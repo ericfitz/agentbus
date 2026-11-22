@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -84,7 +85,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"gpt-5\"\n"), 0o644)
 
 	var out bytes.Buffer
-	if err := Init(initOpts(t, home, f), &out); err != nil {
+	if err := Install(initOpts(t, home, f), &out); err != nil {
 		t.Fatal(err, out.String())
 	}
 	want := []string{
@@ -163,7 +164,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 
 	// Second run: hooks and timeout are not duplicated.
 	out.Reset()
-	if err := Init(initOpts(t, home, f), &out); err != nil {
+	if err := Install(initOpts(t, home, f), &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := sessionStartCommands(readJSON(t, settings)); len(got) != 2 {
@@ -194,7 +195,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	f := &fakeHarness{home: home}
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	var out bytes.Buffer
-	if err := Init(initOpts(t, home, f), &out); err != nil {
+	if err := Install(initOpts(t, home, f), &out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex")); err == nil {
@@ -213,7 +214,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	f.calls = nil
 	o := initOpts(t, home, f)
 	o.Harness = "codex"
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "prompts", "agentbus.md")); err != nil {
@@ -229,7 +230,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	f.calls = nil
 	out.Reset()
 	o.Harness = "grok"
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".grok", "rules", "agentbus.md")); err != nil {
@@ -241,7 +242,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 		}
 	}
 	o.Harness = "vim"
-	if err := Init(o, &out); err == nil {
+	if err := Install(o, &out); err == nil {
 		t.Fatal("bad --harness accepted")
 	}
 }
@@ -254,7 +255,7 @@ func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 	o := initOpts(t, home, f)
 	o.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != 0 || !strings.Contains(out.String(), `"mcpServers"`) || !strings.Contains(out.String(), "~/.grok/config.toml") {
@@ -271,7 +272,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	o := initOpts(t, home, f)
 	o.DryRun = true
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != 0 {
@@ -287,7 +288,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
+func TestConfigInRepoWritesIdentityAndGitignore(t *testing.T) {
 	home := t.TempDir()
 	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"agentbus":{}}}`), 0o644)
 	root := filepath.Join(t.TempDir(), "widgets")
@@ -300,7 +301,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	o := initOpts(t, home, f)
 	o.Cwd = sub
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Config(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.calls) != 0 {
@@ -330,7 +331,7 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	// Rerun keeps the existing identity and does not duplicate the ignore.
 	_ = os.WriteFile(filepath.Join(root, ".local", "agentbus.json"), []byte(`{"identity":"Sam"}`+"\n"), 0o644)
 	out.Reset()
-	if err := Init(o, &out); err != nil {
+	if err := Config(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	gi, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
@@ -346,22 +347,15 @@ func TestInitInRepoWritesIdentityAndGitignore(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	_ = os.WriteFile(filepath.Join(home, ".grok", "config.toml"), []byte("[mcp_servers.agentbus]\ncommand = \"agentbus\"\n"), 0o644)
 	out.Reset()
-	if err := Init(o, &out); err != nil || strings.Contains(out.String(), "warning") {
+	if err := Config(o, &out); err != nil || strings.Contains(out.String(), "warning") {
 		t.Fatalf("warned although Grok MCP is configured: %v\n%s", err, out.String())
 	}
 
 	// No MCP entry anywhere: warn, but still do the repo work.
 	_ = os.RemoveAll(filepath.Join(home, ".grok"))
 	out.Reset()
-	if err := Init(o, &out); err != nil || !strings.Contains(out.String(), "agentbus init --global") {
+	if err := Config(o, &out); err != nil || !strings.Contains(out.String(), "agentbus install") {
 		t.Fatalf("expected the not-configured warning: %v\n%s", err, out.String())
-	}
-
-	// --global inside a repo runs the machine step instead.
-	o.Global = true
-	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-	if err := Init(o, &out); err != nil || len(f.calls) == 0 {
-		t.Fatalf("--global in repo did not run the global step: %v calls=%v", err, f.calls)
 	}
 }
 
@@ -382,7 +376,7 @@ func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
 	o := initOpts(t, home, f)
 	o.Cwd = root
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Config(o, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "removed task-list entries") || !strings.Contains(out.String(), "tasks, tasks/widgets") {
@@ -479,7 +473,7 @@ func TestInitOnWindowsRequiresThisBinaryOnPath(t *testing.T) {
 				return f.lookPath(name)
 			}
 			var out bytes.Buffer
-			err := Init(o, &out)
+			err := Install(o, &out)
 			if tc.want == "" {
 				if err != nil {
 					t.Fatalf("Init: %v", err)
@@ -511,7 +505,58 @@ func TestInitOffWindowsSkipsThePathCheck(t *testing.T) {
 		}
 		return f.lookPath(name)
 	}
-	if err := Init(o, io.Discard); err != nil {
+	if err := Install(o, io.Discard); err != nil {
 		t.Fatalf("Init: %v", err)
+	}
+}
+
+func TestConfigOutsideRepo(t *testing.T) {
+	home := t.TempDir()
+	f := &fakeHarness{home: home}
+	o := initOpts(t, home, f) // Cwd is a temp dir with no .git
+	var out bytes.Buffer
+	err := Config(o, &out)
+	if !errors.Is(err, ErrNotInRepo) {
+		t.Fatalf("Config error = %v, want ErrNotInRepo", err)
+	}
+	if out.Len() != 0 || len(f.calls) != 0 {
+		t.Fatalf("Config wrote before refusing: %q calls=%v", out.String(), f.calls)
+	}
+}
+
+func TestInstallInsideRepo(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	f := &fakeHarness{home: home}
+	o := initOpts(t, home, f)
+	o.Cwd = root
+	var out bytes.Buffer
+	if err := Install(o, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); err != nil {
+		t.Fatal("global step did not run:", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".local", "agentbus.json")); err == nil {
+		t.Fatal("install created the repository identity file")
+	}
+}
+
+func TestConfigFromSubdirectory(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	sub := filepath.Join(root, "a", "b")
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.MkdirAll(sub, 0o755)
+	f := &fakeHarness{home: home}
+	o := initOpts(t, home, f)
+	o.Cwd = sub
+	if err := Config(o, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".local", "agentbus.json")); err != nil {
+		t.Fatal("identity file not at the repository root:", err)
 	}
 }

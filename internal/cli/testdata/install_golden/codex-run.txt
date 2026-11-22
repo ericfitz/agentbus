@@ -7,7 +7,7 @@ updated ~/.codex/hooks.json (backup at ~/.codex/hooks.json.bak)
 wrote ~/.codex/prompts/agentbus.md
 wrote ~/.agents/skills/using-agentbus/SKILL.md
   Codex asks you to trust the SessionStart, Stop and UserPromptSubmit hooks the first time they run; accept them
-done: restart the harness, then run `agentbus init` inside each repository
+done: restart the harness, then run agentbus config inside each repository
 --- calls
 codex mcp remove agentbus
 codex mcp add agentbus -- agentbus mcp

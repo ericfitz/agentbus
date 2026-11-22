@@ -13,12 +13,12 @@ import (
 	"testing"
 )
 
-var updateGolden = flag.Bool("update-golden", false, "rewrite init golden files")
+var updateGolden = flag.Bool("update-golden", false, "rewrite install golden files")
 
-// TestInitGlobalGolden records the exact output, CLI calls and written files
-// of `init --global` so the harness-table refactor can prove it changed
+// TestInstallGolden records the exact output, CLI calls and written files
+// of `agentbus install` so the harness-table refactor can prove it changed
 // nothing. Regenerate with -update-golden only for an intended change.
-func TestInitGlobalGolden(t *testing.T) {
+func TestInstallGolden(t *testing.T) {
 	scenarios := []struct {
 		name    string
 		homes   []string
@@ -40,11 +40,10 @@ func TestInitGlobalGolden(t *testing.T) {
 					}
 				}
 				o := initOpts(t, home, f)
-				o.Global = true
 				o.Harness = sc.harness
 				o.DryRun = mode == "dryrun"
 				var out bytes.Buffer
-				if err := Init(o, &out); err != nil {
+				if err := Install(o, &out); err != nil {
 					t.Fatal(err, out.String())
 				}
 
@@ -83,7 +82,7 @@ func TestInitGlobalGolden(t *testing.T) {
 					b.WriteString(l + "\n")
 				}
 
-				golden := filepath.Join("testdata", "init_golden", sc.name+"-"+mode+".txt")
+				golden := filepath.Join("testdata", "install_golden", sc.name+"-"+mode+".txt")
 				if *updateGolden {
 					if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 						t.Fatal(err)

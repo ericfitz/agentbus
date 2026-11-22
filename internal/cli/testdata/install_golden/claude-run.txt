@@ -5,7 +5,7 @@ updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
 updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
 updated ~/.claude/settings.json (backup at ~/.claude/settings.json.bak)
 wrote ~/.claude/skills/using-agentbus/SKILL.md
-done: restart the harness, then run `agentbus init` inside each repository
+done: restart the harness, then run agentbus config inside each repository
 --- calls
 claude mcp remove -s user agentbus
 claude mcp add -s user agentbus -- agentbus mcp

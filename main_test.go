@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -103,6 +104,38 @@ func TestVersionFlags(t *testing.T) {
 	}
 }
 
+func TestUsageListsInstallAndConfig(t *testing.T) {
+	for _, c := range []string{"install", "config"} {
+		if !strings.Contains(usage, c) {
+			t.Errorf("usage %q does not list %s", usage, c)
+		}
+	}
+	if regexp.MustCompile(`\binit\b`).MatchString(usage) {
+		t.Errorf("usage %q still lists init", usage)
+	}
+}
+
+// TestInitPrintsSplitMessage: init is retired; any invocation names the
+// replacements and exits 2 without parsing flags.
+func TestInitPrintsSplitMessage(t *testing.T) {
+	for _, args := range [][]string{{"init"}, {"init", "--global"}, {"init", "-dry-run"}, {"init", "extra"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			r := execBin(t, args...)
+			if r.code != 2 {
+				t.Errorf("exit %d, want 2", r.code)
+			}
+			for _, want := range []string{"agentbus install", "agentbus config", "was split"} {
+				if !strings.Contains(r.stderr, want) {
+					t.Errorf("stderr %q lacks %q", r.stderr, want)
+				}
+			}
+			if r.stdout != "" {
+				t.Errorf("stdout %q, want empty", r.stdout)
+			}
+		})
+	}
+}
+
 func TestUsageListsUninstall(t *testing.T) {
 	if !strings.Contains(usage, "uninstall") {
 		t.Errorf("usage %q does not list uninstall", usage)
@@ -138,7 +171,7 @@ func TestUnknownCommandExit2(t *testing.T) {
 }
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
-	cmds := []string{"mcp", "init", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel",
+	cmds := []string{"mcp", "install", "config", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel",
 		"subscribe", "unsubscribe", "stop-hook", "subagent-hook", "identity", "park", "unpark"}
 	for _, c := range cmds {
 		for _, h := range []string{"-h", "--help"} {
@@ -156,7 +189,7 @@ func TestSubcommandHelpExitsZero(t *testing.T) {
 }
 
 func TestUnknownFlagStillFails(t *testing.T) {
-	for _, c := range []string{"init", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe", "park"} {
+	for _, c := range []string{"install", "config", "uninstall", "tui", "wait", "watch", "status", "reset", "delete-channel", "subscribe", "unsubscribe", "park"} {
 		t.Run(c, func(t *testing.T) {
 			r := execBin(t, c, "-bogus")
 			if r.code == 0 {
@@ -178,7 +211,8 @@ func TestExtraArgumentsRejected(t *testing.T) {
 		want string
 	}{
 		{[]string{"mcp", "extra"}, 1, `agentbus mcp: unexpected argument "extra"`},
-		{[]string{"init", "extra"}, 2, `agentbus init: unexpected argument "extra"`},
+		{[]string{"install", "extra"}, 2, `agentbus install: unexpected argument "extra"`},
+		{[]string{"config", "extra"}, 2, `agentbus config: unexpected argument "extra"`},
 		{[]string{"uninstall", "extra"}, 2, `agentbus uninstall: unexpected argument "extra"`},
 		{[]string{"tui", "extra"}, 2, `agentbus tui: unexpected argument "extra"`},
 		{[]string{"wait", "-as", "Pat", "extra"}, 2, `agentbus wait: unexpected argument "extra"`},

@@ -16,7 +16,7 @@ func uninstallOpts(home string, f *fakeHarness) UninstallOptions {
 	return UninstallOptions{Home: home, LookPath: f.lookPath, Run: f.run}
 }
 
-// installAll runs init --global for every harness on a fresh home.
+// installAll runs install for every harness on a fresh home.
 func installAll(t *testing.T) (string, *fakeHarness) {
 	t.Helper()
 	home := t.TempDir()
@@ -27,9 +27,8 @@ func installAll(t *testing.T) (string, *fakeHarness) {
 		}
 	}
 	o := initOpts(t, home, f)
-	o.Global = true
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err, out.String())
 	}
 	return home, f
@@ -65,9 +64,9 @@ func TestUninstallReversesInstallForEveryHarness(t *testing.T) {
 			home := t.TempDir()
 			f := &fakeHarness{home: home}
 			io2 := initOpts(t, home, f)
-			io2.Global, io2.Harness = true, h.name
+			io2.Harness = h.name
 			var out bytes.Buffer
-			if err := Init(io2, &out); err != nil {
+			if err := Install(io2, &out); err != nil {
 				t.Fatal(err, out.String())
 			}
 			uo := uninstallOpts(home, f)
@@ -101,7 +100,7 @@ func TestUninstallReversesInstallForEveryHarness(t *testing.T) {
 			}
 			// Reinstalling restores everything.
 			out.Reset()
-			if err := Init(io2, &out); err != nil {
+			if err := Install(io2, &out); err != nil {
 				t.Fatal(err, out.String())
 			}
 			for _, fl := range h.files {
@@ -377,10 +376,9 @@ func TestUninstallKeepsSymlinkedParentDir(t *testing.T) {
 		t.Skip("cannot create symlink:", err)
 	}
 	o := initOpts(t, home, f)
-	o.Global = true
 	o.Harness = "claude"
 	var out bytes.Buffer
-	if err := Init(o, &out); err != nil {
+	if err := Install(o, &out); err != nil {
 		t.Fatal(err, out.String())
 	}
 	if !exists(filepath.Join(target, "using-agentbus", "SKILL.md")) {

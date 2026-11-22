@@ -104,8 +104,8 @@ func TestRepoWarningListsMCPConfigFiles(t *testing.T) {
 	o := initOpts(t, home, f)
 	o.Cwd, o.DryRun = cwd, true
 	var out bytes.Buffer
-	_ = Init(o, &out) // only the warning line matters here
-	want := "warning: no agentbus MCP entry found in ~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml; run `agentbus init --global` first\n"
+	_ = Config(o, &out) // only the warning line matters here
+	want := "warning: no agentbus MCP entry found in ~/.claude.json, ~/.codex/config.toml, or ~/.grok/config.toml; run `agentbus install` first\n"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, out.String())
 	}

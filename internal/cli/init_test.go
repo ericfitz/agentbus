@@ -143,7 +143,7 @@ func TestInstallConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("config.toml:\n%s", toml)
 	}
 	prompt, err := os.ReadFile(filepath.Join(home, ".codex", "prompts", "agentbus.md"))
-	if err != nil || !strings.Contains(string(prompt), "$ARGUMENTS") || !strings.Contains(string(prompt), "agentbus init") {
+	if err != nil || !strings.Contains(string(prompt), "$ARGUMENTS") || !strings.Contains(string(prompt), "agentbus config") {
 		t.Fatalf("codex prompt: %v\n%s", err, prompt)
 	}
 	// The using-agentbus skill lands in each harness's personal skills dir.
@@ -154,7 +154,7 @@ func TestInstallConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 		}
 	}
 	command, err := os.ReadFile(filepath.Join(home, ".grok", "commands", "agentbus.md"))
-	if err != nil || !strings.Contains(string(command), "$ARGUMENTS") || !strings.Contains(string(command), "agentbus init") {
+	if err != nil || !strings.Contains(string(command), "$ARGUMENTS") || !strings.Contains(string(command), "agentbus config") {
 		t.Fatalf("grok command: %v\n%s", err, command)
 	}
 	rule, err := os.ReadFile(filepath.Join(home, ".grok", "rules", "agentbus.md"))

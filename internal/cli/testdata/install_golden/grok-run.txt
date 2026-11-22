@@ -10,8 +10,8 @@ done: restart the harness, then run agentbus config inside each repository
 grok mcp remove --scope user agentbus
 grok mcp add --scope user agentbus -- agentbus mcp
 --- files
-.grok/commands/agentbus.md 35ad9707016f
+.grok/commands/agentbus.md 74b38ef44419
 .grok/hooks/agentbus.json f92df386a73b
 .grok/hooks/agentbus.json.bak 2c23b4899fab
-.grok/rules/agentbus.md bce77ffd26f3
-.grok/skills/using-agentbus/SKILL.md 5412bf34398a
+.grok/rules/agentbus.md d53c46fbc18a
+.grok/skills/using-agentbus/SKILL.md 0a4273db4b16

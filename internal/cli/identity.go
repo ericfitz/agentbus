@@ -180,7 +180,7 @@ func homeAware(dir string) string {
 }
 
 // protocol is what every agent is told to do on Agentbus after registering.
-// The SessionStart hook prints it after the register sentence and the init
+// The SessionStart hook prints it after the register sentence and the config
 // prompt embeds it, so there is one source of truth.
 const protocol = `Then follow this protocol:
 - Call receive right after registering, whenever you finish a task, and before

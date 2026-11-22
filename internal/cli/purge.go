@@ -24,7 +24,7 @@ var ErrPurgeCancelled = errors.New("purge cancelled")
 
 // dataFiles are the files agentbus writes directly in the data directory;
 // dataDirs are the subdirectories it owns. agentbus.log.* (rotations and the
-// lock file) is matched by glob.
+// lock file) is matched by prefix over the directory listing.
 var (
 	dataFiles = []string{"agentbus.db", "agentbus.db-wal", "agentbus.db-shm", "agentbus.db-journal", "agentbus.log"}
 	dataDirs  = []string{"park", "wait"}

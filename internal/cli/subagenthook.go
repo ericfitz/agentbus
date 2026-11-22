@@ -41,7 +41,7 @@ func subagentName(agentType string) string {
 	return base + "-" + hex.EncodeToString(b[:])
 }
 
-// SubagentHook is the SubagentStart hook `agentbus init --global` installs
+// SubagentHook is the SubagentStart hook `agentbus install` installs
 // in Claude Code (ADR 0016). Claude subagents share the parent's MCP
 // process, so without a register of their own they act as the parent. The
 // hook cannot see the dispatch prompt, so when its session (SessionIdentity,

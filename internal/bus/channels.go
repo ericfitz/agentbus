@@ -118,7 +118,7 @@ func (b *Bus) ChannelKind(name string) (string, error) {
 }
 
 // EnsureChannel creates the channel if it is missing, without a registration
-// (it is the CLI's, for `agentbus init`). A same-named channel of another
+// (it is the CLI's, for `agentbus config`). A same-named channel of another
 // kind is left alone, like ensureDefaults.
 func (b *Bus) EnsureChannel(name, kind string) error {
 	if err := validateChannelName(name); err != nil {
@@ -336,7 +336,7 @@ func (b *Bus) reapEmptyChannels() error {
 }
 
 // RenameChannel moves channel from to to, carrying its messages and
-// subscriptions, in one transaction. It is the CLI's, for `agentbus init`
+// subscriptions, in one transaction. It is the CLI's, for `agentbus config`
 // migrating a pre-ADR-0007 project channel (<repo>, <repo>-memory) to its
 // prefixed name. from must exist, to must not, to's implied kind must match
 // from's kind, and from and to must agree on whether they are task channels

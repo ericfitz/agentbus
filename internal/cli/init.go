@@ -18,10 +18,10 @@ import (
 	"github.com/ericfitz/agentbus/internal/repoconfig"
 )
 
-// InitPrompt is what the `init` MCP prompt (Claude Code) and the Codex
+// ConfigPrompt is what the `config` MCP prompt (Claude Code) and the Codex
 // custom prompt tell the agent to do. Both harnesses run the same CLI.
-const InitPrompt = `Set up Agentbus for this repository:
-1. Run ` + "`agentbus init`" + ` in a shell. Inside a git repository it writes the
+const ConfigPrompt = `Set up Agentbus for this repository:
+1. Run ` + "`agentbus config`" + ` in a shell. Inside a git repository it writes the
    repository's identity file and prints a block beginning
    "Agentbus: call the register tool now with the name parameter set to ...".
 2. Call the Agentbus register tool with that name, then pass the returned
@@ -31,7 +31,7 @@ const InitPrompt = `Set up Agentbus for this repository:
    Task lists are separate: find one with list_channels and subscribe to
    it, or create tasks/<effort> when you start an effort.
 ` + protocol + `If the command reports that the MCP server is not configured yet, tell the
-user to run ` + "`agentbus init --global`" + ` from a shell and restart the harness.`
+user to run ` + "`agentbus install`" + ` from a shell and restart the harness.`
 
 // codexPrompt is the in-session agentbus command. Codex does not surface
 // MCP prompts (openai/codex issue 5059), so install writes it to
@@ -39,7 +39,7 @@ user to run ` + "`agentbus init --global`" + ` from a shell and restart the harn
 // text at ~/.grok/commands/agentbus.md, the /agentbus slash command; its
 // command files follow Claude's $ARGUMENTS placeholder.
 const codexPrompt = "# Agentbus\n\nThe user asked for: agentbus $ARGUMENTS\n\n" +
-	"For `init`:\n" + InitPrompt + "\n\n" +
+	"For `config`:\n" + ConfigPrompt + "\n\n" +
 	"For anything else, run `agentbus $ARGUMENTS` in a shell and report the output.\n"
 
 // grokRule is written to ~/.grok/rules/agentbus.md. Grok loads every file
@@ -50,7 +50,7 @@ const grokRule = "# Agentbus\n\n" +
 	"Register with the name it prints, and pass the returned \"as\" on every\n" +
 	"later Agentbus call. The using-agentbus skill is the full protocol. If\n" +
 	"the command reports that the MCP server is not configured, tell the user\n" +
-	"to run `agentbus init --global` and restart Grok.\n"
+	"to run `agentbus install` and restart Grok.\n"
 
 const (
 	hookCommand     = "agentbus identity"

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestAgentFacingTextHasNoBannedPhrases(t *testing.T) {
 	}
 	texts := map[string]string{
 		"protocol":      protocol,
-		"InitPrompt":    InitPrompt,
+		"ConfigPrompt":  ConfigPrompt,
 		"SKILL.md":      string(skillMD),
 		"stop-hook":     stop.String(),
 		"subagent-hook": sub.String(),
@@ -91,5 +92,22 @@ func TestAgentTextStatusProtocol(t *testing.T) {
 	}
 	if strings.Index(p, "set idle with set_status") > strings.Index(p, `then run "agentbus park"`) {
 		t.Error("protocol: idle must come before agentbus park")
+	}
+}
+
+// TestNoLiveInitReferences: `agentbus init` only prints the split message, so
+// no text an agent or user is shown may tell them to run it.
+func TestNoLiveInitReferences(t *testing.T) {
+	re := regexp.MustCompile(`agentbus init|init --global`)
+	texts := map[string]string{
+		"ConfigPrompt": ConfigPrompt,
+		"codexPrompt":  codexPrompt,
+		"grokRule":     grokRule,
+		"SKILL.md":     string(skillMD),
+	}
+	for name, text := range texts {
+		if m := re.FindString(text); m != "" {
+			t.Errorf("%s mentions %q", name, m)
+		}
 	}
 }

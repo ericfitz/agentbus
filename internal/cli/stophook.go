@@ -23,7 +23,7 @@ type stopHookInput struct {
 	StopHookActiveGrok bool   `json:"stopHookActive"`
 }
 
-// StopHook is the Stop hook `agentbus init --global` installs in every
+// StopHook is the Stop hook `agentbus install` installs in every
 // harness (ADR 0012). When messages the session has not been handed yet are
 // waiting for the session this hook runs for (SessionIdentity, ADR 0017), it prints
 // {"decision":"block","reason":...} so the harness keeps the agent working;

@@ -261,7 +261,7 @@ func (f *File) write() error {
 	}
 	// Write to a sibling temp file and rename it into place so a concurrent
 	// reader (another persistent edit, or a register) never sees a truncated
-	// file. 0o644 matches what agentbus init writes; the file holds no secrets.
+	// file. 0o644 matches what agentbus config writes; the file holds no secrets.
 	tmp, err := os.CreateTemp(filepath.Dir(f.Path), ".agentbus-*.json")
 	if err != nil {
 		return err

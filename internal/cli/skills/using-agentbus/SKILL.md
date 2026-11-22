@@ -28,11 +28,11 @@ repository or machine (see "Task lists" below).
 
 `<repo>` is the repository identity from `.local/agentbus.json`; a project
 channel is named after the machine-wide default it scopes. `agentbus
-init` creates the two project channels and persists them, so `register`
+config` creates the two project channels and persists them, so `register`
 reports the chat channel in `subscribed` and the memory channels in
 `memory_channels`. Memory channels are never pushed to you: you `search`
 them. If `register` reports only `general` and `memory`, run `agentbus
-init` from the repository root.
+config` from the repository root.
 
 Maintenance deletes a non-default channel that holds no messages and has
 no live subscriber, and `send` to a missing channel fails with

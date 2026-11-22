@@ -206,7 +206,7 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 	}
 	for _, c := range channels {
 		// Task lists are no longer subscribed by default (ADR 0013): a
-		// leftover "tasks" or "tasks/..." entry, left by an older init or a
+		// leftover "tasks" or "tasks/..." entry, left by an older version or a
 		// pre-upgrade file, is skipped and reported rather than resubscribed.
 		// register does not rewrite the file; the using-agentbus skill tells
 		// the caller to remove these itself.
@@ -216,7 +216,7 @@ func applyPersistent(b *bus.Bus, cwd string, reg *bus.Registration) {
 		}
 		// A prefixed name implies its kind, so a listed project channel the
 		// tick reaped while empty and unsubscribed comes back here rather
-		// than failing until someone reruns agentbus init.
+		// than failing until someone reruns agentbus config.
 		if _, ok := bus.PrefixKind(c); ok {
 			_ = b.EnsureChannel(c, "")
 		}
@@ -372,12 +372,12 @@ func unparkOnToolCall(b *bus.Bus, log *slog.Logger) mcp.Middleware {
 // failure is recorded in the log instead of silently defaulting.
 func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "agentbus", Version: Version}, nil)
-	// Claude Code lists MCP prompts as slash commands (/agentbus:init), so
+	// Claude Code lists MCP prompts as slash commands (/agentbus:config), so
 	// this is the in-harness bootstrap with no files written; Codex does not
-	// surface prompts yet and gets a custom prompt file from `agentbus init`.
-	s.AddPrompt(&mcp.Prompt{Name: "init", Description: "Set up Agentbus for the current repository and register this session"},
+	// surface prompts yet and gets a custom prompt file from `agentbus install`.
+	s.AddPrompt(&mcp.Prompt{Name: "config", Description: "Set up Agentbus for the current repository and register this session"},
 		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: cli.InitPrompt}}}}, nil
+			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: cli.ConfigPrompt}}}}, nil
 		})
 	s.AddReceivingMiddleware(wrapSchemaErrorsInEnvelope, unparkOnToolCall(b, log))
 	cwd, err := os.Getwd()

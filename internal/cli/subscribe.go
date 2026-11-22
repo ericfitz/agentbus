@@ -17,7 +17,7 @@ var errNotRepoRoot = errors.New("run this from the repository root (the director
 // creating the file when absent. cwd must be a repository root.
 func Subscribe(cwd, channel string, out io.Writer) error {
 	// ADR 0025 decision 7: agents never receive memory channels. Only the
-	// name is known here (init itself persists memory/<repo> through
+	// name is known here (config itself persists memory/<repo> through
 	// repoconfig, so the refusal lives in this command, not the file layer).
 	if channel == "memory" || strings.HasPrefix(channel, "memory/") {
 		return fmt.Errorf("channel %q: memory channels are searched, not pushed; use search (ADR 0025)", channel)
@@ -49,7 +49,7 @@ func Unsubscribe(cwd, channel string, out io.Writer) error {
 
 // openRepoFile loads cwd/.local/agentbus.json after checking cwd is a
 // repository root. With create set, a missing file is created with the
-// identity agentbus init would choose (the basename of cwd).
+// identity agentbus config would choose (the basename of cwd).
 func openRepoFile(cwd string, create bool) (*repoconfig.File, error) {
 	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
 		return nil, errNotRepoRoot
@@ -59,7 +59,7 @@ func openRepoFile(cwd string, create bool) (*repoconfig.File, error) {
 		return repoconfig.Create(cwd, filepath.Base(cwd))
 	}
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("%w; run `agentbus init` first", err)
+		return nil, fmt.Errorf("%w; run `agentbus config` first", err)
 	}
 	return f, err
 }

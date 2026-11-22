@@ -374,17 +374,17 @@ func TestRealBusErrorsPassThroughUnwrapped(t *testing.T) {
 	}
 }
 
-// TestInitPromptListed: Claude Code turns MCP prompts into slash commands
-// (/agentbus:init), so the server must advertise one and return the CLI
+// TestConfigPromptListed: Claude Code turns MCP prompts into slash commands
+// (/agentbus:config), so the server must advertise one and return the CLI
 // instructions when asked for it.
-func TestInitPromptListed(t *testing.T) {
+func TestConfigPromptListed(t *testing.T) {
 	cs := testSession(t)
 	ps, err := cs.ListPrompts(context.Background(), nil)
-	if err != nil || len(ps.Prompts) != 1 || ps.Prompts[0].Name != "init" {
+	if err != nil || len(ps.Prompts) != 1 || ps.Prompts[0].Name != "config" {
 		t.Fatalf("prompts = %+v, err %v", ps, err)
 	}
-	got, err := cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "init"})
-	if err != nil || len(got.Messages) != 1 || !strings.Contains(got.Messages[0].Content.(*mcp.TextContent).Text, "agentbus init") {
+	got, err := cs.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "config"})
+	if err != nil || len(got.Messages) != 1 || !strings.Contains(got.Messages[0].Content.(*mcp.TextContent).Text, "agentbus config") {
 		t.Fatalf("get prompt: %+v, err %v", got, err)
 	}
 }
@@ -705,7 +705,7 @@ func TestPersistErrClassifiesIOAsInternalRetryable(t *testing.T) {
 
 // A prefixed chat or memory channel listed in .local/agentbus.json (general/,
 // memory/) is recreated by register if it is missing: the tick reaps an
-// empty channel with no live subscriber, so the ones agentbus init created
+// empty channel with no live subscriber, so the ones agentbus config created
 // can be gone by the time the first session registers. A leftover tasks/...
 // entry (ADR 0013) is ignored instead: never recreated, never subscribed.
 func TestRegisterRecreatesMissingPrefixedChannels(t *testing.T) {

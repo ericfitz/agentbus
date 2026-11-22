@@ -71,11 +71,11 @@ Windows (`usr\bin\openssl.exe`, `mingw64\bin\openssl.exe`, then, on ARM64,
 `winget install --id Git.Git -e` provides one, and without OpenSSL 3 the
 script refuses. Rerunning upgrades: a running `agentbus.exe` is renamed, not
 overwritten, so restart harness sessions and the TUI afterwards. The script
-never runs `agentbus init`; it prints the next steps.
+never runs `agentbus install`; it prints the next steps.
 
 The release zips also carry a `README.txt`, but unzipping one does not
 install agentbus: the harnesses start `agentbus.exe` by name. On Windows,
-`agentbus init` (any form, including `--dry-run`) refuses to run unless the
+`agentbus install` and `agentbus config` (any form, including `--dry-run`) refuse to run unless the
 `agentbus` that `PATH` resolves is the binary you ran, and its message
 gives the install script command.
 
@@ -161,14 +161,15 @@ Windows zips but leaves the Scoop bucket and winget at the previous version
 (no `komac` or komac token needed). Every release carries `SHA256SUMS` over all
 archives, `install.sh` and `install.ps1`, signed with the Ed25519 release key.
 
-## Before first run: bootstrap with `agentbus init`
+## Before first run: bootstrap with `agentbus install`
 
-Once per machine, from any directory outside a git repository (or with
-`--global` from inside one):
+Once per machine, from any directory:
 
 ```sh
-agentbus init --global
+agentbus install
 ```
+
+(`agentbus init` is retired: it prints the two replacements and exits 2.)
 
 For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
 registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
@@ -201,10 +202,10 @@ Codex also gets `tool_timeout_sec = 300` and
 `~/.codex/prompts/agentbus.md`. Grok Build also gets
 `~/.grok/commands/agentbus.md` (the `/agentbus` slash command) and
 `~/.grok/rules/agentbus.md`. Grok ignores SessionStart hook stdout, so
-`init` installs no SessionStart hook; that rule is what tells a session to run `agentbus
+`install` installs no SessionStart hook; that rule is what tells a session to run `agentbus
 identity` and follow it. Grok's default `tool_timeout_sec` is 6000, already
-above `receive_max_wait_seconds`, so `init` does not set one. The skill
-ships inside the binary, so rerun `init --global` after upgrading to refresh
+above `receive_max_wait_seconds`, so `install` does not set one. The skill
+ships inside the binary, so rerun `agentbus install` after upgrading to refresh
 it. `--harness claude`, `--harness codex`, or `--harness grok` configures
 only that harness, even if it is not detected. `--dry-run` prints what would
 change without writing. Restart the harness afterwards.
@@ -212,7 +213,7 @@ change without writing. Restart the harness afterwards.
 Then, inside each repository:
 
 ```sh
-agentbus init
+agentbus config
 ```
 
 This writes the repository's identity file (`.local/agentbus.json`, from the
@@ -223,20 +224,26 @@ already ignored, and prints the registration line. A stale `tasks` or
 `tasks/...` entry already in the file (task lists are per effort now, not
 per repository) is removed, with a note naming what was removed. From
 inside a session
-the same thing is one command: `/agentbus:init` in Claude Code (an MCP
+the same thing is one command: `/agentbus:config` in Claude Code (an MCP
 prompt the server advertises, so nothing is installed for it),
-`/prompts:agentbus init` in Codex (from the custom prompt file above; Codex
-does not surface MCP prompts yet), or `/agentbus init` in Grok Build (from
-`~/.grok/commands/agentbus.md`). Either way the agent runs `agentbus init`
+`/prompts:agentbus config` in Codex (from the custom prompt file above; Codex
+does not surface MCP prompts yet), or `/agentbus config` in Grok Build (from
+`~/.grok/commands/agentbus.md`). Either way the agent runs `agentbus config`
 and then calls `register` in the current session.
+
+`agentbus config --remove` (also `--dry-run`) undoes `config` for the
+repository: it deletes `.local/agentbus.json` and nothing else. The
+`.local/` directory, the `.gitignore` line and the repository's channels on
+the bus stay; it prints the `agentbus delete-channel` hint for the channels.
+It does not open the bus, and exits 2 outside a git repository.
 
 ## Removing agentbus from a harness: `agentbus uninstall`
 
 ```sh
-agentbus uninstall [--harness claude|codex|grok] [--dry-run]
+agentbus uninstall [--harness claude|codex|grok] [--dry-run] [--purge] [--config PATH]
 ```
 
-It undoes `agentbus init --global` for each harness it finds, or only the one
+It undoes `agentbus install` for each harness it finds, or only the one
 named by `--harness`, even if that harness is not detected. `--dry-run` prints
 what would be removed without changing anything. There is no confirmation
 prompt. A second run still calls each harness's `mcp remove`: Claude and Grok
@@ -257,17 +264,28 @@ For each harness it removes:
   `~/.codex/hooks.json` and `~/.grok/hooks/agentbus.json`, after backing each
   edited file up to `.bak`. Grok's hook file is deleted only once nothing else
   is left in it (no hooks and no other keys);
-- the skill, prompt, command and rule files that `init --global` wrote;
+- the skill, prompt, command and rule files that `agentbus install` wrote;
 - the directories those deletions leave empty, but never a directory directly
   under your home directory.
 
-It leaves alone the bus database and key, the config file, every repository's
-`.local/` and running processes. It never deletes a `.bak` file; each hook
+Without `--purge` it leaves alone the bus database and key, the config file,
+every repository's `.local/` and running processes. It never deletes a `.bak` file; each hook
 file it edits is backed up to `<file>.bak` first, which replaces any older
 backup.
 Restart the harness afterwards.
 
-The sections below describe what `init` sets up, for doing it by hand.
+`--purge` also deletes the config file and the bus data directory (every
+repository's messages, memories and task lists), after the harness steps. It
+refuses, deleting nothing, while any session is live or when it cannot verify
+that none is (the config does not parse, or the database does not open); in the
+latter case it prints the config file and data directory paths for you to
+delete by hand after closing the harnesses. Otherwise it lists the paths and asks you
+to type `yes`. It deletes only the entries agentbus itself writes in the data
+directory (the database and its sidecar files, the log and its rotations,
+`park/` and `wait/`), then the directory if it is empty; anything else there
+is listed and left alone.
+
+The sections below describe what `install` and `config` set up, for doing it by hand.
 
 ## Configuration (optional)
 
@@ -339,11 +357,11 @@ characters.
 Keep `receive_max_wait_seconds` below your harness's MCP tool call timeout:
 Claude Code's default is 300 seconds (the `MCP_TOOL_TIMEOUT` environment
 variable, or a per-server `timeout` field in the MCP config), Codex exposes
-`tool_timeout_sec` (init sets it to 300), and Grok Build's default
+`tool_timeout_sec` (`install` sets it to 300), and Grok Build's default
 `tool_timeout_sec` is 6000. Agentbus itself bounds `receive_max_wait_seconds`
 to a maximum of 240 seconds (default 60).
 
-## Per-repo identity and channels (what `agentbus init` writes)
+## Per-repo identity and channels (what `agentbus config` writes)
 
 `.local/agentbus.json` in the repository (git-ignored):
 
@@ -362,11 +380,11 @@ returns it in `memory_channels` for `search`, and drops any memory
 subscription the identity still holds. A
 `tasks` or `tasks/...` entry left over from before ADR 0013 is ignored
 (not subscribed) and reported in `register`'s `ignored_channels` field
-instead; `init` removes such entries from the file, or delete them by hand.
-`init` writes the two machine-wide channels plus the repository's own
+instead; `config` removes such entries from the file, or delete them by hand.
+`config` writes the two machine-wide channels plus the repository's own
 `general/<identity>` and `memory/<identity>`, creating them on the bus if
 missing. A prefix implies the kind, so `create_channel` needs none for such
-names. Rerunning `init` recreates them for whatever identity the file
+names. Rerunning `config` recreates them for whatever identity the file
 names; a project channel from before v1.5.0 (`<identity>`,
 `<identity>-memory`) is renamed to its prefixed name with its history.
 
@@ -509,23 +527,23 @@ the registration block. Install `~/.grok/rules/agentbus.md` instead:
 At the start of a session, run `agentbus identity` and follow its output.
 ```
 
-`init --global` writes that rule with the register instructions included.
+`agentbus install` writes that rule with the register instructions included.
 The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
-`/agentbus init` comes from `~/.grok/commands/agentbus.md`.
+`/agentbus config` comes from `~/.grok/commands/agentbus.md`.
 
 ## Operating
 
-- `agentbus init` bootstraps a repository; `agentbus init --global`
-  bootstraps the harnesses on this machine (see above).
+- `agentbus config` sets up a repository; `agentbus install` configures the
+  harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
-- `agentbus stop-hook` is the Stop hook `init --global` installs. It reads
+- `agentbus stop-hook` is the Stop hook `agentbus install` installs. It reads
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
   waiting for its session. Always exits 0.
 - `agentbus park` / `agentbus unpark` (ADR 0025): `park` puts a session in a
   state where only its direct messages wake it (`wait`, `watch`, the Stop
-  hook); `unpark` ends it and is the UserPromptSubmit hook `init --global`
+  hook); `unpark` ends it and is the UserPromptSubmit hook `agentbus install`
   installs in every harness. `-as` names the session; without it the
   session is found as for the hooks below. `unpark` prints nothing and
   always exits 0; `park` exits 2 when no session can be found. `register`,

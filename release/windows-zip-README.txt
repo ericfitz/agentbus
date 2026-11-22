@@ -3,7 +3,7 @@ agentbus for Windows
 
 Unzipping this archive does not install agentbus. The harnesses (Claude
 Code, Codex, Grok Build) start agentbus.exe by name, so it must be on your
-PATH, and `agentbus init` refuses to run until it is.
+PATH, and `agentbus install` and `agentbus config` refuse to run until it is.
 
 Recommended: install with the script, which verifies the download, copies
 agentbus.exe to %LocalAppData%\Programs\agentbus and adds that directory to
@@ -26,7 +26,7 @@ To install this copy by hand instead, in PowerShell from this folder:
 
 Then open a new terminal and run:
 
-    agentbus init --global      (once per machine)
-    agentbus init               (inside each repository)
+    agentbus install     (once per machine)
+    agentbus config      (inside each repository)
 
 Documentation: https://github.com/ericfitz/agentbus/blob/main/docs/install.md

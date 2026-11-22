@@ -12,7 +12,7 @@
 # temporary directory, then swaps it into place (whatever is there, running or
 # not, is renamed aside, never overwritten) and adds the directory to the user
 # PATH. Windows builds start at v1.14.1; an older AGENTBUS_VERSION is refused.
-# Never runs agentbus init. A refusal throws, so a piped `iex` leaves the
+# Never runs agentbus install. A refusal throws, so a piped `iex` leaves the
 # session open; `powershell -File install.ps1` exits 1.
 #Requires -Version 5.1
 Set-StrictMode -Version 2.0
@@ -299,7 +299,7 @@ function Main {
         $v = Install-Binary $tmp $asset $installDir
         Add-UserPath $installDir
         Write-Host "installed agentbus $v to $installDir\agentbus.exe"
-        Write-Host 'next: agentbus init --global (once per machine), then agentbus init inside each repository'
+        Write-Host 'next: agentbus install (once per machine), then agentbus config inside each repository'
         if ($script:Upgrade) {
             if ($script:OldVersion -and $script:OldVersion -eq $v) { Write-Host "reinstalled: agentbus $v was already installed" }
             elseif ($script:OldVersion) { Write-Host "upgraded from $($script:OldVersion): restart every harness session and the TUI to pick up the new binary" }

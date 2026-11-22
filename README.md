@@ -73,7 +73,7 @@ self-owned tasks you can take, release, assign, and move between states.
 
 **Local-first.** One Go binary, one SQLite database under
 `~/.local/share/agentbus` (`%LocalAppData%\agentbus` on Windows), MCP over stdio. Works with Claude Code, Codex, and
-Grok Build; `agentbus init --global` configures whichever it finds.
+Grok Build; `agentbus install` configures whichever it finds.
 
 ## Install
 
@@ -103,23 +103,30 @@ Then, once per machine, register the MCP server and session hook with each
 harness it finds (`~/.claude`, `~/.codex`, `~/.grok`):
 
 ```sh
-agentbus init --global
+agentbus install
 ```
 
-`agentbus uninstall` removes those integrations again; see the
+`agentbus uninstall` removes those integrations again; `agentbus uninstall
+--purge` also deletes the config file and the bus data, but refuses while any
+session is live or when it cannot verify that none is, asks you to type `yes`,
+and deletes only agentbus's own entries in the data directory (then the
+directory, if empty). See the
 [install guide](docs/install.md#removing-agentbus-from-a-harness-agentbus-uninstall).
 
 And once inside each repository, to write its identity file and create its
 `general/<repo>` and `memory/<repo>` channels:
 
 ```sh
-agentbus init
+agentbus config
 ```
 
-From inside a session, `/agentbus:init` in Claude Code,
-`/prompts:agentbus init` in Codex, or `/agentbus init` in Grok Build does the
+`agentbus config --remove` deletes that identity file again; the repository's
+channels stay on the bus.
+
+From inside a session, `/agentbus:config` in Claude Code,
+`/prompts:agentbus config` in Codex, or `/agentbus config` in Grok Build does the
 same. Restart the harness after
-`init --global`. Configuration, including semantic search through a local
+`agentbus install`. Configuration, including semantic search through a local
 Ollama or a remote embedding provider, is optional; see the
 [install guide](docs/install.md).
 
@@ -154,7 +161,7 @@ you stop, renew leases on long work, and never `force` over a live agent's
 task. Memories add `get_memory`, `edit_memory`, and `delete_memory`;
 `discover` lists live identities (with each one's harness name and version,
 from its MCP client, when sent), `create_channel` and `list_channels` manage
-channels. The `using-agentbus` skill installed by `init --global`
+channels. The `using-agentbus` skill installed by `agentbus install`
 (`internal/cli/skills/using-agentbus/SKILL.md`) is the full protocol agents
 follow, with a worked example.
 
@@ -178,7 +185,7 @@ subagent are never nudged.
   open and close a message body, its replies, or a task's details and
   subtasks; `/` searches. The full key
   reference is in the [install guide](docs/install.md#operating).
-- `agentbus stop-hook` — the Stop hook `init --global` installs: at the end
+- `agentbus stop-hook` — the Stop hook `agentbus install` installs: at the end
   of a turn, keeps the agent working to `receive` when new messages are
   waiting for it.
 - `agentbus set-status [-as NAME] [-problem TEXT] <tag> <text...>` — record
@@ -189,7 +196,7 @@ subagent are never nudged.
   one): until it is unparked, `wait`, `watch` and the Stop hook wake it only
   for direct messages (every direct message wakes a parked wait, whatever
   `-filter` says; other messages never do). A prompt from the
-  user (the `UserPromptSubmit` hook `init --global` installs runs
+  user (the `UserPromptSubmit` hook `agentbus install` installs runs
   `agentbus unpark`), `register`, any MCP tool call except `receive`, and
   `agentbus unpark` end the park. `park` and `unpark` repeat harmlessly;
   `unpark` prints nothing and always exits 0. `agentbus reset` clears every

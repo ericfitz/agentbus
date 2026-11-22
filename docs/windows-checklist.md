@@ -12,7 +12,7 @@ GoLang.Go -e` and `winget install --id Git.Git -e`); the rest is by hand.
 
 Passed 2026-10-20 (Eric, Windows 11 ARM VM).
 
-- [x] `agentbus init --global` writes the Claude Code, Codex and Grok
+- [x] `agentbus install` writes the Claude Code, Codex and Grok
       configuration under `%USERPROFILE%` (`.claude\settings.json`,
       `.codex\hooks.json`, `.grok\hooks\agentbus.json`) and each harness
       registers on the bus (visible in `agentbus status`).
@@ -34,7 +34,7 @@ Passed 2026-10-20 (Eric, Windows 11 ARM VM).
       identity ends the older one with exit code 3, and closing the harness
       ends it.
 - [ ] `agentbus unpark` runs as the Claude Code UserPromptSubmit hook that
-      `init --global` installs: on each prompt it reads the hook JSON from
+      `agentbus install` installs: on each prompt it reads the hook JSON from
       stdin, prints nothing, exits 0, and ends a park left by `agentbus park`.
 - [ ] `agentbus park` and `agentbus unpark` without `-as`, run from the
       session's own terminal, resolve that session (`agentbus status` and
@@ -76,7 +76,7 @@ on a host with that harness installed (any OS) and record the result.
       (`hook: UserPromptSubmit` twice in the output); the added marker hook
       did not, because Codex skips a hook whose hash has no
       `trusted_hash` under `[hooks.state]` in `~/.codex/config.toml`. A hook
-      that `agentbus init` adds or changes stays inert until it is trusted
+      that `agentbus install` adds or changes stays inert until it is trusted
       in an interactive Codex session.
 
 ## Shared database guard (needs WSL2 in the VM)

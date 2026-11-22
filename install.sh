@@ -8,7 +8,7 @@
 #   AGENTBUS_SKIP_SIGNATURE 1 skips the OpenSSL signature check (the checksum is still checked)
 # Downloads the tarball, SHA256SUMS and SHA256SUMS.sig, verifies the Ed25519
 # signature with the public key below and the tarball's checksum, then
-# replaces <dir>/agentbus atomically. Never runs sudo or agentbus init.
+# replaces <dir>/agentbus atomically. Never runs sudo or agentbus install.
 set -eu
 
 # BEGIN agentbus release public key
@@ -175,7 +175,7 @@ report() {
         *":$INSTALL_DIR:"*) ;;
         *) echo "note: $INSTALL_DIR is not on your PATH; add this to your shell profile: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
     esac
-    echo "next: agentbus init --global (once per machine), then agentbus init inside each repository"
+    echo "next: agentbus install (once per machine), then agentbus config inside each repository"
     if [ "$UPGRADE" = 1 ]; then
         if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" = "$v" ]; then
             echo "reinstalled: agentbus $v was already installed"

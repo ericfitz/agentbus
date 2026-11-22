@@ -202,7 +202,7 @@ cases() {
     local d="$1" a="$2" rm_openssl
     rm_openssl='rm -f "$(command -v openssl)"'
     run_case valid-piped "$d" "$a" 0 "installed agentbus 9.0.1" 'cat /fixture/install.sh | sh && ~/.local/bin/agentbus version'
-    run_case valid-prints-next-step "$d" "$a" 0 "agentbus init --global" 'sh /fixture/install.sh'
+    run_case valid-prints-next-step "$d" "$a" 0 "agentbus install" 'sh /fixture/install.sh'
     run_case path-warning "$d" "$a" 0 "not on your PATH" 'sh /fixture/install.sh'
     run_case pinned-version "$d" "$a" 0 "installed agentbus 9.0.0" 'AGENTBUS_VERSION=v9.0.0 sh /fixture/install.sh'
     run_case version-no-v "$d" "$a" 1 "version must look like vX.Y.Z" 'AGENTBUS_VERSION=9.0.0 sh /fixture/install.sh'

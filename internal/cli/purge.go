@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -38,15 +38,15 @@ func (in *initer) purge(o UninstallOptions) error {
 	if err != nil {
 		return in.refuse(o, cfgPath, "", err)
 	}
-	targets, err := purgeTargets(cfg.DataDirectory)
-	if err != nil {
-		return in.refuse(o, cfgPath, cfg.DataDirectory, err)
-	}
 	var cfgExists bool
 	if _, err := os.Lstat(cfgPath); err == nil {
 		cfgExists = true
 	}
 	if in.DryRun {
+		targets, err := purgeTargets(cfg.DataDirectory)
+		if err != nil {
+			return in.refuse(o, cfgPath, cfg.DataDirectory, err)
+		}
 		in.say("would delete:")
 		for _, t := range targets {
 			in.say("  %s", t)
@@ -64,6 +64,13 @@ func (in *initer) purge(o UninstallOptions) error {
 			}
 			return in.refuse(o, cfgPath, cfg.DataDirectory, err)
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return in.refuse(o, cfgPath, cfg.DataDirectory, err)
+	}
+	// After the liveness check: opening the bus can create -wal and -shm.
+	targets, err := purgeTargets(cfg.DataDirectory)
+	if err != nil {
+		return in.refuse(o, cfgPath, cfg.DataDirectory, err)
 	}
 	in.say("this deletes:")
 	for _, t := range targets {
@@ -138,25 +145,27 @@ func (in *initer) checkIdle(cfg config.Config) error {
 }
 
 // purgeTargets lists the paths agentbus wrote in dir that exist. A missing
-// dir has none.
+// dir has none. File entries that are directories are not agentbus's.
 func purgeTargets(dir string) ([]string, error) {
-	var out []string
-	for _, n := range dataFiles {
-		out = append(out, filepath.Join(dir, n))
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
-	rot, err := filepath.Glob(filepath.Join(dir, "agentbus.log.*"))
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(rot)
-	out = append(out, rot...)
-	for _, n := range dataDirs {
-		out = append(out, filepath.Join(dir, n))
-	}
 	var found []string
-	for _, p := range out {
-		if _, err := os.Lstat(p); err == nil {
-			found = append(found, p)
+	for _, e := range entries {
+		n := e.Name()
+		switch {
+		case slices.Contains(dataDirs, n):
+			if e.IsDir() {
+				found = append(found, filepath.Join(dir, n))
+			}
+		case slices.Contains(dataFiles, n), strings.HasPrefix(n, "agentbus.log."):
+			if !e.IsDir() {
+				found = append(found, filepath.Join(dir, n))
+			}
 		}
 	}
 	return found, nil
@@ -166,7 +175,11 @@ func purgeTargets(dir string) ([]string, error) {
 // it; otherwise it lists what it kept.
 func (in *initer) deleteData(dir string, targets []string) error {
 	for _, p := range targets {
-		if err := os.RemoveAll(p); err != nil {
+		rm := os.Remove
+		if slices.Contains(dataDirs, filepath.Base(p)) {
+			rm = os.RemoveAll
+		}
+		if err := rm(p); err != nil {
 			return err
 		}
 		in.say("removed %s", p)

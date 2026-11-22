@@ -270,3 +270,75 @@ func TestPurgeSkippedAfterHarnessError(t *testing.T) {
 		t.Error("purge ran after a harness error")
 	}
 }
+
+func TestPurgeRefusesWhenDBCannotBeStatted(t *testing.T) {
+	e := newPurgeEnv(t)
+	e.seed(t, false)
+	db := filepath.Join(e.data, "agentbus.db")
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(e.home, "nowhere"), db); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	// A dangling link stats as ENOENT; make a real stat failure instead.
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("agentbus.db", db); err != nil { // ELOOP
+		t.Skip("no symlinks:", err)
+	}
+	out, err := e.run(t, e.opts("yes\n"))
+	if !errors.Is(err, ErrPurgeRefused) {
+		t.Fatalf("err = %v\n%s", err, out)
+	}
+	if !exists(e.cfgPath) || !exists(filepath.Join(e.data, "park")) {
+		t.Error("something was deleted")
+	}
+}
+
+func TestPurgeDataDirWithGlobCharacters(t *testing.T) {
+	e := newPurgeEnv(t)
+	e.data = filepath.Join(e.home, "d[a]ta*")
+	body, _ := json.Marshal(map[string]string{"data_directory": e.data})
+	e.writeFile(t, e.cfgPath, string(body))
+	e.seed(t, false)
+	out, err := e.run(t, e.opts("yes\n"))
+	if err != nil {
+		t.Fatal(err, out)
+	}
+	if exists(e.data) || strings.Contains(out, "did not write") {
+		t.Errorf("out=%q", out)
+	}
+}
+
+func TestPurgeKeepsUserDirNamedLikeALogRotation(t *testing.T) {
+	e := newPurgeEnv(t)
+	e.seed(t, false)
+	mine := filepath.Join(e.data, "agentbus.log.mine", "keep.txt")
+	e.writeFile(t, mine, "x")
+	out, err := e.run(t, e.opts("yes\n"))
+	if err != nil {
+		t.Fatal(err, out)
+	}
+	if !exists(mine) || !strings.Contains(out, "agentbus.log.mine") || !strings.Contains(out, "did not write") {
+		t.Errorf("out=%q", out)
+	}
+	if exists(filepath.Join(e.data, "agentbus.log.1")) {
+		t.Error("rotation survived")
+	}
+}
+
+func TestPurgeWalFilesAreNotReportedForeign(t *testing.T) {
+	e := newPurgeEnv(t)
+	e.seed(t, false)
+	e.writeFile(t, filepath.Join(e.data, "agentbus.db-wal"), "x")
+	e.writeFile(t, filepath.Join(e.data, "agentbus.db-shm"), "x")
+	out, err := e.run(t, e.opts("yes\n"))
+	if err != nil {
+		t.Fatal(err, out)
+	}
+	if strings.Contains(out, "did not write") || exists(e.data) {
+		t.Errorf("out=%q", out)
+	}
+}

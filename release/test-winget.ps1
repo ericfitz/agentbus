@@ -16,6 +16,7 @@
 #   ... -Architecture x64          one architecture (default: x64 and arm64)
 #   ... -SumsFile <path>           use a local SHA256SUMS instead of the release's
 #   ... -Cleanup                   uninstall ericfitz.agentbus left by a failed run
+#   ... -TimeoutScale <n>          multiply every time limit (default 1)
 #   release\test-winget.ps1 -SelfTest  checks the harness's own functions (needs Go;
 #                                      also runs outside Windows)
 # Refuses to start when ericfitz.agentbus is already installed, so it never
@@ -25,13 +26,27 @@
 # winget does not find a package installed from local manifests by id
 # (`winget uninstall --id` says no installed package matches), so uninstall
 # goes through the same manifests.
+# Progress and timeouts: each long step (validate, each architecture's
+# install, bare run, version, uninstall, and the Defender child) prints
+# "==> <step>" before it and "    done in Ns" after. winget and the installed
+# executable run with a time limit (validate 120 s, install and uninstall
+# 600 s, other winget queries and the bare run and version 60 s; -TimeoutScale
+# multiplies all of them, for example 2 on a slow VM). The program's output is
+# read asynchronously and, on a timeout, its whole process tree is killed
+# (taskkill /T /F on Windows), the step fails naming the limit, and the
+# architecture's finally block still uninstalls and checks for leftovers. If a
+# timed-out step left the package installed (or the run was interrupted), a
+# rerun refuses to start until -Cleanup -ManifestDir <dir> removes it. The
+# elevated Defender child has no limit: it includes a UAC prompt a person must
+# answer and a signature update of unpredictable length.
 # Dot-sourcing (. release\test-winget.ps1) loads the functions without running.
 param(
     [switch]$SelfTest,
     [switch]$Cleanup,
     [string]$ManifestDir,
     [string[]]$Architecture = @('x64', 'arm64'),
-    [string]$SumsFile
+    [string]$SumsFile,
+    [ValidateRange(0.01, 1000)][double]$TimeoutScale = 1
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -219,7 +234,9 @@ function Assert-DefenderResults($Results, [hashtable]$Names) {
 }
 
 # Invoke-DefenderElevated runs the child elevated (one UAC prompt) and
-# asserts on its results.
+# asserts on its results. It has no time limit on purpose: the wait includes
+# a person answering the UAC prompt plus a signature update, and this
+# non-elevated process could not kill the elevated child anyway.
 function Invoke-DefenderElevated([string]$Dir, [string]$Mp, [hashtable]$Names) {
     $job = New-DefenderJob $Dir $Mp @($Names.Keys)
     $hostExe = (Get-Process -Id $PID).Path
@@ -306,16 +323,111 @@ function Get-PeMachine([string]$Path) {
     switch ($m) { 0x8664 { return 'x64' } 0xAA64 { return 'arm64' } 0x014C { return 'x86' } default { return ('0x{0:X4}' -f $m) } }
 }
 
+# Get-Limit scales a step's default time limit in seconds by -TimeoutScale.
+function Get-Limit([int]$Seconds) { return [int][Math]::Ceiling($Seconds * $TimeoutScale) }
+
+# Start-Step prints the "==> name" progress line and returns a stopwatch for
+# Stop-Step, which prints how long the step took.
+function Start-Step([string]$Name) {
+    Write-Host "==> $Name"
+    return [Diagnostics.Stopwatch]::StartNew()
+}
+function Stop-Step($Watch) {
+    $Watch.Stop()
+    Write-Host ('    done in {0}s' -f [int][Math]::Round($Watch.Elapsed.TotalSeconds))
+}
+
+# ConvertTo-CommandLineArg quotes one argument by the Windows command-line
+# rules (CommandLineToArgvW): quote it when it is empty or has whitespace or a
+# quote; backslashes are literal unless they precede a quote, where they are
+# doubled (also before the closing quote), and an embedded quote is escaped.
+function ConvertTo-CommandLineArg([string]$Arg) {
+    if ($Arg.Length -gt 0 -and $Arg.IndexOfAny([char[]]@(' ', "`t", "`n", "`v", '"')) -lt 0) { return $Arg }
+    $sb = New-Object System.Text.StringBuilder
+    $null = $sb.Append('"')
+    $bs = 0
+    $bsl = [char]92
+    foreach ($ch in $Arg.ToCharArray()) {
+        if ($ch -eq $bsl) { $bs++; continue }
+        if ($ch -eq [char]34) { $null = $sb.Append($bsl, $bs * 2 + 1).Append([char]34) } else { $null = $sb.Append($bsl, $bs).Append($ch) }
+        $bs = 0
+    }
+    $null = $sb.Append($bsl, $bs * 2).Append([char]34)
+    return $sb.ToString()
+}
+
+# Stop-ProcessTree kills a process and its descendants. Process.Kill($true)
+# is .NET Core only, and Windows PowerShell 5.1 runs on .NET Framework, so on
+# Windows this uses taskkill /T. Elsewhere a plain Kill is enough for the
+# self-test's children.
+function Stop-ProcessTree([Diagnostics.Process]$Proc) {
+    if ($IsWin) {
+        $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        try { $null = & taskkill.exe /T /F /PID $Proc.Id 2>&1 } catch { } finally { $ErrorActionPreference = $eap }
+    }
+    try { $Proc.Kill() } catch { }
+}
+
 # Invoke-Exe runs a program with stderr merged into stdout and returns its
-# exit code and output. Windows PowerShell 5.1 turns captured stderr into a
-# terminating error under 'Stop', so this runs under 'Continue'.
-function Invoke-Exe([string]$Path, [string[]]$Arguments = @()) {
+# exit code, output and whether it timed out. Windows PowerShell 5.1 turns
+# captured stderr into a terminating error under 'Stop', so this runs under
+# 'Continue'. With -TimeoutSec > 0 it runs the program as a process whose
+# stdout and stderr are read asynchronously (so a full pipe cannot deadlock
+# it), and kills the process tree when the limit passes: Code is -1, TimedOut
+# is true, and Out ends with a line saying so.
+function Invoke-Exe([string]$Path, [string[]]$Arguments = @(), [int]$TimeoutSec = 0) {
+    if ($TimeoutSec -gt 0) { return Invoke-ExeTimed $Path $Arguments $TimeoutSec }
     $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
         $global:LASTEXITCODE = 0
         $out = @(& $Path @Arguments 2>&1 | ForEach-Object { "$_" })
-        return [pscustomobject]@{ Code = $LASTEXITCODE; Out = ($out -join "`n") }
+        return [pscustomobject]@{ Code = $LASTEXITCODE; Out = ($out -join "`n"); TimedOut = $false }
     } finally { $ErrorActionPreference = $eap }
+}
+
+function Invoke-ExeTimed([string]$Path, [string[]]$Arguments, [int]$TimeoutSec) {
+    $cmd = Get-Command $Path -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $file = $Path
+    if ($null -ne $cmd) { $file = $cmd.Source }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $file
+    $psi.Arguments = (@($Arguments | ForEach-Object { ConvertTo-CommandLineArg ([string]$_) }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $psi
+    try {
+        $null = $p.Start()
+        $tOut = $p.StandardOutput.ReadToEndAsync()
+        $tErr = $p.StandardError.ReadToEndAsync()
+        $timedOut = -not $p.WaitForExit([int][Math]::Min([double]$TimeoutSec * 1000, 2000000000))
+        if ($timedOut) {
+            Stop-ProcessTree $p
+            $null = $p.WaitForExit(10000)
+        }
+        # A descendant that outlives the program can hold the pipes open;
+        # bound the wait and keep whatever was read.
+        $o = ''; $e = ''
+        if ($tOut.Wait(10000)) { $o = [string]$tOut.Result }
+        if ($tErr.Wait(1000)) { $e = [string]$tErr.Result }
+        $text = (@($o, $e | Where-Object { $_ }) -join "`n").TrimEnd("`r", "`n") -replace "`r`n", "`n"
+        if ($timedOut) {
+            $note = "TIMED OUT after ${TimeoutSec}s; killed the process tree of $([IO.Path]::GetFileName($file))"
+            return [pscustomobject]@{ Code = -1; Out = (@($text, $note | Where-Object { $_ }) -join "`n"); TimedOut = $true }
+        }
+        return [pscustomobject]@{ Code = $p.ExitCode; Out = $text; TimedOut = $false }
+    } finally { $p.Dispose() }
+}
+
+# Assert-NotTimedOut fails the step named $Step when $R timed out, and
+# returns whether it did not, so callers can stop that step.
+function Assert-NotTimedOut([string]$Step, $R, [int]$Limit) {
+    if (-not $R.TimedOut) { return $true }
+    Assert "$Step finished within ${Limit}s (timed out)" $false
+    Show-Failure $R
+    return $false
 }
 
 function Format-Code([int]$Code) { if ($Code -lt 0) { return ('{0} (0x{1:X8})' -f $Code, $Code) } return "$Code" }
@@ -324,7 +436,7 @@ function Format-Code([int]$Code) { if ($Code -lt 0) { return ('{0} (0x{1:X8})' -
 # stays readable.
 function Show-Failure($R) { if ($R.Out) { ($R.Out -split "`n") | ForEach-Object { Write-Host "    $_" } } }
 
-function Invoke-Winget([string[]]$Arguments) { return Invoke-Exe 'winget' $Arguments }
+function Invoke-Winget([string[]]$Arguments, [int]$TimeoutSec = 60) { return Invoke-Exe 'winget' $Arguments -TimeoutSec (Get-Limit $TimeoutSec) }
 
 function Get-InstalledState {
     $left = Get-Leftovers $env:LOCALAPPDATA (Get-UserPath)
@@ -334,7 +446,10 @@ function Get-InstalledState {
 }
 
 function Invoke-Uninstall([string]$Dir) {
-    $r = Invoke-Winget @('uninstall', '--manifest', $Dir, '--purge', '--disable-interactivity', '--accept-source-agreements')
+    $w = Start-Step 'winget uninstall'
+    $r = Invoke-Winget @('uninstall', '--manifest', $Dir, '--purge', '--disable-interactivity', '--accept-source-agreements') 600
+    Stop-Step $w
+    if (-not (Assert-NotTimedOut 'winget uninstall --manifest --purge' $r (Get-Limit 600))) { return }
     Assert "winget uninstall --manifest --purge (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
     if ($r.Code -ne 0) { Show-Failure $r; return }
     # winget removes the package folder but leaves the user PATH entry it
@@ -383,7 +498,15 @@ function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]
     $installed = $false
     try {
         # --scope user: the checks below look under LocalAppData.
-        $r = Invoke-Winget @('install', '--manifest', $Dir, '--architecture', $Arch, '--scope', 'user', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+        $w = Start-Step "$Arch winget install"
+        $r = Invoke-Winget @('install', '--manifest', $Dir, '--architecture', $Arch, '--scope', 'user', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') 600
+        Stop-Step $w
+        if (-not (Assert-NotTimedOut "$Arch winget install --manifest" $r (Get-Limit 600))) {
+            # The install may have finished or half-finished; the finally
+            # block uninstalls whatever is there.
+            $installed = ((Get-InstalledState).Count -gt 0)
+            return
+        }
         Assert "$Arch winget install --manifest (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
         if ($r.Code -ne 0) {
             Show-Failure $r
@@ -401,17 +524,24 @@ function Invoke-ArchCase([string]$Arch, [string]$Dir, [string]$Version, [string]
         if (-not (Test-Path -LiteralPath $exe)) { return }
         $m = Get-PeMachine $exe
         Assert "$Arch PE machine is $Arch (got $m)" ($m -eq $Arch)
-        $bare = Invoke-Exe $exe
+        $w = Start-Step "$Arch bare agentbus.exe"
+        $bare = Invoke-Exe $exe -TimeoutSec (Get-Limit 60)
+        Stop-Step $w
+        if (-not (Assert-NotTimedOut "$Arch bare agentbus.exe" $bare (Get-Limit 60))) { return }
         Assert "$Arch bare agentbus.exe exits 0 (exit $(Format-Code $bare.Code))" ($bare.Code -eq 0)
         if ($bare.Code -ne 0) { Show-Failure $bare }
         $links = Get-LinksExe $env:LOCALAPPDATA
         if (Test-Path -LiteralPath $links) {
-            $la = Invoke-Exe $links
+            $la = Invoke-Exe $links -TimeoutSec (Get-Limit 60)
+            if (-not (Assert-NotTimedOut "$Arch bare Links\agentbus.exe alias" $la (Get-Limit 60))) { return }
             Assert "$Arch bare Links\agentbus.exe alias exits 0 (exit $(Format-Code $la.Code))" ($la.Code -eq 0)
         } else {
             Assert "$Arch no Links alias, so winget put the package folder on the user PATH" ((Get-UserPath) -split ';' -contains $new[0])
         }
-        $v = Invoke-Exe $exe @('version')
+        $w = Start-Step "$Arch agentbus version"
+        $v = Invoke-Exe $exe @('version') -TimeoutSec (Get-Limit 60)
+        Stop-Step $w
+        if (-not (Assert-NotTimedOut "$Arch agentbus version" $v (Get-Limit 60))) { return }
         Assert "$Arch agentbus version prints $Version (got '$($v.Out.Trim())')" (($v.Code -eq 0) -and ($v.Out.Trim() -eq $Version))
         $copy = Join-Path $ScanDir "agentbus-$Arch.exe"
         Copy-Item -LiteralPath $exe -Destination $copy
@@ -432,7 +562,10 @@ function Invoke-Run {
     foreach ($p in $check.Problems) { Assert "manifest: $p" $false }
     Assert "manifests match v$ver's SHA256SUMS" ($check.Problems.Count -eq 0)
     if ($check.Problems.Count -gt 0) { return }
-    $r = Invoke-Winget @('validate', '--manifest', $dir, '--disable-interactivity')
+    $w = Start-Step 'winget validate'
+    $r = Invoke-Winget @('validate', '--manifest', $dir, '--disable-interactivity') 120
+    Stop-Step $w
+    if (-not (Assert-NotTimedOut 'winget validate --manifest' $r (Get-Limit 120))) { return }
     Assert "winget validate --manifest (exit $(Format-Code $r.Code))" ($r.Code -eq 0)
     if ($r.Code -ne 0) { Show-Failure $r; return }
     $scanDir = Join-Path ([IO.Path]::GetTempPath()) ('agentbus-wscan-' + [guid]::NewGuid().ToString('N'))
@@ -444,7 +577,11 @@ function Invoke-Run {
             # A later install would land on the leftover one and test nothing.
             if ($script:Leftover) { Write-Host "stopping: $a left $PackageId installed; fix that, then rerun with -Cleanup -ManifestDir $ManifestDir"; break }
         }
-        if ($names.Count -gt 0) { Write-Host '==> Defender (elevated; accept the UAC prompt)'; Invoke-DefenderElevated $scanDir $mp $names }
+        if ($names.Count -gt 0) {
+            $w = Start-Step 'Defender (elevated; accept the UAC prompt)'
+            Invoke-DefenderElevated $scanDir $mp $names
+            Stop-Step $w
+        }
     } finally { Remove-Item -LiteralPath $scanDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
@@ -454,8 +591,12 @@ function Invoke-CleanupRun {
     if ([string]::IsNullOrEmpty($ManifestDir)) { throw 'test-winget: -Cleanup needs -ManifestDir, the manifests the failed run installed from' }
     $state = Get-InstalledState
     if ($state.Count -eq 0) { Write-Host "nothing to clean up: $PackageId is not installed"; return }
-    $r = Invoke-Winget @('uninstall', '--manifest', (Resolve-Path -LiteralPath $ManifestDir).Path, '--purge', '--disable-interactivity', '--accept-source-agreements')
-    if ($r.Code -eq $NoPackageFound) {
+    $w = Start-Step 'winget uninstall (cleanup)'
+    $r = Invoke-Winget @('uninstall', '--manifest', (Resolve-Path -LiteralPath $ManifestDir).Path, '--purge', '--disable-interactivity', '--accept-source-agreements') 600
+    Stop-Step $w
+    if ($r.TimedOut) {
+        $null = Assert-NotTimedOut 'winget uninstall --manifest --purge' $r (Get-Limit 600)
+    } elseif ($r.Code -eq $NoPackageFound) {
         # winget has no record, so what is left is debris: the package's own
         # folders and PATH entries naming folders that are gone.
         Write-Host "winget has no install record for $PackageId; removing its leftovers"
@@ -611,6 +752,21 @@ if (`$f -like '*threat*') { "Scanning `$f found 1 threats."; exit 2 }
         Assert 'self: Invoke-Exe reports exit 2' ($r.Code -eq 2)
         $r = Invoke-Exe $pw @('-NoProfile', '-Command', '[Console]::Error.WriteLine(''to-stderr''); exit 3')
         Assert 'self: Invoke-Exe captures stderr without throwing and reports exit 3' (($r.Code -eq 3) -and $r.Out.Contains('to-stderr'))
+        $r = Invoke-Exe $pw @('-NoProfile', '-Command', 'exit 2') -TimeoutSec 60
+        Assert 'self: timed Invoke-Exe preserves exit 2 and does not time out' (($r.Code -eq 2) -and (-not $r.TimedOut))
+        $r = Invoke-Exe $pw @('-NoProfile', '-Command', '[Console]::Error.WriteLine(''to-stderr''); [Console]::Out.WriteLine(''to-stdout''); exit 3') -TimeoutSec 60
+        Assert 'self: timed Invoke-Exe captures stdout and stderr and reports exit 3' (($r.Code -eq 3) -and $r.Out.Contains('to-stderr') -and $r.Out.Contains('to-stdout') -and (-not $r.TimedOut))
+        $r = Invoke-Exe $pw @('-NoProfile', '-Command', '[Console]::Out.Write(''a b'')') -TimeoutSec 60
+        Assert 'self: timed Invoke-Exe passes an argument with a space intact' (($r.Code -eq 0) -and ($r.Out -eq 'a b'))
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-Exe $pw @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -TimeoutSec 2
+        $sw.Stop()
+        Assert "self: timed Invoke-Exe kills a child that outlives its limit ($([int]$sw.Elapsed.TotalSeconds)s)" ($r.TimedOut -and ($r.Code -eq -1) -and $r.Out.Contains('TIMED OUT after 2s') -and ($sw.Elapsed.TotalSeconds -lt 20))
+        $r = Invoke-Exe $pw @('-NoProfile', '-Command', '[Console]::Out.Write(''x'' * 200000)') -TimeoutSec 60
+        Assert "self: timed Invoke-Exe reads 200000 characters of output without deadlock ($($r.Out.Length))" (($r.Code -eq 0) -and ($r.Out.Length -eq 200000) -and (-not $r.TimedOut))
+        $q = [ordered]@{ 'plain' = 'plain'; '' = '""'; 'a b' = '"a b"'; 'C:\x y\' = '"C:\x y\\"'; 'say "hi"' = '"say \"hi\""'; 'a\"b' = '"a\\\"b"'; 'C:\nospace\' = 'C:\nospace\' }
+        foreach ($k in $q.Keys) { Assert "self: ConvertTo-CommandLineArg quotes <$k> as <$($q[$k])>" ((ConvertTo-CommandLineArg $k) -eq $q[$k]) }
+        Assert 'self: Get-Limit scales by -TimeoutScale' ((Get-Limit 60) -eq [int][Math]::Ceiling(60 * $TimeoutScale))
         Assert 'self: Format-Code shows HRESULTs in hex' ((Format-Code -1978335212) -eq '-1978335212 (0x8A150014)')
 
         foreach ($a in @(@('x64', 'amd64'), @('arm64', 'arm64'))) {

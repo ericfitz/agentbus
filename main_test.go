@@ -290,3 +290,19 @@ func TestIdentityBadConfigStillPrintsName(t *testing.T) {
 		t.Errorf("exit %d stdout %q stderr %q; want exit 0, register line, agentbus: error on stderr", r.code, r.stdout, r.stderr)
 	}
 }
+
+// Outside a repository, config reports that before it looks at the bus
+// configuration, so a broken config file cannot turn exit 2 into exit 1.
+func TestConfigOutsideRepoChecksRepoFirst(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.toml")
+	if err := os.WriteFile(bad, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTBUS_CONFIG", bad)
+	for _, args := range [][]string{{"config"}, {"config", "--remove"}} {
+		r := execBin(t, args...)
+		if r.code != 2 || !strings.Contains(r.stderr, "not inside a git repository") {
+			t.Errorf("%v: exit %d stderr %q, want exit 2 and the not-in-repo message", args, r.code, r.stderr)
+		}
+	}
+}

@@ -128,16 +128,26 @@ func run(cmd string, args []string) int {
 		fs := flag.NewFlagSet("agentbus config", flag.ContinueOnError)
 		var o cli.InitOptions
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would change without writing anything")
+		fs.BoolVar(&o.Remove, "remove", false, "remove this repository's .local/agentbus.json (channels stay on the bus)")
 		path := fs.String("config", "", "configuration file")
 		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
-		cfg, _, err := config.Load(*path)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "agentbus:", err)
-			return 1
+		// Check the repository first so a broken bus configuration cannot
+		// hide the not-in-repo error, and skip the bus configuration for
+		// --remove, which never opens the bus.
+		if !cli.InRepo() {
+			fmt.Fprintln(os.Stderr, "agentbus config:", cli.ErrNotInRepo)
+			return 2
 		}
-		o.Config = cfg
+		if !o.Remove {
+			cfg, _, err := config.Load(*path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "agentbus:", err)
+				return 1
+			}
+			o.Config = cfg
+		}
 		if err := cli.Config(o, os.Stdout); err != nil {
 			if errors.Is(err, cli.ErrNotInRepo) {
 				fmt.Fprintln(os.Stderr, "agentbus config:", err)

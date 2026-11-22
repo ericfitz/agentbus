@@ -17,13 +17,13 @@ type mcpSpec struct {
 // hookSpec is one event hook that runs command.
 type hookSpec struct{ event, command, matcher string }
 
-// fileSpec is a file init writes under the home directory.
+// fileSpec is a file install writes under the home directory.
 type fileSpec struct {
 	path    string // relative to home, slash-separated
 	content []byte
 }
 
-// harness is everything init knows about one agent harness. install, and the
+// harness is everything install knows about one agent harness. install, and the
 // uninstall that mirrors it, are driven entirely by this table.
 type harness struct {
 	name, title string // "claude"/"Claude Code"

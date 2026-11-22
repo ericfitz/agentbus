@@ -79,6 +79,7 @@ var skillPath = "skills/using-agentbus/SKILL.md" // slash-separated, like the ta
 type InitOptions struct {
 	Harness string        // "", "claude", "codex", or "grok": force one harness
 	DryRun  bool          // print actions, write nothing
+	Remove  bool          // Config: delete the repository's identity file instead of creating it
 	Home    string        // home directory; defaults to os.UserHomeDir
 	Cwd     string        // working directory; defaults to os.Getwd
 	Config  config.Config // bus config, for creating the repository's channels
@@ -164,7 +165,16 @@ func Config(o InitOptions, out io.Writer) error {
 	if root == "" {
 		return ErrNotInRepo
 	}
+	if in.Remove {
+		return in.removeRepo(root)
+	}
 	return in.repo(root)
+}
+
+// InRepo reports whether the working directory is inside a git repository.
+func InRepo() bool {
+	cwd, err := os.Getwd()
+	return err == nil && gitRoot(cwd) != ""
 }
 
 // execRun runs a harness CLI, discarding its stdout.
@@ -427,6 +437,25 @@ func (in *initer) repo(root string) error {
 		return err
 	}
 	return identity(&in.Config, in.Cwd, in.out, os.Stderr)
+}
+
+// removeRepo deletes the repository's identity file and nothing else: not
+// .gitignore, not other files in .local/. It never opens the bus; the
+// repository's channels stay there, and the output says how to delete them.
+func (in *initer) removeRepo(root string) error {
+	idPath := filepath.Join(root, ".local", "agentbus.json")
+	name := filepath.Base(root)
+	if f, err := repoconfig.Load(root); err == nil {
+		name = f.Identity
+	} else if os.IsNotExist(err) {
+		in.say("nothing to remove: %s does not exist", idPath)
+		return nil
+	}
+	if err := in.remove(idPath); err != nil {
+		return err
+	}
+	in.say("the repository's channels general/%s and memory/%s stay on the bus; delete them with agentbus delete-channel", name, name)
+	return nil
 }
 
 // projectChannels creates general/<identity> and memory/<identity> on the

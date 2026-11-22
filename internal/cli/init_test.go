@@ -41,7 +41,7 @@ func initOpts(t *testing.T, home string, f *fakeHarness) InitOptions {
 	cfg := config.Default()
 	cfg.DataDirectory = t.TempDir()
 	// OS is fixed so the fake LookPath (/fake/agentbus) never meets the
-	// Windows PATH check; TestInitOnWindowsRequiresThisBinaryOnPath covers it.
+	// Windows PATH check; TestWindowsRequiresThisBinaryOnPath covers it.
 	return InitOptions{Home: home, Cwd: t.TempDir(), LookPath: f.lookPath, Run: f.run, Config: cfg, OS: "linux"}
 }
 
@@ -73,7 +73,7 @@ func hookCommands(m map[string]any, event string) []string {
 	return out
 }
 
-func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
+func TestInstallConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	f := &fakeHarness{home: home}
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
@@ -190,7 +190,7 @@ func TestInitGlobalConfiguresDetectedHarnessesAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
+func TestInstallSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	home := t.TempDir()
 	f := &fakeHarness{home: home}
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
@@ -247,7 +247,7 @@ func TestInitGlobalSkipsAbsentHarnessUnlessForced(t *testing.T) {
 	}
 }
 
-func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
+func TestInstallWithoutCLIPrintsSnippet(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
@@ -263,7 +263,7 @@ func TestInitGlobalWithoutCLIPrintsSnippet(t *testing.T) {
 	}
 }
 
-func TestInitDryRunWritesNothing(t *testing.T) {
+func TestInstallDryRunWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
@@ -305,7 +305,7 @@ func TestConfigInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(f.calls) != 0 {
-		t.Fatal("repo init touched harness CLIs:", f.calls)
+		t.Fatal("repo config touched harness CLIs:", f.calls)
 	}
 	id := readJSON(t, filepath.Join(root, ".local", "agentbus.json"))
 	if id["identity"] != "widgets" || !strings.Contains(string(mustJSON(t, id["channels"])), `["general","memory","general/widgets","memory/widgets"]`) {
@@ -315,7 +315,7 @@ func TestConfigInRepoWritesIdentityAndGitignore(t *testing.T) {
 		t.Fatalf("project channels not created on the bus: %v", got)
 	}
 	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
-		t.Fatal("init must not create a per-repo task list (ADR 0013)")
+		t.Fatal("config must not create a per-repo task list (ADR 0013)")
 	}
 	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if string(gi) != "bin/\n.local/\n" {
@@ -359,11 +359,11 @@ func TestConfigInRepoWritesIdentityAndGitignore(t *testing.T) {
 	}
 }
 
-// TestInitRemovesTaskEntriesFromExistingFile (ADR 0013): init no longer
+// TestConfigRemovesTaskEntriesFromExistingFile (ADR 0013): config no longer
 // creates a per-repo task list, and cleans a bare "tasks" or "tasks/..." entry a
 // pre-ADR-0013 file already lists, reporting what it removed. Other entries
 // are left alone.
-func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
+func TestConfigRemovesTaskEntriesFromExistingFile(t *testing.T) {
 	home := t.TempDir()
 	_ = os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"agentbus":{}}}`), 0o644)
 	root := filepath.Join(t.TempDir(), "widgets")
@@ -391,7 +391,7 @@ func TestInitRemovesTaskEntriesFromExistingFile(t *testing.T) {
 		t.Fatalf("unrelated entries lost: %s", got)
 	}
 	if _, ok := channelKinds(t, o.Config)["tasks/widgets"]; ok {
-		t.Fatal("init must not create a per-repo task list (ADR 0013)")
+		t.Fatal("config must not create a per-repo task list (ADR 0013)")
 	}
 }
 
@@ -432,11 +432,11 @@ func TestEmbeddedSkillHasLFLineEndings(t *testing.T) {
 	}
 }
 
-// On Windows, init refuses to run unless the agentbus on PATH is this
+// On Windows, install and config refuse to run unless the agentbus on PATH is this
 // binary: the harness configs start "agentbus" by name, so an unzipped
 // agentbus.exe that is not on PATH (or an older copy that is) would leave
 // every harness without a working MCP server.
-func TestInitOnWindowsRequiresThisBinaryOnPath(t *testing.T) {
+func TestWindowsRequiresThisBinaryOnPath(t *testing.T) {
 	dir := t.TempDir()
 	self := filepath.Join(dir, "self", "agentbus.exe")
 	other := filepath.Join(dir, "other", "agentbus.exe")
@@ -448,51 +448,62 @@ func TestInitOnWindowsRequiresThisBinaryOnPath(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, tc := range []struct {
-		name, onPath, want string
+	cmds := []struct {
+		name  string
+		run   func(InitOptions, io.Writer) error
+		again string
 	}{
-		{"missing", "", "agentbus.exe is not on your PATH"},
-		{"other copy", other, "is not this agentbus.exe"},
-		{"this binary", self, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			f := &fakeHarness{home: home}
-			o := initOpts(t, home, f)
-			o.Cwd = t.TempDir() // not a git repository: the global step
-			o.DryRun = true
-			o.OS = "windows"
-			o.Executable = func() (string, error) { return self, nil }
-			o.LookPath = func(name string) (string, error) {
-				if name == "agentbus" {
-					if tc.onPath == "" {
-						return "", exec.ErrNotFound
+		{"install", Install, "run agentbus install again"},
+		{"config", Config, "run agentbus config again"},
+	}
+	for _, cmd := range cmds {
+		for _, tc := range []struct {
+			name, onPath, want string
+		}{
+			{"missing", "", "agentbus.exe is not on your PATH"},
+			{"other copy", other, "is not this agentbus.exe"},
+			{"this binary", self, ""},
+		} {
+			t.Run(cmd.name+"/"+tc.name, func(t *testing.T) {
+				home := t.TempDir()
+				f := &fakeHarness{home: home}
+				o := initOpts(t, home, f)
+				o.Cwd = t.TempDir() // not a git repository
+				o.DryRun = true
+				o.OS = "windows"
+				o.Executable = func() (string, error) { return self, nil }
+				o.LookPath = func(name string) (string, error) {
+					if name == "agentbus" {
+						if tc.onPath == "" {
+							return "", exec.ErrNotFound
+						}
+						return tc.onPath, nil
 					}
-					return tc.onPath, nil
+					return f.lookPath(name)
 				}
-				return f.lookPath(name)
-			}
-			var out bytes.Buffer
-			err := Install(o, &out)
-			if tc.want == "" {
-				if err != nil {
-					t.Fatalf("Init: %v", err)
+				var out bytes.Buffer
+				err := cmd.run(o, &out)
+				if tc.want == "" {
+					// Config outside a repository still gets past the PATH check.
+					if err != nil && !errors.Is(err, ErrNotInRepo) {
+						t.Fatalf("%s: %v", cmd.name, err)
+					}
+					return
 				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "install.ps1") {
-				t.Fatalf("Init error = %v, want %q and install.ps1", err, tc.want)
-			}
-			if out.Len() != 0 {
-				t.Fatalf("Init wrote before refusing:\n%s", out.String())
-			}
-		})
+				if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "install.ps1") || !strings.Contains(err.Error(), cmd.again) {
+					t.Fatalf("%s error = %v, want %q, install.ps1 and %q", cmd.name, err, tc.want, cmd.again)
+				}
+				if out.Len() != 0 {
+					t.Fatalf("%s wrote before refusing:\n%s", cmd.name, out.String())
+				}
+			})
+		}
 	}
 }
 
-// Other systems keep running init from anywhere (a Homebrew or install.sh
+// Other systems keep running install from anywhere (a Homebrew or install.sh
 // binary is on PATH; a developer may run a fresh build).
-func TestInitOffWindowsSkipsThePathCheck(t *testing.T) {
+func TestOffWindowsSkipsThePathCheck(t *testing.T) {
 	home := t.TempDir()
 	f := &fakeHarness{home: home}
 	o := initOpts(t, home, f)
@@ -506,7 +517,7 @@ func TestInitOffWindowsSkipsThePathCheck(t *testing.T) {
 		return f.lookPath(name)
 	}
 	if err := Install(o, io.Discard); err != nil {
-		t.Fatalf("Init: %v", err)
+		t.Fatalf("Install: %v", err)
 	}
 }
 
@@ -558,5 +569,120 @@ func TestConfigFromSubdirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".local", "agentbus.json")); err != nil {
 		t.Fatal("identity file not at the repository root:", err)
+	}
+}
+
+// repoWithIdentity makes a git repository named name whose identity file was
+// written by Config, plus an unrelated .local/other.json.
+func repoWithIdentity(t *testing.T, name string) (root string, o InitOptions) {
+	t.Helper()
+	home := t.TempDir()
+	root = filepath.Join(t.TempDir(), name)
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	f := &fakeHarness{home: home}
+	o = initOpts(t, home, f)
+	o.Cwd = root
+	if err := Config(o, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".local", "other.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, o
+}
+
+func TestConfigRemoveRoundTrip(t *testing.T) {
+	root, o := repoWithIdentity(t, "widgets")
+	idPath := filepath.Join(root, ".local", "agentbus.json")
+	o.Remove = true
+	var out bytes.Buffer
+	if err := Config(o, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if _, err := os.Stat(idPath); !os.IsNotExist(err) {
+		t.Fatalf("identity file still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".local", "other.json")); err != nil {
+		t.Fatal("other.json was touched:", err)
+	}
+	gi, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if !strings.Contains(string(gi), ".local/") {
+		t.Fatalf(".gitignore lost .local/: %q", gi)
+	}
+	for _, want := range []string{idPath, "general/widgets", "memory/widgets", "delete-channel"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestConfigRemoveTwice(t *testing.T) {
+	_, o := repoWithIdentity(t, "widgets")
+	o.Remove = true
+	if err := Config(o, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Config(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "nothing to remove") {
+		t.Fatalf("second run output:\n%s", out.String())
+	}
+}
+
+func TestConfigRemoveMalformed(t *testing.T) {
+	root, o := repoWithIdentity(t, "widgets")
+	idPath := filepath.Join(root, ".local", "agentbus.json")
+	if err := os.WriteFile(idPath, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.Remove = true
+	var out bytes.Buffer
+	if err := Config(o, &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if _, err := os.Stat(idPath); !os.IsNotExist(err) {
+		t.Fatal("malformed identity file not deleted")
+	}
+	if !strings.Contains(out.String(), "general/widgets") {
+		t.Fatalf("hint should use the directory name:\n%s", out.String())
+	}
+}
+
+func TestConfigRemoveDryRun(t *testing.T) {
+	root, o := repoWithIdentity(t, "widgets")
+	o.Remove, o.DryRun = true, true
+	var out bytes.Buffer
+	if err := Config(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".local", "agentbus.json")); err != nil {
+		t.Fatal("dry run deleted the file:", err)
+	}
+	if !strings.Contains(out.String(), "would remove") {
+		t.Fatalf("dry run output:\n%s", out.String())
+	}
+}
+
+func TestConfigRemoveOutsideRepo(t *testing.T) {
+	home := t.TempDir()
+	o := initOpts(t, home, &fakeHarness{home: home})
+	o.Remove = true
+	if err := Config(o, io.Discard); !errors.Is(err, ErrNotInRepo) {
+		t.Fatalf("error = %v, want ErrNotInRepo", err)
+	}
+}
+
+func TestConfigRemoveDoesNotOpenBus(t *testing.T) {
+	_, o := repoWithIdentity(t, "widgets")
+	data := filepath.Join(t.TempDir(), "never-created")
+	o.Config.DataDirectory = data
+	o.Remove = true
+	if err := Config(o, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(data); !os.IsNotExist(err) {
+		t.Fatalf("config --remove created the data directory: %v", err)
 	}
 }

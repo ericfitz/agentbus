@@ -106,9 +106,6 @@ func binaryPointer(osName string, exe func() (string, error)) string {
 	return b.String()
 }
 
-// purge is replaced by Task 4.
-func (in *initer) purge(UninstallOptions) error { return nil }
-
 // uninstall reverses install for one harness. The hook file is parsed before
 // anything changes, so an invalid file leaves the harness untouched.
 func (in *initer) uninstall(h harness) error {

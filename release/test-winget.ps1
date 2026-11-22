@@ -794,12 +794,14 @@ if (`$f -like '*threat*') { "Scanning `$f found 1 threats."; exit 2 }
         Assert "self: timed Invoke-Exe kills a child that outlives its limit ($([int]$sw.Elapsed.TotalSeconds)s)" ($r.TimedOut -and ($r.Code -eq -1) -and ($r.Limit -eq 2) -and $r.Out.Contains('TIMED OUT after 2s') -and ($sw.Elapsed.TotalSeconds -lt 20))
         if ($IsWin) {
             # The grandchild shares the parent's stdout; only killing the whole
-            # tree closes the pipe before the 10 s pipe-wait bound.
+            # tree closes the pipe before the 10 s pipe-wait bound (a parent-only
+            # kill returns after ~14 s). The 4 s limit gives both PowerShell
+            # startups time to finish, so the grandchild is running when killed.
             $pwq = $pw.Replace("'", "''")
             $sw = [Diagnostics.Stopwatch]::StartNew()
-            $r = Invoke-Exe $pw @('-NoProfile', '-Command', "& '$pwq' -NoProfile -Command Start-Sleep -Seconds 60; Start-Sleep -Seconds 60") -TimeoutSec 2
+            $r = Invoke-Exe $pw @('-NoProfile', '-Command', "& '$pwq' -NoProfile -Command Start-Sleep -Seconds 60; Start-Sleep -Seconds 60") -TimeoutSec 4
             $sw.Stop()
-            Assert "self: timed Invoke-Exe kills the grandchild too ($([int]$sw.Elapsed.TotalSeconds)s)" ($r.TimedOut -and ($sw.Elapsed.TotalSeconds -lt 8))
+            Assert "self: timed Invoke-Exe kills the grandchild too ($([int]$sw.Elapsed.TotalSeconds)s)" ($r.TimedOut -and ($sw.Elapsed.TotalSeconds -lt 10))
         } else {
             Write-Host 'note: skipping the process-tree kill case: the non-Windows path only kills the process itself'
         }

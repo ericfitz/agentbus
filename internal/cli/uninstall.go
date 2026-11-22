@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -17,11 +18,18 @@ type UninstallOptions struct {
 	Home     string // home directory; defaults to os.UserHomeDir
 	LookPath func(string) (string, error)
 	Run      func(name string, args ...string) error
+
+	Purge      bool                   // also delete the config file and the bus data
+	ConfigPath string                 // configuration file for --purge; "" means the default
+	In         io.Reader              // the purge confirmation; defaults to os.Stdin
+	OS         string                 // defaults to runtime.GOOS
+	Executable func() (string, error) // defaults to os.Executable
 }
 
-// Uninstall reverses `init --global` for the harnesses on this machine: the
-// MCP entry, the hooks and the files. Per-repository state (the identity
-// file, the bus and its data) is left alone.
+// Uninstall reverses `install` for the harnesses on this machine: the MCP
+// entry, the hooks and the files. With Purge it also deletes the config file
+// and the bus data once no session is live. Per-repository identity files are
+// left alone. It ends by saying where the agentbus binary is.
 func Uninstall(o UninstallOptions, out io.Writer) error {
 	if err := validHarness(o.Harness); err != nil {
 		return err
@@ -39,6 +47,15 @@ func Uninstall(o UninstallOptions, out io.Writer) error {
 	if o.Run == nil {
 		o.Run = execRun
 	}
+	if o.In == nil {
+		o.In = os.Stdin
+	}
+	if o.OS == "" {
+		o.OS = runtime.GOOS
+	}
+	if o.Executable == nil {
+		o.Executable = os.Executable
+	}
 	in := &initer{
 		InitOptions: InitOptions{Harness: o.Harness, DryRun: o.DryRun, Home: o.Home, LookPath: o.LookPath, Run: o.Run},
 		out:         out,
@@ -53,13 +70,44 @@ func Uninstall(o UninstallOptions, out io.Writer) error {
 			return err
 		}
 	}
-	if !did {
+	if did {
+		in.say("done: restart the harness")
+	} else {
 		in.say("%s", in.noHarnessMessage())
-		return nil
 	}
-	in.say("done: restart the harness")
+	if o.Purge {
+		if err := in.purge(o); err != nil {
+			return err
+		}
+	}
+	in.say("%s", binaryPointer(o.OS, o.Executable))
 	return nil
 }
+
+// binaryPointer says where the agentbus binary is and how to remove it:
+// uninstall never deletes the binary it is running from.
+func binaryPointer(osName string, exe func() (string, error)) string {
+	var b strings.Builder
+	dir := ""
+	if p, err := exe(); err == nil {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			p = r
+		}
+		dir = filepath.Dir(p)
+		b.WriteString(p + "\n")
+	}
+	b.WriteString("the agentbus binary is still installed; if you installed it with Homebrew (brew uninstall agentbus) or winget (winget uninstall ericfitz.agentbus), use that, otherwise delete the file")
+	if osName == "windows" {
+		if dir == "" {
+			dir = "its directory"
+		}
+		b.WriteString("\nif install.ps1 put it on your PATH, remove " + dir + " from your user PATH")
+	}
+	return b.String()
+}
+
+// purge is replaced by Task 4.
+func (in *initer) purge(UninstallOptions) error { return nil }
 
 // uninstall reverses install for one harness. The hook file is parsed before
 // anything changes, so an invalid file leaves the harness untouched.

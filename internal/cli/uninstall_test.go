@@ -420,3 +420,74 @@ func TestUninstallKeepsPreExistingEmptyEvent(t *testing.T) {
 		t.Errorf("settings.json = %v, want %v", got, want)
 	}
 }
+
+func fakeExe(p string) func() (string, error) { return func() (string, error) { return p, nil } }
+
+const pointerAdvice = "the agentbus binary is still installed; if you installed it with Homebrew (brew uninstall agentbus) or winget (winget uninstall ericfitz.agentbus), use that, otherwise delete the file"
+
+func TestBinaryPointerUnix(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "agentbus")
+	if err := os.WriteFile(exe, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(exe, link); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	real, _ := filepath.EvalSymlinks(exe)
+	got := binaryPointer("linux", fakeExe(link))
+	if want := real + "\n" + pointerAdvice; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if strings.Contains(got, "PATH") {
+		t.Errorf("unix pointer mentions PATH: %q", got)
+	}
+}
+
+func TestBinaryPointerWindows(t *testing.T) {
+	got := binaryPointer("windows", fakeExe(`C:\tools\agentbus.exe`))
+	for _, w := range []string{pointerAdvice, "remove ", "from your user PATH", "install.ps1"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("missing %q in %q", w, got)
+		}
+	}
+	if !strings.Contains(got, filepath.Dir(`C:\tools\agentbus.exe`)) {
+		t.Errorf("missing directory in %q", got)
+	}
+}
+
+func TestBinaryPointerExecutableError(t *testing.T) {
+	got := binaryPointer("linux", func() (string, error) { return "", os.ErrNotExist })
+	if got != pointerAdvice {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestUninstallNoHarnessStillPrintsPointer(t *testing.T) {
+	home := t.TempDir()
+	o := uninstallOpts(home, &fakeHarness{home: home})
+	o.Executable = fakeExe(filepath.Join(home, "agentbus"))
+	var out bytes.Buffer
+	if err := Uninstall(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"no harness found", "brew uninstall agentbus"} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("missing %q in %q", w, out.String())
+		}
+	}
+}
+
+func TestUninstallPointerComesLast(t *testing.T) {
+	home, f := installAll(t)
+	o := uninstallOpts(home, f)
+	o.Executable = fakeExe(filepath.Join(home, "agentbus"))
+	var out bytes.Buffer
+	if err := Uninstall(o, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(out.String()); !strings.HasSuffix(got, pointerAdvice) {
+		t.Errorf("pointer is not last: %q", got)
+	}
+}

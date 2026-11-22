@@ -162,9 +162,12 @@ func run(cmd string, args []string) int {
 		var o cli.UninstallOptions
 		fs.StringVar(&o.Harness, "harness", "", "remove only this harness ("+cli.HarnessNameList()+"), even if it is not detected")
 		fs.BoolVar(&o.DryRun, "dry-run", false, "print what would be removed without changing anything")
+		fs.BoolVar(&o.Purge, "purge", false, "also delete the config file and the bus data (asks for yes; refuses while sessions are live)")
+		fs.StringVar(&o.ConfigPath, "config", "", "configuration file that --purge deletes (default: the usual location)")
 		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
+		o.In = os.Stdin
 		if err := cli.Uninstall(o, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1

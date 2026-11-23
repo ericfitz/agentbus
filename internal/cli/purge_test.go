@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -114,11 +116,15 @@ func TestPurgeEOFCancels(t *testing.T) {
 	e := newPurgeEnv(t)
 	e.seed(t, false)
 	out, err := e.run(t, e.opts(""))
-	if !errors.Is(err, ErrPurgeCancelled) {
+	if !errors.Is(err, ErrPurgeCanceled) {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(out, "purge cancelled") || !exists(filepath.Join(e.data, "agentbus.db")) || !exists(e.cfgPath) {
-		t.Errorf("out=%q", out)
+	// main prints the error once; the output must not repeat it.
+	if err.Error() != "purge canceled" || strings.Contains(out, "purge canceled") {
+		t.Errorf("err=%q out=%q", err, out)
+	}
+	if !exists(filepath.Join(e.data, "agentbus.db")) || !exists(e.cfgPath) {
+		t.Errorf("something was deleted: out=%q", out)
 	}
 }
 
@@ -126,7 +132,7 @@ func TestPurgeOtherAnswerCancels(t *testing.T) {
 	e := newPurgeEnv(t)
 	e.seed(t, false)
 	_, err := e.run(t, e.opts("y\n"))
-	if !errors.Is(err, ErrPurgeCancelled) {
+	if !errors.Is(err, ErrPurgeCanceled) {
 		t.Fatalf("err = %v", err)
 	}
 	if !exists(filepath.Join(e.data, "agentbus.db")) || !exists(e.cfgPath) {
@@ -233,8 +239,16 @@ func TestPurgeDryRun(t *testing.T) {
 	if !strings.Contains(out, "would delete:") {
 		t.Errorf("out=%q", out)
 	}
-	if after := snapshot(t, e.home); len(after) != len(before) {
-		t.Error("dry run changed files")
+	for _, want := range []string{
+		"  " + e.data + " (the directory, if left empty)",
+		"  " + filepath.Dir(e.cfgPath) + " (the directory, if left empty)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run output missing %q:\n%s", want, out)
+		}
+	}
+	if after := snapshot(t, e.home); !maps.Equal(after, before) {
+		t.Errorf("dry run changed files:\nbefore=%v\nafter=%v", before, after)
 	}
 }
 
@@ -272,7 +286,7 @@ func TestPurgeSkippedAfterHarnessError(t *testing.T) {
 	e.seed(t, false)
 	e.writeFile(t, filepath.Join(e.home, ".claude", "settings.json"), "{")
 	_, err := e.run(t, e.opts("yes\n"))
-	if err == nil || errors.Is(err, ErrPurgeCancelled) || errors.Is(err, ErrPurgeRefused) {
+	if err == nil || errors.Is(err, ErrPurgeCanceled) || errors.Is(err, ErrPurgeRefused) {
 		t.Fatalf("err = %v, want the settings.json error", err)
 	}
 	if !exists(filepath.Join(e.data, "agentbus.db")) || !exists(e.cfgPath) {
@@ -359,7 +373,13 @@ func (e *purgeEnv) decoy(t *testing.T) string {
 	d := filepath.Join(e.home, ".local", "share", "agentbus")
 	e.writeFile(t, filepath.Join(d, "agentbus.db"), "x")
 	e.writeFile(t, filepath.Join(d, "agentbus.log"), "x")
-	e.writeFile(t, filepath.Join(e.home, "AppData", "Local", "agentbus", "agentbus.log"), "x")
+	// The default data directory as config resolves it on this OS (on
+	// Windows %LOCALAPPDATA%\agentbus, and newPurgeEnv sets that to home).
+	def := config.Default().DataDirectory
+	if rest, ok := strings.CutPrefix(def, "~/"); ok {
+		def = filepath.Join(e.home, rest)
+	}
+	e.writeFile(t, filepath.Join(def, "agentbus.log"), "x")
 	return d
 }
 
@@ -383,7 +403,7 @@ func TestPurgeExplicitMissingConfigTouchesNothing(t *testing.T) {
 		if !strings.Contains(out, "already removed: "+missing) || strings.Contains(out, "Type yes") {
 			t.Errorf("viaEnv=%v out=%q", viaEnv, out)
 		}
-		if !exists(filepath.Join(d, "agentbus.db")) || len(snapshot(t, e.home)) != len(before) {
+		if !exists(filepath.Join(d, "agentbus.db")) || !maps.Equal(snapshot(t, e.home), before) {
 			t.Errorf("viaEnv=%v: default bus touched", viaEnv)
 		}
 	}
@@ -571,15 +591,16 @@ func (r *registerThenYes) Read(p []byte) (int, error) {
 	return copy(p, "yes\n"), io.EOF
 }
 
-func TestPurgeBinaryPointerPrintedWhenRefusedOrCancelled(t *testing.T) {
+func TestPurgeBinaryPointerPrintedWhenRefusedOrCanceled(t *testing.T) {
 	e := newPurgeEnv(t)
 	e.seed(t, false)
 	out, err := e.run(t, e.opts(""))
-	if !errors.Is(err, ErrPurgeCancelled) {
+	if !errors.Is(err, ErrPurgeCanceled) {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(out), strings.TrimSpace(out[strings.Index(out, e.home+string(filepath.Separator)+"agentbus"):])) || !strings.Contains(out, "still installed") {
-		t.Errorf("cancel: out=%q", out)
+	want := binaryPointer(runtime.GOOS, fakeExe(filepath.Join(e.home, "agentbus")))
+	if !strings.HasSuffix(strings.TrimSpace(out), want) || !strings.Contains(want, "still installed") {
+		t.Errorf("cancel: out=%q, want it to end with %q", out, want)
 	}
 	e.writeFile(t, e.cfgPath, "{")
 	out, err = e.run(t, e.opts("yes\n"))

@@ -446,14 +446,14 @@ func TestBinaryPointerUnix(t *testing.T) {
 }
 
 func TestBinaryPointerWindows(t *testing.T) {
-	got := binaryPointer("windows", fakeExe(`C:\tools\agentbus.exe`))
+	got := binaryPointer("windows", fakeExe(`C:\Program Files\agentbus\agentbus.exe`))
 	for _, w := range []string{pointerAdvice, "remove ", "from your user PATH", "install.ps1"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in %q", w, got)
 		}
 	}
-	if !strings.Contains(got, filepath.Dir(`C:\tools\agentbus.exe`)) {
-		t.Errorf("missing directory in %q", got)
+	if want := `remove C:\Program Files\agentbus from your user PATH`; !strings.Contains(got, want) {
+		t.Errorf("missing %q in %q", want, got)
 	}
 }
 

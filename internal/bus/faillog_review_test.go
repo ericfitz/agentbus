@@ -116,7 +116,7 @@ func TestEmbedFailureCancelledNotLoggedDeadlineLogged(t *testing.T) {
 	cancel()
 	b.logEmbedFailure(ctx, fmt.Errorf("x"), []int64{1})
 	if n := len(h.records()); n != 0 {
-		t.Fatalf("cancelled ctx logged %d records", n)
+		t.Fatalf("canceled ctx logged %d records", n)
 	}
 	dctx, dcancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer dcancel()

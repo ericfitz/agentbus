@@ -63,7 +63,7 @@ func DeleteChannel(cfg config.Config, cwd, name string, yes bool, in io.Reader, 
 			return readErr
 		}
 		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
-			return errors.New("delete cancelled")
+			return errors.New("delete canceled")
 		}
 	}
 	ch, err := b.DeleteChannel(name, "")

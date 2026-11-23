@@ -40,8 +40,12 @@ func snapshot(t *testing.T, home string) map[string]string {
 	t.Helper()
 	m := map[string]string{}
 	err := filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
 			return err
+		}
+		if d.IsDir() { // a directory a run removed or created must show
+			m[p+"/"] = "dir"
+			return nil
 		}
 		body, err := os.ReadFile(p)
 		if err != nil {

@@ -110,6 +110,14 @@ func TestPurgeYesDeletesEverything(t *testing.T) {
 	if exists(e.data) || exists(e.cfgPath) || exists(filepath.Dir(e.cfgPath)) {
 		t.Errorf("data or config survived:\n%s", out)
 	}
+	for _, want := range []string{
+		"  " + e.data + " (the directory, if left empty)",
+		"  " + filepath.Dir(e.cfgPath) + " (the directory, if left empty)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt list missing %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestPurgeEOFCancels(t *testing.T) {
@@ -603,7 +611,7 @@ func TestPurgeBinaryPointerPrintedWhenRefusedOrCanceled(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	want := binaryPointer(runtime.GOOS, fakeExe(filepath.Join(e.home, "agentbus")))
-	if !strings.HasSuffix(strings.TrimSpace(out), want) || !strings.Contains(want, "still installed") {
+	if !strings.HasSuffix(strings.TrimSpace(out), want) || !strings.Contains(out, "still installed") {
 		t.Errorf("cancel: out=%q, want it to end with %q", out, want)
 	}
 	e.writeFile(t, e.cfgPath, "{")

@@ -106,6 +106,9 @@ func (in *initer) purge(o UninstallOptions) error {
 	if cfgExists {
 		in.say("  %s", cfgPath)
 	}
+	for _, d := range in.emptyDirCandidates(dataDir, cfgPath) {
+		in.say("  %s (the directory, if left empty)", d)
+	}
 	_, _ = fmt.Fprint(in.out, "Type yes to continue: ")
 	line, readErr := bufio.NewReader(o.In).ReadString('\n')
 	if readErr != nil && readErr != io.EOF {

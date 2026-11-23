@@ -172,12 +172,12 @@ agentbus install
 (`agentbus init` is retired: it prints the two replacements and exits 2.)
 
 For each harness it finds (`~/.claude`, `~/.codex`, or `~/.grok` exists), it
-registers the MCP server through the harness's own CLI (`claude mcp add -s user`,
-`codex mcp add`, `grok mcp add --scope user`), merges an `agentbus identity`
-SessionStart hook, an `agentbus stop-hook` Stop hook, an `agentbus unpark` UserPromptSubmit hook (ADR 0025), and (Claude Code only) an
-`agentbus subagent-hook` SubagentStart hook (backing the file up
-to `.bak` first), and installs the `using-agentbus` skill. Hook and skill
-paths:
+registers the MCP server through the harness's own CLI (`claude mcp add -s
+user`, `codex mcp add`, `grok mcp add --scope user`), merges an `agentbus
+identity` SessionStart hook, an `agentbus stop-hook` Stop hook, an `agentbus
+unpark` UserPromptSubmit hook (ADR 0025), and (Claude Code only) an `agentbus
+subagent-hook` SubagentStart hook (backing the file up to `.bak` first), and
+installs the `using-agentbus` skill. Hook and skill paths:
 
 | Harness | Hooks | Skill |
 |---------|-------|-------|
@@ -288,6 +288,16 @@ is listed and left alone. If you name a config with `--config` or
 removed and never falls back to the default data directory (only
 `AGENTBUS_DATA_DIR` can then name one). When nothing is left to delete it says
 so and exits 0 without asking.
+
+`--purge` does not run when a harness step failed (for example a hook file
+that does not parse): fix that first, then rerun.
+
+`uninstall` never deletes the binary it is running from. It ends by printing
+the binary's path and how to remove it: `brew uninstall agentbus` or `winget
+uninstall ericfitz.agentbus` if you installed it that way, otherwise delete
+the file (on Windows it also says to remove the binary's directory from your
+user PATH if `install.ps1` put it there). The path is printed even when
+`--purge` refuses or is canceled.
 
 The sections below describe what `install` and `config` set up, for doing it by hand.
 

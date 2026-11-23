@@ -110,7 +110,10 @@ agentbus install
 --purge` also deletes the config file and the bus data, but refuses while any
 session is live or when it cannot verify that none is, asks you to type `yes`,
 and deletes only agentbus's own entries in the data directory (then the
-directory, if empty). See the
+directory, if empty). `--purge` does not run when a harness step failed (fix
+that first, then rerun). `uninstall` never deletes the binary: it ends by
+printing the binary's path and how to remove it (`brew uninstall agentbus`,
+`winget uninstall ericfitz.agentbus`, or delete the file). See the
 [install guide](docs/install.md#removing-agentbus-from-a-harness-agentbus-uninstall).
 
 And once inside each repository, to write its identity file and create its

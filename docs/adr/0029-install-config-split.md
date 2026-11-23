@@ -17,9 +17,9 @@ The design is `docs/superpowers/specs/2026-11-22-install-config-split-design.md`
 
 1. `init --global` becomes `agentbus install`. The per-repository `init`
    becomes `agentbus config`. Reason: "init" is ambiguous.
-2. `agentbus init` is not kept as an alias. agentbus is released (v1.20.0 on
-   Homebrew, winget and the install scripts, all of which print
-   `agentbus init`), so `init` exits 2 with a message naming both
+2. `agentbus init` is not kept as an alias. agentbus is released (v1.20.0 is
+   published on Homebrew and winget, and the install scripts, the Homebrew
+   caveats and the Windows zip README all tell users to run `agentbus init`), so `init` exits 2 with a message naming both
    replacements instead of a bare usage error.
 3. `agentbus uninstall --purge` also deletes the config file and the data
    directory (the shared bus database: every repository's messages,

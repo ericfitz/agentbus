@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -480,14 +481,24 @@ func TestUninstallNoHarnessStillPrintsPointer(t *testing.T) {
 }
 
 func TestUninstallPointerComesLast(t *testing.T) {
-	home, f := installAll(t)
-	o := uninstallOpts(home, f)
-	o.Executable = fakeExe(filepath.Join(home, "agentbus"))
-	var out bytes.Buffer
-	if err := Uninstall(o, &out); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(out.String()); !strings.HasSuffix(got, pointerAdvice) {
-		t.Errorf("pointer is not last: %q", got)
+	for _, osName := range []string{"", "linux", "windows"} { // "" is the host OS
+		t.Run("os="+osName, func(t *testing.T) {
+			home, f := installAll(t)
+			o := uninstallOpts(home, f)
+			o.OS = osName
+			o.Executable = fakeExe(filepath.Join(home, "agentbus"))
+			var out bytes.Buffer
+			if err := Uninstall(o, &out); err != nil {
+				t.Fatal(err)
+			}
+			effective := osName
+			if effective == "" {
+				effective = runtime.GOOS
+			}
+			want := binaryPointer(effective, o.Executable)
+			if got := strings.TrimSpace(out.String()); !strings.HasSuffix(got, want) {
+				t.Errorf("output does not end with the full pointer %q: %q", want, got)
+			}
+		})
 	}
 }

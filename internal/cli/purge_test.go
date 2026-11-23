@@ -322,7 +322,11 @@ func TestPurgeRefusesWhenDBCannotBeStatted(t *testing.T) {
 
 func TestPurgeDataDirWithGlobCharacters(t *testing.T) {
 	e := newPurgeEnv(t)
-	e.data = filepath.Join(e.home, "d[a]ta*")
+	name := "d[a]ta*"
+	if runtime.GOOS == "windows" {
+		name = "d[a]ta" // * is not a legal Windows filename character
+	}
+	e.data = filepath.Join(e.home, name)
 	body, _ := json.Marshal(map[string]string{"data_directory": e.data})
 	e.writeFile(t, e.cfgPath, string(body))
 	e.seed(t, false)

@@ -294,11 +294,11 @@ that does not parse): fix that first, then rerun.
 
 `uninstall` never deletes the binary it is running from. Once the harness steps
 succeed it prints (after any `--purge` output, whatever its result) the binary's
-path, when it can determine it, and how to remove it: `brew uninstall agentbus` or `winget
-uninstall ericfitz.agentbus` if you installed it that way, otherwise delete
-the file (on Windows it also says to remove the binary's directory from your
-user PATH if `install.ps1` put it there). It is not printed when a harness
-step fails.
+path, when it can determine it, and how to remove it: `brew uninstall agentbus`
+or `winget uninstall ericfitz.agentbus` if you installed it that way,
+otherwise delete the file (on Windows it also says to remove the binary's
+directory from your user PATH if `install.ps1` put it there). It is not printed
+when a harness step fails.
 
 The sections below describe what `install` and `config` set up, for doing it by hand.
 

@@ -19,8 +19,8 @@ import (
 // live session; nothing was deleted.
 var ErrPurgeRefused = errors.New("purge refused")
 
-// ErrPurgeCancelled means the answer was not exactly "yes"; nothing was deleted.
-var ErrPurgeCancelled = errors.New("purge cancelled")
+// ErrPurgeCanceled means the answer was not exactly "yes"; nothing was deleted.
+var ErrPurgeCanceled = errors.New("purge canceled")
 
 // dataFiles are the files agentbus writes directly in the data directory;
 // dataDirs are the subdirectories it owns. The log's rotations
@@ -82,6 +82,9 @@ func (in *initer) purge(o UninstallOptions) error {
 		if cfgExists {
 			in.say("  %s", cfgPath)
 		}
+		for _, d := range in.emptyDirCandidates(dataDir, cfgPath) {
+			in.say("  %s (the directory, if left empty)", d)
+		}
 		return nil
 	}
 	if err := in.ensureIdle(o, cfg, cfgPath, dataDir); err != nil {
@@ -109,8 +112,7 @@ func (in *initer) purge(o UninstallOptions) error {
 		return readErr
 	}
 	if strings.TrimSpace(line) != "yes" {
-		in.say("purge cancelled")
-		return ErrPurgeCancelled
+		return ErrPurgeCanceled
 	}
 	// The prompt can wait without limit: a session may have started.
 	if err := in.ensureIdle(o, cfg, cfgPath, dataDir); err != nil {
@@ -120,6 +122,26 @@ func (in *initer) purge(o UninstallOptions) error {
 		return in.refuse(o, cfgPath, dataDir, err)
 	}
 	return in.deleteData(dataDir, targets, cfgPath, cfgExists)
+}
+
+// emptyDirCandidates lists the directories a real run removes when nothing
+// else is left in them: the data directory, then the config file's directory
+// when it is a different one. Only existing real directories count.
+func (in *initer) emptyDirCandidates(dataDir, cfgPath string) []string {
+	var dirs []string
+	if dataDir != "" {
+		dirs = append(dirs, dataDir)
+	}
+	if cfgDir := filepath.Dir(cfgPath); filepath.Clean(cfgDir) != filepath.Clean(dataDir) {
+		dirs = append(dirs, cfgDir)
+	}
+	var found []string
+	for _, d := range dirs {
+		if fi, err := os.Lstat(d); err == nil && fi.IsDir() {
+			found = append(found, d)
+		}
+	}
+	return found
 }
 
 // sayNothing reports that there is nothing to delete.
@@ -173,6 +195,9 @@ func (in *initer) refuse(o UninstallOptions, cfgPath, dataDir string, cause erro
 // checkIdle opens the existing database and refuses while a session is live.
 // It closes the bus before returning so the files can be deleted.
 func (in *initer) checkIdle(cfg config.Config) error {
+	// Opening may migrate an older database, as any agentbus command would.
+	// That is harmless: the user is about to delete it, and a canceled purge
+	// leaves a normally upgraded database.
 	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		return err

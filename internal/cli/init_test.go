@@ -631,6 +631,40 @@ func TestConfigRemoveTwice(t *testing.T) {
 	}
 }
 
+// The identity file can vanish between the read and the remove (overlapping
+// runs): that is "already removed", not an error.
+func TestConfigRemoveVanishedBetweenReadAndRemove(t *testing.T) {
+	root, o := repoWithIdentity(t, "widgets")
+	var out bytes.Buffer
+	in := &initer{InitOptions: o, out: &out}
+	in.rm = func(p string) error {
+		_ = os.Remove(p) // the other run wins the race
+		return os.Remove(p)
+	}
+	if err := in.removeRepo(root); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if !strings.Contains(out.String(), "nothing to remove") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+}
+
+// config --remove deletes a file; it needs no agentbus on PATH. Plain config
+// still does.
+func TestConfigRemoveSkipsWindowsPathCheck(t *testing.T) {
+	_, o := repoWithIdentity(t, "widgets")
+	o.OS = "windows"
+	o.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	o.Remove = true
+	if err := Config(o, io.Discard); err != nil {
+		t.Fatalf("--remove: %v", err)
+	}
+	o.Remove = false
+	if err := Config(o, io.Discard); err == nil || !strings.Contains(err.Error(), "not on your PATH") {
+		t.Fatalf("plain config: err = %v, want the PATH refusal", err)
+	}
+}
+
 func TestConfigRemoveMalformed(t *testing.T) {
 	root, o := repoWithIdentity(t, "widgets")
 	idPath := filepath.Join(root, ".local", "agentbus.json")

@@ -151,6 +151,23 @@ func TestUninstallRejectsUnknownHarness(t *testing.T) {
 	}
 }
 
+// TestUnusedConfigFlagRejected: --config means nothing to `uninstall` without
+// --purge, nor to `config --remove`; both are usage errors (exit 2).
+func TestUnusedConfigFlagRejected(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"uninstall", "--config", "x.json"}, "--config applies only with --purge"},
+		{[]string{"config", "--remove", "--config", "x.json"}, "--config is not used by --remove"},
+	} {
+		r := execBin(t, tc.args...)
+		if r.code != 2 || !strings.Contains(r.stderr, tc.want) {
+			t.Errorf("%v: exit %d stderr %q, want exit 2 and %q", tc.args, r.code, r.stderr, tc.want)
+		}
+	}
+}
+
 // TestNoArgsUsageExit0: bare agentbus prints usage like help and exits 0;
 // winget validation runs the executable with no arguments and needs 0.
 func TestNoArgsUsageExit0(t *testing.T) {

@@ -90,6 +90,8 @@ type InitOptions struct {
 	// os.Executable).
 	OS         string
 	Executable func() (string, error)
+
+	rm func(string) error // os.Remove; a test seam
 }
 
 // installPS1 is the Windows installer one-liner; it puts agentbus.exe on the
@@ -136,7 +138,8 @@ func prepare(o InitOptions, out io.Writer, again string) (*initer, error) {
 	if err := validHarness(o.Harness); err != nil {
 		return nil, err
 	}
-	if o.OS == "windows" {
+	// config --remove deletes a file and needs no binary on PATH.
+	if o.OS == "windows" && !o.Remove {
 		if err := requireOnPath(o.LookPath, o.Executable, again); err != nil {
 			return nil, err
 		}
@@ -258,7 +261,11 @@ func (in *initer) remove(path string) error {
 		in.say("  would remove %s", path)
 		return nil
 	}
-	if err := os.Remove(path); err != nil {
+	rm := in.rm
+	if rm == nil {
+		rm = os.Remove
+	}
+	if err := rm(path); err != nil {
 		return err
 	}
 	in.say("  removed %s", path)
@@ -451,7 +458,11 @@ func (in *initer) removeRepo(root string) error {
 		in.say("nothing to remove: %s does not exist", idPath)
 		return nil
 	}
-	if err := in.remove(idPath); err != nil {
+	if err := in.remove(idPath); errors.Is(err, os.ErrNotExist) {
+		// An overlapping run removed it between the read and the remove.
+		in.say("nothing to remove: %s does not exist", idPath)
+		return nil
+	} else if err != nil {
 		return err
 	}
 	in.say("the repository's channels general/%s and memory/%s stay on the bus; delete them with agentbus delete-channel", name, name)

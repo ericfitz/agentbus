@@ -92,7 +92,7 @@ func binaryPointer(osName string, exe func() (string, error)) string {
 		if r, err := filepath.EvalSymlinks(p); err == nil {
 			p = r
 		}
-		dir = filepath.Dir(p)
+		dir = dirOf(osName, p)
 		b.WriteString(p + "\n")
 	}
 	b.WriteString("the agentbus binary is still installed; if you installed it with Homebrew (brew uninstall agentbus) or winget (winget uninstall ericfitz.agentbus), use that, otherwise delete the file")
@@ -103,6 +103,22 @@ func binaryPointer(osName string, exe func() (string, error)) string {
 		b.WriteString("\nif install.ps1 put it on your PATH, remove " + dir + " from your user PATH")
 	}
 	return b.String()
+}
+
+// dirOf is the directory of p. For a Windows path it splits at either
+// separator, so the result does not depend on the OS running this code.
+func dirOf(osName, p string) string {
+	if osName != "windows" {
+		return filepath.Dir(p)
+	}
+	i := strings.LastIndexAny(p, `/\`)
+	if i < 0 {
+		return "."
+	}
+	if i == 0 || p[i-1] == ':' {
+		return p[:i+1]
+	}
+	return p[:i]
 }
 
 // uninstall reverses install for one harness. The hook file is parsed before

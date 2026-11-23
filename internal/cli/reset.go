@@ -40,7 +40,7 @@ func Reset(cfg config.Config, in io.Reader, out io.Writer) error {
 		return readErr
 	}
 	if strings.TrimSpace(line) != "yes" {
-		return errors.New("reset cancelled")
+		return errors.New("reset canceled")
 	}
 	if err := b.Reset(); err != nil {
 		return err

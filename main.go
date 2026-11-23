@@ -133,6 +133,10 @@ func run(cmd string, args []string) int {
 		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
+		if o.Remove && *path != "" {
+			fmt.Fprintln(os.Stderr, "agentbus config: --config is not used by --remove (it never opens the bus)")
+			return 2
+		}
 		// Check the repository first so a broken bus configuration cannot
 		// hide the not-in-repo error, and skip the bus configuration for
 		// --remove, which never opens the bus.
@@ -167,7 +171,10 @@ func run(cmd string, args []string) int {
 		if err := parseFlags(fs, args); err != nil {
 			return parseExit(err)
 		}
-		o.In = os.Stdin
+		if o.ConfigPath != "" && !o.Purge {
+			fmt.Fprintln(os.Stderr, "agentbus uninstall: --config applies only with --purge")
+			return 2
+		}
 		if err := cli.Uninstall(o, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 1

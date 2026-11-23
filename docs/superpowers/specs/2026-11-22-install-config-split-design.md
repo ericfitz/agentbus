@@ -51,6 +51,12 @@ write (other hooks, other MCP servers, agentmesh files).
    error, and prints the config file and data directory paths (the defaults
    when the config does not parse) for the user to delete by hand after
    closing the harnesses. It never deletes what it could not verify is idle.
+7. When `--config` or `AGENTBUS_CONFIG` names a config file that does not
+   exist, `--purge` never falls back to the default data directory (a second
+   run after an explicit-config purge, or a stale path, must not reach a bus
+   the user did not name). It reports `already removed: <path>` for the
+   config, purges a data directory only when `AGENTBUS_DATA_DIR` names one,
+   and exits 0. With no explicit config, the defaults are targeted as before.
 
 ## Approaches
 
@@ -133,7 +139,11 @@ deleted).
 1. Load the config the way every other command does (`--config`,
    `AGENTBUS_CONFIG`, default path; `AGENTBUS_DATA_DIR` applies) to find the
    config file path and the data directory. If loading fails, refuse per
-   decision 6.
+   decision 6. If an explicit config (`--config` or `AGENTBUS_CONFIG`) does
+   not exist, apply decision 7: report it as already removed and use no data
+   directory unless `AGENTBUS_DATA_DIR` names one. If there is then nothing
+   to delete (no listed entries, no config file), say so and exit 0 without
+   prompting; `--dry-run` says the same.
 2. If the data directory exists and holds a bus database, open it and call
    `LiveSessionCount`; if opening fails, refuse per decision 6. If it is above zero, print
    `uninstall: N live agentbus session(s); close or restart every harness, then run agentbus uninstall --purge again`

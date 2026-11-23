@@ -23,16 +23,35 @@ var ErrPurgeRefused = errors.New("purge refused")
 var ErrPurgeCancelled = errors.New("purge cancelled")
 
 // dataFiles are the files agentbus writes directly in the data directory;
-// dataDirs are the subdirectories it owns. agentbus.log.* (rotations and the
-// lock file) is matched by prefix over the directory listing.
+// dataDirs are the subdirectories it owns. The log's rotations
+// (agentbus.log.<digits>) are matched by isLogRotation.
 var (
-	dataFiles = []string{"agentbus.db", "agentbus.db-wal", "agentbus.db-shm", "agentbus.db-journal", "agentbus.log"}
+	dataFiles = []string{"agentbus.db", "agentbus.db-wal", "agentbus.db-shm", "agentbus.db-journal", "agentbus.log", "agentbus.log.lock"}
 	dataDirs  = []string{"park", "wait"}
 )
+
+// isLogRotation reports whether name is agentbus.log.<digits>, the only
+// rotated names the log writer makes.
+func isLogRotation(name string) bool {
+	rest, ok := strings.CutPrefix(name, "agentbus.log.")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 // purge deletes the config file and the bus data, but only after verifying no
 // session is live and the user typed yes. It deletes only what agentbus
 // wrote and removes a directory only when it is empty.
+//
+// An explicitly named config (--config or AGENTBUS_CONFIG) that does not exist
+// never falls back to the default data directory (decision 7): only
+// AGENTBUS_DATA_DIR can then name a data directory.
 func (in *initer) purge(o UninstallOptions) error {
 	cfg, cfgPath, err := config.Load(o.ConfigPath)
 	if err != nil {
@@ -42,10 +61,19 @@ func (in *initer) purge(o UninstallOptions) error {
 	if _, err := os.Lstat(cfgPath); err == nil {
 		cfgExists = true
 	}
+	explicit := o.ConfigPath != "" || os.Getenv("AGENTBUS_CONFIG") != ""
+	dataDir := cfg.DataDirectory
+	if explicit && !cfgExists && os.Getenv("AGENTBUS_DATA_DIR") == "" {
+		dataDir = ""
+	}
 	if in.DryRun {
-		targets, err := purgeTargets(cfg.DataDirectory)
+		targets, err := purgeTargets(dataDir)
 		if err != nil {
-			return in.refuse(o, cfgPath, cfg.DataDirectory, err)
+			return in.refuse(o, cfgPath, dataDir, err)
+		}
+		if len(targets) == 0 && !cfgExists {
+			in.sayNothing(explicit, cfgPath)
+			return nil
 		}
 		in.say("would delete:")
 		for _, t := range targets {
@@ -56,21 +84,17 @@ func (in *initer) purge(o UninstallOptions) error {
 		}
 		return nil
 	}
-	db := filepath.Join(cfg.DataDirectory, "agentbus.db")
-	if _, err := os.Stat(db); err == nil {
-		if err := in.checkIdle(cfg); err != nil {
-			if errors.Is(err, ErrPurgeRefused) {
-				return err
-			}
-			return in.refuse(o, cfgPath, cfg.DataDirectory, err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return in.refuse(o, cfgPath, cfg.DataDirectory, err)
+	if err := in.ensureIdle(o, cfg, cfgPath, dataDir); err != nil {
+		return err
 	}
 	// After the liveness check: opening the bus can create -wal and -shm.
-	targets, err := purgeTargets(cfg.DataDirectory)
+	targets, err := purgeTargets(dataDir)
 	if err != nil {
-		return in.refuse(o, cfgPath, cfg.DataDirectory, err)
+		return in.refuse(o, cfgPath, dataDir, err)
+	}
+	if len(targets) == 0 && !cfgExists {
+		in.sayNothing(explicit, cfgPath)
+		return nil
 	}
 	in.say("this deletes:")
 	for _, t := range targets {
@@ -78,9 +102,6 @@ func (in *initer) purge(o UninstallOptions) error {
 	}
 	if cfgExists {
 		in.say("  %s", cfgPath)
-	}
-	if len(targets) == 0 && !cfgExists {
-		in.say("  (nothing: already removed)")
 	}
 	_, _ = fmt.Fprint(in.out, "Type yes to continue: ")
 	line, readErr := bufio.NewReader(o.In).ReadString('\n')
@@ -91,18 +112,41 @@ func (in *initer) purge(o UninstallOptions) error {
 		in.say("purge cancelled")
 		return ErrPurgeCancelled
 	}
-	if err := in.deleteData(cfg.DataDirectory, targets); err != nil {
+	// The prompt can wait without limit: a session may have started.
+	if err := in.ensureIdle(o, cfg, cfgPath, dataDir); err != nil {
 		return err
 	}
-	if !cfgExists {
+	if targets, err = purgeTargets(dataDir); err != nil {
+		return in.refuse(o, cfgPath, dataDir, err)
+	}
+	return in.deleteData(dataDir, targets, cfgPath, cfgExists)
+}
+
+// sayNothing reports that there is nothing to delete.
+func (in *initer) sayNothing(explicit bool, cfgPath string) {
+	if explicit {
 		in.say("already removed: %s", cfgPath)
+	}
+	in.say("nothing to remove: no config file or bus data found")
+}
+
+// ensureIdle verifies, when the database exists, that no session is live.
+func (in *initer) ensureIdle(o UninstallOptions, cfg config.Config, cfgPath, dataDir string) error {
+	if dataDir == "" {
 		return nil
 	}
-	if err := os.Remove(cfgPath); err != nil {
-		return err
+	_, err := os.Stat(filepath.Join(dataDir, "agentbus.db"))
+	switch {
+	case err == nil:
+		if err := in.checkIdle(cfg); err != nil {
+			if errors.Is(err, ErrPurgeRefused) {
+				return err
+			}
+			return in.refuse(o, cfgPath, dataDir, err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return in.refuse(o, cfgPath, dataDir, err)
 	}
-	in.say("removed %s", cfgPath)
-	_ = os.Remove(filepath.Dir(cfgPath)) // keep it silently when it is not empty
 	return nil
 }
 
@@ -114,6 +158,9 @@ func (in *initer) refuse(o UninstallOptions, cfgPath, dataDir string, cause erro
 	}
 	if dataDir == "" {
 		dataDir = config.Default().DataDirectory
+		if d := os.Getenv("AGENTBUS_DATA_DIR"); d != "" {
+			dataDir = d
+		}
 		if rest, ok := strings.CutPrefix(dataDir, "~/"); ok {
 			dataDir = filepath.Join(o.Home, rest)
 		}
@@ -147,6 +194,9 @@ func (in *initer) checkIdle(cfg config.Config) error {
 // purgeTargets lists the paths agentbus wrote in dir that exist. A missing
 // dir has none. File entries that are directories are not agentbus's.
 func purgeTargets(dir string) ([]string, error) {
+	if dir == "" {
+		return nil, nil
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -162,7 +212,7 @@ func purgeTargets(dir string) ([]string, error) {
 			if e.IsDir() {
 				found = append(found, filepath.Join(dir, n))
 			}
-		case slices.Contains(dataFiles, n), strings.HasPrefix(n, "agentbus.log."):
+		case slices.Contains(dataFiles, n), isLogRotation(n):
 			if !e.IsDir() {
 				found = append(found, filepath.Join(dir, n))
 			}
@@ -171,18 +221,68 @@ func purgeTargets(dir string) ([]string, error) {
 	return found, nil
 }
 
-// deleteData removes targets, then the data directory if nothing else is in
-// it; otherwise it lists what it kept.
-func (in *initer) deleteData(dir string, targets []string) error {
+// deleteData removes targets, then the config file, then the data and config
+// directories when nothing else is in them; a data directory that holds other
+// files is kept and they are listed. A path that is already gone is reported,
+// not an error, and a symbolic link is never unlinked in place of a directory.
+func (in *initer) deleteData(dataDir string, targets []string, cfgPath string, cfgExists bool) error {
 	for _, p := range targets {
-		rm := os.Remove
-		if slices.Contains(dataDirs, filepath.Base(p)) {
-			rm = os.RemoveAll
-		}
-		if err := rm(p); err != nil {
+		if err := in.removePath(p, slices.Contains(dataDirs, filepath.Base(p))); err != nil {
 			return err
 		}
+	}
+	if cfgExists {
+		if err := in.removePath(cfgPath, false); err != nil {
+			return err
+		}
+	} else {
+		in.say("already removed: %s", cfgPath)
+	}
+	if dataDir != "" {
+		if err := in.removeDataDir(dataDir); err != nil {
+			return err
+		}
+	}
+	if cfgDir := filepath.Dir(cfgPath); filepath.Clean(cfgDir) != filepath.Clean(dataDir) {
+		if fi, err := os.Lstat(cfgDir); err == nil && fi.IsDir() {
+			_ = os.Remove(cfgDir) // keep it silently when it is not empty
+		}
+	}
+	return nil
+}
+
+// removePath deletes one file (or, when all is set, a directory tree).
+func (in *initer) removePath(p string, all bool) error {
+	rm := os.Remove
+	if all {
+		rm = os.RemoveAll
+	}
+	err := rm(p)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		in.say("already removed: %s", p)
+	case err != nil:
+		return err
+	default:
 		in.say("removed %s", p)
+	}
+	return nil
+}
+
+// removeDataDir removes dir when it is an empty real directory; otherwise it
+// lists what it kept.
+func (in *initer) removeDataDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		in.say("already removed: %s", dir)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		in.say("kept %s: it is a symbolic link, not a directory", dir)
+		return nil
 	}
 	if err := os.Remove(dir); err == nil {
 		in.say("removed %s", dir)

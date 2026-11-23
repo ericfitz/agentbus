@@ -34,6 +34,12 @@ The design is `docs/superpowers/specs/2026-11-22-install-config-split-design.md`
    error, and prints the config file and data directory paths (the defaults
    when the config does not parse) for the user to delete by hand after
    closing the harnesses. It never deletes what it could not verify is idle.
+7. When `--config` or `AGENTBUS_CONFIG` names a config file that does not
+   exist, `--purge` never falls back to the default data directory (a second
+   run after an explicit-config purge, or a stale path, must not reach a bus
+   the user did not name). It reports `already removed: <path>` for the
+   config, purges a data directory only when `AGENTBUS_DATA_DIR` names one,
+   and exits 0. With no explicit config, the defaults are targeted as before.
 
 ## Consequences
 

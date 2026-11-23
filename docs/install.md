@@ -283,7 +283,11 @@ delete by hand after closing the harnesses. Otherwise it lists the paths and ask
 to type `yes`. It deletes only the entries agentbus itself writes in the data
 directory (the database and its sidecar files, the log and its rotations,
 `park/` and `wait/`), then the directory if it is empty; anything else there
-is listed and left alone.
+is listed and left alone. If you name a config with `--config` or
+`AGENTBUS_CONFIG` and the file does not exist, it reports the file as already
+removed and never falls back to the default data directory (only
+`AGENTBUS_DATA_DIR` can then name one). When nothing is left to delete it says
+so and exits 0 without asking.
 
 The sections below describe what `install` and `config` set up, for doing it by hand.
 

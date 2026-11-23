@@ -75,13 +75,12 @@ func Uninstall(o UninstallOptions, out io.Writer) error {
 	} else {
 		in.say("%s", in.noHarnessMessage())
 	}
+	var purgeErr error
 	if o.Purge {
-		if err := in.purge(o); err != nil {
-			return err
-		}
+		purgeErr = in.purge(o)
 	}
 	in.say("%s", binaryPointer(o.OS, o.Executable))
-	return nil
+	return purgeErr
 }
 
 // binaryPointer says where the agentbus binary is and how to remove it:

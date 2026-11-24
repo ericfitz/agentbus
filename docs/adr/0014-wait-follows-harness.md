@@ -32,6 +32,10 @@ one identity.
   watch is skipped.
 - **Pid reuse guard.** The harness is recorded as pid plus process start
   time; it counts as alive only while both match.
+- **Lookup errors (clarified 2026-11-23, drafted by Claude).** The watcher
+  exits 4 only when the process table says the harness is gone or its pid
+  now has a different start time. A lookup that fails for any other reason
+  is not proof of exit; the watcher keeps polling.
 - **Polling.** A watcher checks every 2 seconds. kqueue `NOTE_EXIT` on macOS
   and pidfd on Linux would be faster and are deferred as an optimization.
 - **Opt out.** `-no-harness-watch` keeps the wait running without its

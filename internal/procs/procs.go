@@ -46,3 +46,18 @@ func Alive(t Table, r Ref) bool {
 	}
 	return r.Start == 0 || start == 0 || start == r.Start
 }
+
+// Gone reports whether r's process is known to have exited: the process
+// table says so (ErrGone), or the pid now belongs to a different
+// incarnation. Unlike !Alive, a lookup that fails for any other reason is
+// not proof of exit, so Gone returns false and the caller asks again later.
+func Gone(t Table, r Ref) bool {
+	if r.Pid <= 0 {
+		return true
+	}
+	start, err := t.StartTime(r.Pid)
+	if err != nil {
+		return errors.Is(err, ErrGone)
+	}
+	return r.Start != 0 && start != 0 && start != r.Start
+}

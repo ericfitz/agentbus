@@ -28,6 +28,9 @@ func TestSystemSelf(t *testing.T) {
 	if !Alive(System, Ref{Pid: pid}) {
 		t.Fatal("start 0 matches any incarnation")
 	}
+	if Gone(System, Ref{pid, start}) {
+		t.Fatal("self must not be gone")
+	}
 }
 
 func TestSystemGone(t *testing.T) {
@@ -51,6 +54,9 @@ func TestSystemGone(t *testing.T) {
 	_ = cmd.Wait()
 	if Alive(System, Ref{pid, start}) {
 		t.Fatal("killed and reaped process must not be alive")
+	}
+	if !Gone(System, Ref{pid, start}) {
+		t.Fatal("killed and reaped process must be gone")
 	}
 	if _, err := System.Parent(pid); err != ErrGone {
 		t.Fatalf("Parent of gone pid = %v, want ErrGone", err)

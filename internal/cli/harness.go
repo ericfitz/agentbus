@@ -16,8 +16,9 @@ var ErrHarnessGone = errors.New("harness gone")
 // tests do not wait seconds.
 var harnessPollInterval = 2 * time.Second
 
-// watchHarness cancels with ErrHarnessGone once the process h is no longer
-// alive (gone, or its pid reused). It returns when ctx is done.
+// watchHarness cancels with ErrHarnessGone once the process h is known to
+// have exited (gone, or its pid reused). A failed lookup is not proof of
+// exit: it keeps watching. It returns when ctx is done.
 func watchHarness(ctx context.Context, t procs.Table, h procs.Ref, cancel context.CancelCauseFunc) {
 	tick := time.NewTicker(harnessPollInterval)
 	defer tick.Stop()
@@ -26,7 +27,7 @@ func watchHarness(ctx context.Context, t procs.Table, h procs.Ref, cancel contex
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if !procs.Alive(t, h) {
+			if procs.Gone(t, h) {
 				cancel(ErrHarnessGone)
 				return
 			}

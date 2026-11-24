@@ -2,6 +2,7 @@ package procs
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -60,6 +61,39 @@ func TestIsShell(t *testing.T) {
 	} {
 		if got := isShell(name); got != want {
 			t.Errorf("isShell(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// errTable answers StartTime with a fixed result.
+type errTable struct {
+	start int64
+	err   error
+}
+
+func (e errTable) Parent(int) (int, error)      { return 0, e.err }
+func (e errTable) Comm(int) (string, error)     { return "", e.err }
+func (e errTable) StartTime(int) (int64, error) { return e.start, e.err }
+
+func TestGone(t *testing.T) {
+	cases := []struct {
+		name string
+		tbl  errTable
+		ref  Ref
+		want bool
+	}{
+		{"explicit gone", errTable{err: ErrGone}, Ref{10, 5}, true},
+		{"wrapped gone", errTable{err: fmt.Errorf("x: %w", ErrGone)}, Ref{10, 5}, true},
+		{"lookup error is not gone", errTable{err: errors.New("EPERM")}, Ref{10, 5}, false},
+		{"same start", errTable{start: 5}, Ref{10, 5}, false},
+		{"reused pid", errTable{start: 6}, Ref{10, 5}, true},
+		{"unknown remembered start", errTable{start: 6}, Ref{10, 0}, false},
+		{"unknown current start", errTable{start: 0}, Ref{10, 5}, false},
+		{"no pid", errTable{start: 5}, Ref{0, 5}, true},
+	}
+	for _, c := range cases {
+		if got := Gone(c.tbl, c.ref); got != c.want {
+			t.Errorf("%s: Gone = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

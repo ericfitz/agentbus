@@ -2,6 +2,8 @@ module github.com/ericfitz/agentbus
 
 go 1.27
 
+toolchain go1.27.4
+
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10

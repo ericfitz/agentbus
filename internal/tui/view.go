@@ -291,7 +291,7 @@ func statusIcon(tag string) string {
 // (like the gear) and carries U+FE0F for the color glyph; per OS like the
 // gear, see icons_unix.go and icons_windows.go.
 var (
-	taskPending    = "\u274E "     // negative squared cross mark
+	taskPending    = "\u2B1C "     // white large square (not started)
 	taskInProgress = stopwatchIcon // stopwatch
 	taskCompleted  = "\u2705 "     // white heavy check mark
 )

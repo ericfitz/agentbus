@@ -661,9 +661,9 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   retained direct messages show as unread once.
   A `tasks/` channel shows its task tree: subtasks start hidden under
   their parent (`N subtasks`), `→` opens a task's details, then its
-  subtasks, `←` hides its subtasks, then its details; ❎ pending, ⏱️ in
+  subtasks, `←` hides its subtasks, then its details; ⬜ pending, ⏱️ in
   progress (with the owner's name beside it), ✅ completed (dimmed); a
-  blocked task keeps ❎ with `blocked by #n`. You can change tasks that are
+  blocked task keeps ⬜ with `blocked by #n`. You can change tasks that are
   unassigned or yours (the TUI's identity): `space` cycles the selected
   task's state (not started, in progress, completed) as a draft shown in
   the `unsaved` color, `enter` saves it (a move into in progress claims the
@@ -783,7 +783,7 @@ does.
 | `agent` | other senders and sessions | gear | U+EE0D fa-robot |
 | `user` | your own name | adult | U+F007 fa-user |
 | `idle` | an ended session, or a task channel past `task_idle_hours`, in the rail | sleeping symbol | U+F04B2 md-sleep |
-| `task_pending` | a pending or blocked task | ❎ | U+F096 fa-square |
+| `task_pending` | a pending or blocked task | ⬜ | U+F096 fa-square |
 | `task_in_progress` | an in-progress task | stopwatch | U+F152 fa-square-caret-right |
 | `task_completed` | a completed task | ✅ | U+F14A fa-square-check |
 | `collapsed` | selected list item; a thread that can expand | ▶ | U+F0DA fa-caret-right |

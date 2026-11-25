@@ -370,6 +370,22 @@ func TestIconTasksIsWideEmojiWithoutEscapes(t *testing.T) {
 	}
 }
 
+// The pending task mark is the white large square, not the green cross box
+// U+274E (read as "failed" beside the green check). U+2B1C is Wide with
+// emoji presentation: Terminal.app advances two cells for it (measured with
+// CSI 6n, 2026-11-24), so like the check mark it needs no CSI trick.
+func TestTaskPendingIsWideSquareWithoutEscapes(t *testing.T) {
+	if taskPending != "⬜ " {
+		t.Fatalf("taskPending = %q, want white large square", taskPending)
+	}
+	if w, want := lipgloss.Width(taskPending), lipgloss.Width(taskCompleted); w != want {
+		t.Fatalf("taskPending width %d, want %d (same as taskCompleted)", w, want)
+	}
+	if strings.Contains(taskPending, "\x1b[") {
+		t.Fatalf("taskPending must not need the CSI erase trick: %q", taskPending)
+	}
+}
+
 // The channel name carries its kind's color (agent for chat, memory for
 // memory) in the rail and the stream header, as it does in the compose row.
 func TestChannelNameColoredInRailAndHeader(t *testing.T) {

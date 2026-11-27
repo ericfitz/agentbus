@@ -1279,3 +1279,53 @@ func TestRegisterRenameStillRefusesLiveTUIName(t *testing.T) {
 		t.Fatalf("rename onto a live TUI name accepted: %v", out)
 	}
 }
+
+// TestSearchToolTagsOnly (ADR 0031): search takes tags without a query, every
+// tag must match, hits come back newest first, and the input schema no longer
+// requires query.
+func TestSearchToolTagsOnly(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	send := func(content string, tags ...string) {
+		t.Helper()
+		call(t, cs, "send", map[string]any{"as": "Sam", "channel": "general", "content": content, "tags": tags})
+	}
+	send("first", "deployment", "failed")
+	send("second", "deployment")
+	send("third", "deployment", "failed")
+
+	out, res := call(t, cs, "search", map[string]any{"as": "Sam", "tags": []string{"deployment", "failed"}})
+	if res.IsError {
+		t.Fatalf("tags-only search must succeed: %+v", out)
+	}
+	hits, _ := out["hits"].([]any)
+	if len(hits) != 2 {
+		t.Fatalf("want 2 hits carrying both tags, got %+v", out)
+	}
+	got := []any{hits[0].(map[string]any)["content"], hits[1].(map[string]any)["content"]}
+	if got[0] != "third" || got[1] != "first" {
+		t.Fatalf("hits must be newest first: %v", got)
+	}
+
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if tl.Name != "search" {
+			continue
+		}
+		schema, ok := tl.InputSchema.(map[string]any)
+		if !ok {
+			t.Fatalf("search input schema: %T", tl.InputSchema)
+		}
+		req, _ := schema["required"].([]any)
+		for _, r := range req {
+			if r == "query" {
+				t.Fatalf("query must not be required: %v", req)
+			}
+		}
+		return
+	}
+	t.Fatal("search tool not registered")
+}

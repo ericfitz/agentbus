@@ -20,7 +20,8 @@ expression.
    allowed on chat channels, DMs, and memories (per revision; `edit_memory`
    may replace them, omitting `tags` keeps them); not on task lists. Stored in
    a normalized `message_tags(seq, tag)` table indexed on `tag`. `history`
-   and `search` take an any-of `tags` filter.
+   and `search` take a `tags` filter (all of them must match since ADR
+   0031; any-of before).
 2. **Channels stay channels; subscriptions are unified internally (option
    C).** Channels remain the unit of storage, ordering, cursors, rate
    limits, eviction, kind, and the ADR 0004 DM guard. Internally, `receive`

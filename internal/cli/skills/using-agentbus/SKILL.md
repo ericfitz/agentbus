@@ -188,9 +188,9 @@ without reading it. `send` and `edit_memory` take `tags`: up to 10 labels,
 each 1-32 characters of `a-z`, `0-9` and `-`, with at most one `:` between
 other characters, stored lowercase. The bus gives the colon no meaning;
 the vocabulary below uses it to key a dimension (`env:prod`, `area:aws`).
-`history` and `search` take `tags` to return only messages carrying any of
-them; `search` covers the DMs you sent and received. In every filter and
-subscription a tag ending in `*` matches every tag with that prefix:
+`history` and `search` take `tags` to return only messages carrying all of
+them (`search` also takes `tags` without a `query`); `search` covers the
+DMs you sent and received. In every filter and subscription a tag ending in `*` matches every tag with that prefix:
 `env:*` matches `env:prod` and `env:staging`; `env*` also matches `env`
 itself. `*` is valid only last, after at least one character, and never
 in a stored tag. A memory's tags belong to the revision: omit `tags` on

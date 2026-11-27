@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -254,6 +255,138 @@ func TestSearchStarOnlyQueryNeverEmbeds(t *testing.T) {
 			if _, err := b.Search(sam, SearchInput{Query: q, Mode: mode}); err == nil {
 				t.Fatalf("mode %s query %q: want a validation error", mode, q)
 			}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("embedder was called %d times", calls)
+	}
+}
+
+func TestSearchTagsMustAllMatchInEveryMode(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "mem", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "mem", "widget both", "foo", "bar")
+	sendTagged(t, b, sam, "mem", "widget foo", "foo")
+	sendTagged(t, b, sam, "mem", "widget bar", "bar")
+	// Semantic search ranks embedded memory revisions only.
+	b.waitEmbed()
+	if _, err := b.embedBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"text", "semantic", "both"} {
+		r, err := b.Search(sam, SearchInput{Query: "widget", Tags: []string{"foo", "bar"}, Mode: mode})
+		if err != nil || len(r.Hits) != 1 || r.Hits[0].Content != "widget both" {
+			t.Fatalf("mode %s: %+v %v", mode, r.Hits, err)
+		}
+	}
+}
+
+func TestSearchTagsOnly(t *testing.T) {
+	b, sam, kim := setupTwo(t)
+	if _, err := b.CreateChannel(sam, "ops", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	a := sendTagged(t, b, sam, "dev", "one", "deployment", "failed")
+	sendTagged(t, b, sam, "dev", "skip", "deployment")
+	c := sendTagged(t, b, kim, "dev", "two", "deployment", "failed")
+	d := sendTagged(t, b, sam, "ops", "three", "deployment", "failed")
+	e := sendTagged(t, b, sam, "dev", "four", "deployment", "failed")
+	// Reply to a, so Thread=a.Seq matches a and the reply.
+	rep, err := b.Send(kim, SendInput{Channel: "dev", Content: "reply", ReplyTo: &a.Seq, Tags: []string{"deployment", "failed"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another agent's DM inbox: Kim to Lee; Sam must not see it.
+	lee := reg(t, b, "Lee")
+	if _, err := b.Send(kim, SendInput{Channel: DMChannel(lee), Content: "secret", Tags: []string{"deployment", "failed"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A tombstoned match.
+	gone := sendTagged(t, b, sam, "dev", "gone", "deployment", "failed")
+	if _, err := b.db.Exec("UPDATE messages SET tombstone=1 WHERE seq=?", gone.Seq); err != nil {
+		t.Fatal(err)
+	}
+	seqs := func(r SearchResult) []int64 {
+		var out []int64
+		for _, h := range r.Hits {
+			if h.Score != 0 {
+				t.Fatalf("score %v, want 0", h.Score)
+			}
+			out = append(out, h.Seq)
+		}
+		return out
+	}
+	tags := []string{"deployment", "failed"}
+	want := []int64{rep.Seq, e.Seq, d.Seq, c.Seq, a.Seq}
+	r, err := b.Search(sam, SearchInput{Tags: tags})
+	if err != nil || !slices.Equal(seqs(r), want) {
+		t.Fatalf("tags only: %v %v want %v", seqs(r), err, want)
+	}
+	r, err = b.Search(sam, SearchInput{Query: "*", Tags: tags})
+	if err != nil || !slices.Equal(seqs(r), want) {
+		t.Fatalf("star + tags: %v %v", seqs(r), err)
+	}
+	r, err = b.Search(sam, SearchInput{Tags: tags, Count: 1})
+	if err != nil || len(r.Hits) != 1 || r.Next == "" {
+		t.Fatalf("page 1: %+v %v", r, err)
+	}
+	r2, err := b.Search(sam, SearchInput{Tags: tags, Count: 1, Cursor: r.Next})
+	if err != nil || len(r2.Hits) != 1 || r2.Hits[0].Seq != e.Seq {
+		t.Fatalf("page 2: %+v %v", r2, err)
+	}
+	r, _ = b.Search(sam, SearchInput{Tags: tags, Channel: "ops"})
+	if !slices.Equal(seqs(r), []int64{d.Seq}) {
+		t.Fatalf("channel: %v", seqs(r))
+	}
+	r, _ = b.Search(sam, SearchInput{Tags: tags, Sender: "Kim"})
+	if !slices.Equal(seqs(r), []int64{rep.Seq, c.Seq}) {
+		t.Fatalf("sender: %v", seqs(r))
+	}
+	r, _ = b.Search(sam, SearchInput{Tags: tags, Thread: &a.Seq})
+	if !slices.Equal(seqs(r), []int64{rep.Seq, a.Seq}) {
+		t.Fatalf("thread: %v", seqs(r))
+	}
+	wantCode(t, func() error { _, err := b.Search(sam, SearchInput{Tags: tags, Mode: "bogus"}); return err }(), "validation")
+	_, err = b.Search(sam, SearchInput{})
+	wantCode(t, err, "validation")
+	if !strings.Contains(err.Error(), "query is required (or give tags)") {
+		t.Fatalf("message: %v", err)
+	}
+	_, err = b.Search(sam, SearchInput{Query: "*"})
+	wantCode(t, err, "validation")
+	if !strings.Contains(err.Error(), "* alone matches nothing") {
+		t.Fatalf("ADR 0019 error: %v", err)
+	}
+}
+
+func TestSearchTagsOnlyNeverEmbeds(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		t.Errorf("embedder called for a tags-only search: %s", r.URL.Path)
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	sendTagged(t, b, sam, "dev", "x", "foo")
+	for _, mode := range []string{"semantic", "both"} {
+		r, err := b.Search(sam, SearchInput{Tags: []string{"foo"}, Mode: mode})
+		if err != nil || r.SemanticUnavailable || len(r.Hits) != 1 {
+			t.Fatalf("mode %s: %+v %v", mode, r, err)
 		}
 	}
 	mu.Lock()

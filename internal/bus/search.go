@@ -9,7 +9,7 @@ import (
 )
 
 type SearchInput struct {
-	Query   string   `json:"query"`
+	Query   string   `json:"query,omitempty"`
 	Mode    string   `json:"mode,omitempty"`
 	Channel string   `json:"channel,omitempty"`
 	Sender  string   `json:"sender,omitempty"`
@@ -181,16 +181,56 @@ func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, err
 	return hits, nil
 }
 
+// tagsOnlySearch serves a search with tags and no query terms: the live
+// messages matching the filters, newest first, each with Score 0. Search
+// has validated the filters and tags; nothing is embedded.
+func (b *Bus) tagsOnlySearch(as string, in SearchInput, limit int) ([]SearchHit, error) {
+	filters, fargs := b.searchFilters(as, in)
+	q := "SELECT " + messageCols("m") + " FROM messages m WHERE m.tombstone=0" + filters + " ORDER BY m.seq DESC LIMIT ?"
+	rows, err := b.db.Query(q, append(fargs, limit)...)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	hits := []SearchHit{}
+	for rows.Next() {
+		var h SearchHit
+		var meta, tags *string
+		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Subject, &h.Content, &h.ReplyTo, &meta, &h.MemoryID, &h.Revision, &tags); err != nil {
+			return nil, internal(err)
+		}
+		m, err := decodeJSONFields(h.Message, meta)
+		if err != nil {
+			return nil, internal(err)
+		}
+		h.Message = m
+		if tags != nil {
+			h.Tags = strings.Fields(*tags)
+		}
+		hits = append(hits, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return hits, nil
+}
+
 func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return SearchResult{}, err
 	}
-	if strings.TrimSpace(in.Query) == "" {
-		return SearchResult{}, errf("validation", false, "query is required")
+	var err error
+	if in.Tags, err = NormalizeTagPatterns(in.Tags); err != nil {
+		return SearchResult{}, err
 	}
-	// A query of only stars has no term to match or embed (ADR 0019);
-	// refused here, before the mode switch, so semantic mode never embeds it.
-	if len(searchTerms(in.Query)) == 0 {
+	// No terms with tags is a tags-only search (no ranking, never embeds);
+	// without tags a blank query is an error, and a star-only one keeps the
+	// ADR 0019 refusal. Both are decided before the mode switch.
+	tagsOnly := len(searchTerms(in.Query)) == 0
+	if tagsOnly && len(in.Tags) == 0 {
+		if strings.TrimSpace(in.Query) == "" {
+			return SearchResult{}, errf("validation", false, "query is required (or give tags)")
+		}
 		return SearchResult{}, errf("validation", false, "query must contain a word; * alone matches nothing")
 	}
 	if in.Channel != "" && !b.dmReadable(as, in.Channel) {
@@ -211,10 +251,6 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 		}
 		offset = o
 	}
-	var err error
-	if in.Tags, err = NormalizeTagPatterns(in.Tags); err != nil {
-		return SearchResult{}, err
-	}
 	if in.Mode == "" {
 		in.Mode = "text"
 		if b.embedder != nil {
@@ -224,16 +260,21 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	res := SearchResult{}
 	var ranked []SearchHit
 	switch in.Mode {
-	case "text":
+	case "text", "semantic", "both":
+	default:
+		return SearchResult{}, errf("validation", false, "mode must be text, semantic, or both")
+	}
+	switch {
+	case tagsOnly:
+		ranked, err = b.tagsOnlySearch(as, in, searchPageMax)
+	case in.Mode == "text":
 		// ponytail: every page re-runs and re-decodes the full top-1000-candidate
 		// query (searchPageMax), then slices to the requested page in Go; fine
 		// at this ceiling, add real cursor-based paging in SQL if 1000 rows per
 		// call ever shows up in profiling.
 		ranked, err = b.textSearch(as, in, searchPageMax)
-	case "semantic", "both":
-		ranked, res.SemanticUnavailable, err = b.rankedSearch(as, in)
 	default:
-		return SearchResult{}, errf("validation", false, "mode must be text, semantic, or both")
+		ranked, res.SemanticUnavailable, err = b.rankedSearch(as, in)
 	}
 	if err != nil {
 		return SearchResult{}, err

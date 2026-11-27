@@ -162,8 +162,12 @@ func TestSendStoresTagsAndHistorySearchFilter(t *testing.T) {
 		t.Fatalf("receive tags: %+v %v", r.Messages, err)
 	}
 	h, err := b.History(sam, "dev", nil, nil, 10, "docs", "release")
-	if err != nil || len(h) != 2 || h[0].Content != "one" || h[1].Content != "two" {
-		t.Fatalf("history any-of filter: %+v %v", h, err)
+	if err != nil || len(h) != 0 {
+		t.Fatalf("history all-of filter, no message has both: %+v %v", h, err)
+	}
+	h, err = b.History(sam, "dev", nil, nil, 10, "bug", "release")
+	if err != nil || len(h) != 1 || h[0].Content != "one" {
+		t.Fatalf("history all-of filter: %+v %v", h, err)
 	}
 	if h, _ := b.History(sam, "dev", nil, nil, 10); len(h) != 3 || !slices.Equal(h[1].Tags, []string{"docs"}) {
 		t.Fatalf("history returns tags: %+v", h)
@@ -718,8 +722,16 @@ func TestHistoryAndSearchMatchTagPatterns(t *testing.T) {
 		t.Fatalf("env* : %v %v", contents(h), err)
 	}
 	h, err = b.History(sam, "dev", nil, nil, 10, "ENV:prod", "prod")
-	if err != nil || !slices.Equal(contents(h), []string{"prod deploy", "old style"}) {
-		t.Fatalf("mixed exact, lowercased: %v %v", contents(h), err)
+	if err != nil || len(h) != 0 {
+		t.Fatalf("all-of, lowercased: %v %v", contents(h), err)
+	}
+	h, err = b.History(sam, "dev", nil, nil, 10, "deployment", "env:*")
+	if err != nil || !slices.Equal(contents(h), []string{"prod deploy", "staging deploy"}) {
+		t.Fatalf("all-of wildcard: %v %v", contents(h), err)
+	}
+	h, err = b.History(sam, "dev", nil, nil, 10, "deployment", "env:p*")
+	if err != nil || !slices.Equal(contents(h), []string{"prod deploy"}) {
+		t.Fatalf("all-of prefix: %v %v", contents(h), err)
 	}
 	for _, bad := range []string{"env_*", "*", "e*v"} {
 		wantCode(t, func() error { _, err := b.History(sam, "dev", nil, nil, 10, bad); return err }(), "validation")
@@ -735,8 +747,12 @@ func TestHistoryAndSearchMatchTagPatterns(t *testing.T) {
 		t.Fatalf("search prefix: %+v %v", s.Hits, err)
 	}
 	s, err = b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"env:*", "prod"}})
+	if err != nil || len(s.Hits) != 0 {
+		t.Fatalf("search all-of, none: %+v %v", s.Hits, err)
+	}
+	s, err = b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"env:*", "deployment"}})
 	if err != nil || len(s.Hits) != 2 {
-		t.Fatalf("search mixed: %+v %v", s.Hits, err)
+		t.Fatalf("search all-of: %+v %v", s.Hits, err)
 	}
 	wantCode(t, func() error {
 		_, err := b.Search(sam, SearchInput{Query: "deploy", Mode: "text", Tags: []string{"e*v"}})

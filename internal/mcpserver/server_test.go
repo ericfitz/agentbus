@@ -1329,3 +1329,27 @@ func TestSearchToolTagsOnly(t *testing.T) {
 	}
 	t.Fatal("search tool not registered")
 }
+
+// TestHistoryTagsSchemaSaysAll (ADR 0031): the history tags parameter text
+// that MCP clients show says all-of, not any-of.
+func TestHistoryTagsSchemaSaysAll(t *testing.T) {
+	cs := testSession(t)
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if tl.Name != "history" {
+			continue
+		}
+		schema, _ := tl.InputSchema.(map[string]any)
+		props, _ := schema["properties"].(map[string]any)
+		tags, _ := props["tags"].(map[string]any)
+		desc, _ := tags["description"].(string)
+		if strings.Contains(desc, "at least one") || !strings.Contains(desc, "all") {
+			t.Fatalf("history tags description must say all of: %q", desc)
+		}
+		return
+	}
+	t.Fatal("history tool not registered")
+}

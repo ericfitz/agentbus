@@ -75,7 +75,7 @@ type historyIn struct {
 	Before  *int64   `json:"before,omitempty"`
 	After   *int64   `json:"after,omitempty"`
 	Count   int      `json:"count,omitempty"`
-	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying at least one of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying all of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
 }
 type searchIn struct {
 	As string `json:"as,omitempty"`

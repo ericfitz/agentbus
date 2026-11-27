@@ -9,14 +9,14 @@ import (
 )
 
 type SearchInput struct {
-	Query   string   `json:"query,omitempty"`
+	Query   string   `json:"query,omitempty" jsonschema:"words to search for; may be omitted when tags are given, then the matches come back newest first"`
 	Mode    string   `json:"mode,omitempty"`
 	Channel string   `json:"channel,omitempty"`
 	Sender  string   `json:"sender,omitempty"`
 	Since   *int64   `json:"since,omitempty"`
 	Until   *int64   `json:"until,omitempty"`
 	Thread  *int64   `json:"thread,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying all of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
 	Count   int      `json:"count,omitempty"`
 	Cursor  string   `json:"cursor,omitempty"`
 }

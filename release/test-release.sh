@@ -279,6 +279,7 @@ gh() {
         "release create"|"release edit"|"release download"|"run watch"|"auth status"|"release upload") return "${GH_RC:-0}" ;;
         "attestation verify") return "${GH_RC_ATTEST:-${GH_RC:-0}}" ;;
         "pr list") printf '%s' "${GH_PRS:-}"; return "${GH_RC_PR:-0}" ;;
+        "repo sync") [[ "$3" == ericfitz/winget-pkgs && $# == 3 ]] || { echo "gh stub: unexpected sync: $*" >&2; return 98; }; return "${GH_RC_SYNC:-0}" ;;
         *) echo "gh stub: unexpected call: $*" >&2; return 99 ;;
     esac
 }
@@ -456,13 +457,27 @@ check winget-old-skips-submit 0 "would write ManifestVersion 1.12.0, and winget-
 check winget-recorded-skips-submit 0 "would write ManifestVersion 1.12.0" -- winget_stub "KOMAC_PREVIEW_FILE='$KOMAC_REC' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
 check winget-recorded-raised-submits 0 "" -- winget_stub "KOMAC_PREVIEW_FILE='$WORK/komac-1.28.txt' submit_winget >/dev/null && grep -q -- '--submit token=test-token' '$WORK/komac.log'"
 check winget-old-names-komac 0 "komac (komac 9.9.9)" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget"
-check winget-old-prints-rerun 0 "upgrade komac and rerun: (source $WORK/komac-key" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget"
+check winget-old-prints-rerun 0 "upgrade komac and rerun: gh repo sync ericfitz/winget-pkgs && (source $WORK/komac-key" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget"
 check winget-mixed-skips-submit 0 "ManifestVersion 1.12.0" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\nManifestVersion: 1.12.0\n' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
 check winget-no-version-skips-submit 0 "would write no ManifestVersion" -- winget_stub "KOMAC_PREVIEW='nothing\n' submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
 check winget-dry-run-fails 0 "komac --dry-run failed; nothing was submitted" -- winget_stub "KOMAC_DRY_RC=1 submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
 check winget-submit-fails-release-stands 0 "warning: komac failed; the release stands" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' KOMAC_SUBMIT_RC=1 submit_winget"
 check winget-open-pr-skips-komac 0 "an open pull request for 1.2.3 exists" -- winget_stub "GH_PRS=448498 submit_winget && [[ ! -s '$WORK/komac.log' ]]"
 check winget-pr-list-fails 1 "could not list open pull requests" -- winget_stub "GH_RC_PR=1 submit_winget"
+# #50: the fork is synced with upstream after the dry-run and the
+# ManifestVersion guard pass and before --submit (one log for gh and komac
+# records the order); a sync failure skips --submit and the release stands.
+# Every printed rerun command syncs first.
+order_of() { echo "awk '/--dry-run/{printf \"dry \"} /^gh repo sync/{printf \"sync \"} /--submit/{printf \"submit \"}' '$WORK/gh.log'"; }
+check winget-syncs-before-submit 0 "dry sync submit" -- winget_stub ": > '$WORK/gh.log'; export KOMAC_LOG='$WORK/gh.log'; KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' submit_winget >/dev/null && $(order_of)"
+check winget-sync-fails-skips-submit 0 "could not sync ericfitz/winget-pkgs with microsoft/winget-pkgs" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' GH_RC_SYNC=1 submit_winget && ! grep -q -- --submit '$WORK/komac.log'"
+check winget-sync-fails-prints-rerun 0 "Then rerun: gh repo sync ericfitz/winget-pkgs && (source $WORK/komac-key && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" komac update ericfitz.agentbus --version 1.2.3 $URLS --submit)" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' GH_RC_SYNC=1 submit_winget"
+check winget-sync-fails-names-force 0 "gh repo sync ericfitz/winget-pkgs --force\` discards its own commits" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' GH_RC_SYNC=1 submit_winget"
+check winget-old-does-not-sync 0 "" -- winget_stub ": > '$WORK/gh.log'; KOMAC_PREVIEW='ManifestVersion: 1.12.0\n' submit_winget >/dev/null 2>&1 && ! grep -q 'repo sync' '$WORK/gh.log'"
+check winget-dry-run-fails-does-not-sync 0 "" -- winget_stub ": > '$WORK/gh.log'; KOMAC_DRY_RC=1 submit_winget >/dev/null 2>&1 && ! grep -q 'repo sync' '$WORK/gh.log'"
+check winget-open-pr-does-not-sync 0 "" -- winget_stub ": > '$WORK/gh.log'; GH_PRS=448498 submit_winget >/dev/null && ! grep -q 'repo sync' '$WORK/gh.log'"
+check winget-submit-fails-rerun-syncs 0 "Rerun: gh repo sync ericfitz/winget-pkgs && (source" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' KOMAC_SUBMIT_RC=1 submit_winget"
+check winget-dry-run-fails-rerun-syncs 0 "Rerun: gh repo sync ericfitz/winget-pkgs && (source" -- winget_stub "KOMAC_DRY_RC=1 submit_winget"
 check winget-token-not-exported 0 "" -- winget_stub "KOMAC_PREVIEW='ManifestVersion: 1.28.0\n' submit_winget >/dev/null && [[ -z \${GITHUB_TOKEN:-} && -z \${KOMAC_GITHUB_KEY:-} ]]"
 
 echo "test-release: $PASS passed, $FAIL failed"

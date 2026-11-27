@@ -21,6 +21,7 @@ TAP_DIR="${TAP_DIR:-$HOME/Projects/homebrew-tap}" # SSH clone of ericfitz/homebr
 SCOOP_DIR="${SCOOP_DIR:-$HOME/Projects/scoop-bucket}" # SSH clone of ericfitz/scoop-bucket
 KOMAC_KEY_FILE="$HOME/.keys/KOMAC_GITHUB_KEY"           # `export KOMAC_GITHUB_KEY='<PAT with public_repo>'`
 WINGET_ID="ericfitz.agentbus"
+WINGET_FORK="ericfitz/winget-pkgs" # komac branches here; gh repo sync keeps it at upstream's tip
 # The oldest ManifestVersion winget-pkgs accepts: it deprecated 1.12.0 on
 # 2026-11-03, and komac 2.17.1 still writes 1.12.0 (winget-types 0.5.2).
 WINGET_MIN_MANIFEST_VERSION="1.28.0"
@@ -500,7 +501,12 @@ check_manifest_versions() {
 # (winget-pkgs rejects older ones). A komac failure or an old ManifestVersion
 # does not fail the release: the exact rerun command is printed. The token is
 # scoped to each komac command, because exporting GITHUB_TOKEN would override
-# gh's own auth for the rest of the run.
+# gh's own auth for the rest of the run. Before --submit, gh syncs the fork
+# $WINGET_FORK with upstream: komac creates its branch on the fork at
+# upstream's tip, and GitHub refuses that ref when upstream changed
+# .github/workflows since the last sync unless the token has the workflow
+# scope (#50). gh's login has it; the komac token needs only public_repo. A
+# sync failure skips the submission and the release stands.
 submit_winget() {
     echo "==> Submitting ${WINGET_ID} ${VERSION} to winget"
     local open
@@ -512,18 +518,23 @@ submit_winget() {
     local base="https://github.com/${GH_REPO}/releases/download/${TAG}"
     local update=(komac update "$WINGET_ID" --version "$VERSION" --urls "$base/${BIN_NAME}-${TAG}-windows-amd64.zip" "$base/${BIN_NAME}-${TAG}-windows-arm64.zip")
     local cmd=("${update[@]}" --submit)
+    local rerun="gh repo sync $WINGET_FORK && (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})"
     local preview why rc=0
     if ! preview="$(
         # shellcheck disable=SC1090
         source "$KOMAC_KEY_FILE"
         GITHUB_TOKEN="$KOMAC_GITHUB_KEY" "${update[@]}" --dry-run </dev/null
     )"; then
-        echo "warning: komac --dry-run failed; nothing was submitted and the release stands. Rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+        echo "warning: komac --dry-run failed; nothing was submitted and the release stands. Rerun: $rerun" >&2
         return 0
     fi
     why="$(check_manifest_versions <<<"$preview")" || rc=$?
     if ((rc != 0)); then
-        echo "warning: not submitting to winget: komac ($(komac --version 2>/dev/null || echo 'version unknown')) would write ${why}, and winget-pkgs needs ManifestVersion ${WINGET_MIN_MANIFEST_VERSION} or later. The release stands. Submit by hand (docs/windows-checklist.md, Packaging), or upgrade komac and rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+        echo "warning: not submitting to winget: komac ($(komac --version 2>/dev/null || echo 'version unknown')) would write ${why}, and winget-pkgs needs ManifestVersion ${WINGET_MIN_MANIFEST_VERSION} or later. The release stands. Submit by hand (docs/windows-checklist.md, Packaging), or upgrade komac and rerun: $rerun" >&2
+        return 0
+    fi
+    if ! gh repo sync "$WINGET_FORK"; then
+        echo "warning: could not sync ${WINGET_FORK} with microsoft/winget-pkgs (komac would fail to create its branch on a stale fork); nothing was submitted and the release stands. If the fork diverged, \`gh repo sync ${WINGET_FORK} --force\` discards its own commits. Then rerun: $rerun" >&2
         return 0
     fi
     if ! (
@@ -531,7 +542,7 @@ submit_winget() {
         source "$KOMAC_KEY_FILE"
         GITHUB_TOKEN="$KOMAC_GITHUB_KEY" "${cmd[@]}"
     ); then
-        echo "warning: komac failed; the release stands. Rerun: (source $KOMAC_KEY_FILE && GITHUB_TOKEN=\"\$KOMAC_GITHUB_KEY\" ${cmd[*]})" >&2
+        echo "warning: komac failed; the release stands. Rerun: $rerun" >&2
     fi
 }
 

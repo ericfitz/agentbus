@@ -112,8 +112,9 @@ machine or a cloud Windows VM with nested virtualization.
       version; update `PackageVersion`, the installer URLs and
       `InstallerSha256` values (from the release's `SHA256SUMS`),
       `ReleaseDate`, `ReleaseNotes` and `ReleaseNotesUrl`; run
-      `release\test-winget.ps1` on it as above; then commit the folder to a
-      branch of your winget-pkgs fork under
+      `release\test-winget.ps1` on it as above; then sync your fork
+      (`gh repo sync ericfitz/winget-pkgs`), commit the folder to a
+      branch of it under
       `manifests/e/ericfitz/agentbus/<version>/` and open the pull request
       titled `New version: ericfitz.agentbus version <version>`.
 - [ ] `winget install ericfitz.agentbus` installs once the package is

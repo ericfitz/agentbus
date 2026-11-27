@@ -258,6 +258,13 @@ architecture.
 - If komac fails, the rest of the release stands; `release.sh` prints the
   exact command to rerun. On a rerun, an open winget-pkgs pull request for
   that version counts as done.
+- Before `--submit`, `release.sh` runs `gh repo sync ericfitz/winget-pkgs`
+  (#50). komac creates its branch on the fork at upstream's tip, and GitHub
+  refuses that ref when upstream changed `.github/workflows` since the last
+  sync unless the token has the `workflow` scope; gh's login has it, so the
+  komac token stays `public_repo` only. A sync failure skips the
+  submission, prints the rerun command (sync, then komac), and the release
+  stands.
 - ManifestVersion guard (human decision, 2026-11-03): winget-pkgs
   deprecated ManifestVersion 1.12.0, and komac 2.17.1 still writes it in
   both `update` and `submit`. `release.sh` runs `komac update --dry-run`

@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -403,4 +404,129 @@ func TestSearchTagsOnlyNeverEmbeds(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("embedder was called %d times", calls)
 	}
+}
+
+// searchKindsFixture builds one widget row in each kind of channel: memory
+// "mem", ordinary "general", task list "tasks/w", and Ann's DM to Sam.
+func searchKindsFixture(t *testing.T) (b *Bus, ann, sam, bob string) {
+	t.Helper()
+	b = newTestBus(t)
+	ann = reg(t, b, "Ann")
+	sam = reg(t, b, "Sam")
+	bob = reg(t, b, "Bob")
+	for _, c := range []struct{ name, kind string }{{"mem", "memory"}, {"general", "ordinary"}, {"tasks/w", "memory"}} {
+		if _, err := b.CreateChannel(ann, c.name, c.kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := b.Send(ann, SendInput{Channel: "mem", Content: "widget memory", Tags: []string{"k"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(ann, SendInput{Channel: "general", Content: "widget chat", Tags: []string{"k"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(bob, SendInput{Channel: "general", Content: "widget other", Tags: []string{"j"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.TaskCreate(ann, TaskCreateInput{Channel: "tasks/w", Subject: "job", Description: "widget task"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(ann, SendInput{Channel: DMChannel(sam), Content: "widget dm"}); err != nil {
+		t.Fatal(err)
+	}
+	return b, ann, sam, bob
+}
+
+func searchChannels(t *testing.T, b *Bus, as string, in SearchInput) []string {
+	t.Helper()
+	if in.Query == "" && len(in.Tags) == 0 {
+		in.Query = "widget"
+	}
+	r, err := b.Search(as, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, h := range r.Hits {
+		got = append(got, h.Channel)
+	}
+	slices.Sort(got)
+	return got
+}
+
+func wantChannels(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("channels = %v, want %v", got, want)
+	}
+}
+
+func TestSearchKindsDefaultAll(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{}), "mem", "general", "general", "tasks/w", DMChannel(sam))
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Kinds: []string{"memories", "chat", "tasks"}}), "mem", "general", "general", "tasks/w", DMChannel(sam))
+}
+
+func TestSearchKindsChat(t *testing.T) {
+	b, _, sam, bob := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Kinds: []string{"chat"}}), "general", "general", DMChannel(sam))
+	wantChannels(t, searchChannels(t, b, bob, SearchInput{Kinds: []string{"chat"}}), "general", "general")
+}
+
+func TestSearchKindsTasks(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Kinds: []string{"tasks"}}), "tasks/w")
+}
+
+func TestSearchKindsMemories(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Kinds: []string{"memories"}}), "mem")
+}
+
+func TestSearchKindsUnion(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Kinds: []string{"memories", "tasks"}}), "mem", "tasks/w")
+}
+
+func TestSearchKindsUnknown(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	_, err := b.Search(sam, SearchInput{Query: "widget", Kinds: []string{"chats", "x", "Chat"}})
+	if err == nil {
+		t.Fatal("unknown kinds must be rejected")
+	}
+	var be *Error
+	if !errors.As(err, &be) || be.Code != "validation" {
+		t.Fatalf("want validation error, got %v", err)
+	}
+	const want = `unknown kind "chats", "x", "Chat"; kinds are memories, chat, tasks`
+	if be.Message != want {
+		t.Fatalf("message %q, want %q", be.Message, want)
+	}
+	if _, err := b.Search(sam, SearchInput{Query: "widget", Kinds: []string{"chat", "chat"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Unknown values are rejected even when a channel scope would ignore them.
+	if _, err := b.Search(sam, SearchInput{Query: "widget", Channel: "mem", Kinds: []string{"bogus"}}); err == nil {
+		t.Fatal("unknown kind with channel must be rejected")
+	}
+}
+
+func TestSearchChannelOverridesKinds(t *testing.T) {
+	b, _, sam, _ := searchKindsFixture(t)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Channel: "tasks/w", Kinds: []string{"chat"}}), "tasks/w")
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Channel: "mem", Kinds: []string{"chat"}}), "mem")
+}
+
+func TestSearchKindsWithFilters(t *testing.T) {
+	b, ann, sam, bob := searchKindsFixture(t)
+	// Tags-only: tag k is on a memory row and a chat row.
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Tags: []string{"k"}, Kinds: []string{"chat"}}), "general")
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Tags: []string{"k"}, Kinds: []string{"memories"}}), "mem")
+	// Sender filter.
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Sender: bob, Kinds: []string{"chat"}}), "general")
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Sender: ann, Kinds: []string{"chat"}}), "general", DMChannel(sam))
+	// Since filter in the future matches nothing.
+	future := time.Now().Add(time.Hour).UnixMilli()
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Since: &future, Kinds: []string{"chat"}}))
 }

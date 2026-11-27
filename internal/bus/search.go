@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,52 @@ type SearchInput struct {
 	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying all of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
 	Count   int      `json:"count,omitempty"`
 	Cursor  string   `json:"cursor,omitempty"`
+	Kinds   []string `json:"kinds,omitempty" jsonschema:"narrow to these kinds: memories, chat, tasks; default all; ignored when channel is set"`
+}
+
+// SearchKinds lists the values SearchInput.Kinds accepts.
+var SearchKinds = []string{"memories", "chat", "tasks"}
+
+// normalizeKinds rejects every unknown kind (case-sensitive, listed in input
+// order) and returns the known ones deduplicated in input order.
+func normalizeKinds(kinds []string) ([]string, error) {
+	var out, bad []string
+	for _, k := range kinds {
+		switch {
+		case slices.Contains(SearchKinds, k):
+			if !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		case !slices.Contains(bad, strconv.Quote(k)):
+			bad = append(bad, strconv.Quote(k))
+		}
+	}
+	if len(bad) > 0 {
+		return nil, errf("validation", false, "unknown kind %s; kinds are %s", strings.Join(bad, ", "), strings.Join(SearchKinds, ", "))
+	}
+	return out, nil
+}
+
+// kindsPredicate returns the AND clause narrowing m.channel to kinds, or ""
+// when kinds is empty or names all three. It must agree with IsTaskChannel.
+func kindsPredicate(kinds []string) string {
+	if len(kinds) == 0 || len(kinds) >= len(SearchKinds) {
+		return ""
+	}
+	const tasks = "(m.channel='tasks' OR m.channel LIKE 'tasks/%')"
+	const memKind = "m.channel IN (SELECT name FROM channels WHERE kind='memory')"
+	var ps []string
+	for _, k := range kinds {
+		switch k {
+		case "tasks":
+			ps = append(ps, tasks)
+		case "memories":
+			ps = append(ps, "("+memKind+" AND NOT "+tasks+")")
+		case "chat":
+			ps = append(ps, "(m.channel NOT IN (SELECT name FROM channels WHERE kind='memory'))")
+		}
+	}
+	return " AND (" + strings.Join(ps, " OR ") + ")"
 }
 
 type SearchHit struct {
@@ -121,6 +168,7 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 		sb.WriteString(" AND (m.channel NOT LIKE 'dm/%' OR m.channel=? OR m.sender=?)")
 		args = append(args, DMChannel(as), as)
 	}
+	sb.WriteString(kindsPredicate(in.Kinds))
 	if in.Sender != "" {
 		sb.WriteString(" AND m.sender=?")
 		args = append(args, in.Sender)
@@ -217,6 +265,12 @@ func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
 	var err error
 	if in.Tags, err = NormalizeTagPatterns(in.Tags); err != nil {
 		return SearchResult{}, err
+	}
+	if in.Kinds, err = normalizeKinds(in.Kinds); err != nil {
+		return SearchResult{}, err
+	}
+	if in.Channel != "" {
+		in.Kinds = nil
 	}
 	// No terms with tags is a tags-only search (no ranking, never embeds);
 	// without tags a blank query is an error, and a star-only one keeps the

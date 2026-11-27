@@ -48,7 +48,7 @@ func (m Model) helpLines() []string {
 		{"u", "task list: unassign your not-started cursor task"},
 		{"a", "task list: assign the cursor task to you or a live session (unassigned tasks or yours)"},
 		{"d", "delete the channel and all its messages (asks first); on a tag set, unfollow it (no confirmation); no-op in the sessions pane or on a heading"},
-		{"/", "search (tab cycles text / semantic / both)"},
+		{"/", "search (tag:<tag> filters; tab cycles text / semantic / both)"},
 		{"b", "select the sessions heading: the agent status board (not in compose)"},
 		{"o", "board: cycle the sort, time / name / tag"},
 		{"tab (board)", "focus the board rows; esc returns to the rail"},

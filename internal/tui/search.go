@@ -17,7 +17,8 @@ const searchCount = 20
 type searchState struct {
 	input        textinput.Model
 	mode         string
-	query        string // the query the current hits answer; typing past it makes enter re-run
+	tags         []string // the tag filters of the current hits, for the title
+	query        string   // the query the current hits answer; typing past it makes enter re-run
 	hits         []bus.SearchHit
 	cursor       int
 	ran          bool
@@ -82,8 +83,23 @@ func (m *Model) runSearch() tea.Cmd {
 		return nil
 	}
 	m.search.query = q
+	spec, err := parseSearchInput(q)
+	if err != nil {
+		// No hits, so enter re-runs after the line is edited instead of jumping.
+		m.search.err = err
+		m.search.ran = true
+		m.search.hits = nil
+		m.search.cursor = 0
+		m.search.tags = nil
+		m.search.textOnly = false
+		return nil
+	}
+	if spec.Query == "" && len(spec.Tags) == 0 {
+		return nil
+	}
+	m.search.tags = spec.Tags
 	c := m.c
-	in := bus.SearchInput{Query: q, Mode: m.search.mode, Count: searchCount}
+	in := bus.SearchInput{Query: spec.Query, Tags: spec.Tags, Mode: m.search.mode, Count: searchCount}
 	return func() tea.Msg {
 		res, err := c.b.Search(c.as, in)
 		return searchMsg{query: q, res: res, err: err}
@@ -178,6 +194,10 @@ func (m Model) viewSearch() string {
 	if m.search.textOnly {
 		b.WriteString("\n" + th.Style(th.Warn).Render("text only — embedding endpoint unreachable"))
 	}
-	title := "search  " + dim.Render("mode "+m.search.mode+" · tab to switch")
+	tagsPart := ""
+	if len(m.search.tags) > 0 {
+		tagsPart = " · tags " + strings.Join(m.search.tags, " ")
+	}
+	title := "search  " + dim.Render("mode "+m.search.mode+tagsPart+" · tab to switch")
 	return m.overlay(title, th.Agent, b.String(), m.hints("enter", "search / open", "tab", "mode", "↑↓", "move", "esc", "close"))
 }

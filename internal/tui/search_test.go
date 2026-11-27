@@ -376,3 +376,64 @@ func TestPendingTaskCursorIgnoredIfChannelChangedBeforeTasksArrive(t *testing.T)
 		t.Fatalf("pending fields not cleared after consuming tasksMsg for %q: ch=%q id=%d", "tasks/x", f.m.pendingTaskCursorCh, f.m.pendingTaskCursorID)
 	}
 }
+
+func (f *fixture) agentSendTagged(t *testing.T, ch, content string, tags ...string) {
+	t.Helper()
+	if _, err := f.ab.Send(f.sam, bus.SendInput{Channel: ch, Content: content, Tags: tags}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchTagTokensFilterHits(t *testing.T) {
+	f := newFixture(t)
+	f.agentSendTagged(t, "dev", "release one", "deployment", "failed")
+	f.agentSendTagged(t, "dev", "release two", "deployment")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("tag:deployment tag:failed release")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 || f.m.search.hits[0].Content != "release one" {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	if v := f.m.View(); !strings.Contains(v, "tags deployment failed") {
+		t.Fatalf("view:\n%s", v)
+	}
+}
+
+func TestSearchTagOnlyLine(t *testing.T) {
+	f := newFixture(t)
+	f.agentSendTagged(t, "dev", "release one", "deployment", "failed")
+	f.agentSendTagged(t, "dev", "release two", "deployment")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("tag:deployment")
+	f.key("enter")
+	h := f.m.search.hits
+	if len(h) != 2 || h[0].Content != "release two" || h[1].Content != "release one" {
+		t.Fatalf("hits=%+v err=%v", h, f.m.search.err)
+	}
+}
+
+func TestSearchInvalidTagShowsErrorThenReruns(t *testing.T) {
+	f := newFixture(t)
+	f.agentSendTagged(t, "dev", "release one", "deployment")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("tag:bad_tag x")
+	f.key("enter")
+	if f.m.search.err == nil || !f.m.search.ran || len(f.m.search.hits) != 0 {
+		t.Fatalf("err=%v ran=%v hits=%+v", f.m.search.err, f.m.search.ran, f.m.search.hits)
+	}
+	if v := f.m.View(); !strings.Contains(v, "bad_tag") {
+		t.Fatalf("view must show the error:\n%s", v)
+	}
+	f.key("ctrl+u")
+	f.key("tag:deployment release")
+	f.key("enter")
+	if f.m.mode != modeSearch || f.m.search.err != nil || len(f.m.search.hits) != 1 {
+		t.Fatalf("mode=%v err=%v hits=%+v", f.m.mode, f.m.search.err, f.m.search.hits)
+	}
+}

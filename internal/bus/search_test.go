@@ -353,6 +353,15 @@ func TestSearchTagsOnly(t *testing.T) {
 	if !slices.Equal(seqs(r), []int64{rep.Seq, a.Seq}) {
 		t.Fatalf("thread: %v", seqs(r))
 	}
+	future := time.Now().Add(time.Hour).UnixMilli()
+	r, _ = b.Search(sam, SearchInput{Tags: tags, Since: &future})
+	if len(r.Hits) != 0 {
+		t.Fatalf("since in the future: %v", seqs(r))
+	}
+	r, _ = b.Search(sam, SearchInput{Tags: tags, Until: &future})
+	if len(r.Hits) != len(want) {
+		t.Fatalf("until in the future: %v", seqs(r))
+	}
 	wantCode(t, func() error { _, err := b.Search(sam, SearchInput{Tags: tags, Mode: "bogus"}); return err }(), "validation")
 	_, err = b.Search(sam, SearchInput{})
 	wantCode(t, err, "validation")

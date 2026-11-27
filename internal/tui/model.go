@@ -345,7 +345,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search.hits = msg.res.Hits
 			m.search.cursor = 0
 			m.search.textOnly = msg.res.SemanticUnavailable
-			if m.search.mode != "text" {
+			if m.search.mode != "text" && !msg.noTerms {
 				m.search.semanticDown = msg.res.SemanticUnavailable
 			}
 		} else {

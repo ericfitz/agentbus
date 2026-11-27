@@ -23,6 +23,10 @@ func TestParseSearchInput(t *testing.T) {
 		{"tag: x", "", nil, "tag: needs a tag"},
 		{"tag:bad_tag x", "", nil, "bad_tag"},
 		{"a  b", "a b", nil, ""},
+		{`""`, "", nil, ""},
+		{`foo "" bar`, "foo bar", nil, ""},
+		{`"tag:foo`, `"tag:foo`, nil, ""},
+		{"\u0130ag:foo", "\u0130ag:foo", nil, ""},
 	}
 	for _, tc := range tests {
 		got, err := parseSearchInput(tc.in)

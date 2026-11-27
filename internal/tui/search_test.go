@@ -437,3 +437,60 @@ func TestSearchInvalidTagShowsErrorThenReruns(t *testing.T) {
 		t.Fatalf("mode=%v err=%v hits=%+v", f.m.mode, f.m.search.err, f.m.search.hits)
 	}
 }
+
+// A tags-only search never contacts the embedding endpoint, so it must not
+// clear the unreachable flag a worded search set.
+func TestSearchTagsOnlyKeepsSemanticDown(t *testing.T) {
+	f := newFixture(t)
+	f.agentSendTagged(t, "dev", "release one", "deployment")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("tab")
+	f.key("tab")
+	if f.m.search.mode != "both" {
+		t.Fatalf("mode %q", f.m.search.mode)
+	}
+	f.key("release")
+	f.key("enter")
+	if !f.m.search.semanticDown {
+		t.Fatal("worded search with no endpoint must set semanticDown")
+	}
+	f.key("ctrl+u")
+	f.key("tag:deployment")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	if !f.m.search.semanticDown {
+		t.Fatal("a tags-only search must leave semanticDown set")
+	}
+	f.key("ctrl+u")
+	f.key("tag:deployment *")
+	f.key("enter")
+	if !f.m.search.semanticDown {
+		t.Fatal("star-only text with a tag is tags-only too")
+	}
+}
+
+// A line that parses to nothing must not become the remembered query, or the
+// next enter would jump to the previous search's hit.
+func TestSearchEmptyQuotesDoNotArmStaleHit(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "release dev-notes")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("release")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%d", len(f.m.search.hits))
+	}
+	f.key("ctrl+u")
+	f.key(`""`)
+	f.key("enter")
+	f.key("enter")
+	if f.m.mode != modeSearch {
+		t.Fatalf("enter on an empty-quotes line must not jump; mode=%v", f.m.mode)
+	}
+}

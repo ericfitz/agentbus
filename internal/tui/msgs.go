@@ -37,8 +37,11 @@ type (
 	}
 	searchMsg struct {
 		query string // the query that produced res, so a stale response (search reopened, or a newer search in flight) is ignored
-		res   bus.SearchResult
-		err   error
+		// noTerms marks a tags-only search: the embedding endpoint was never
+		// contacted, so it says nothing about whether it is reachable.
+		noTerms bool
+		res     bus.SearchResult
+		err     error
 	}
 	revisionsMsg struct {
 		seq  int64 // the live row the fetch was for

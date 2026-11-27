@@ -1346,7 +1346,7 @@ func TestHistoryTagsSchemaSaysAll(t *testing.T) {
 		props, _ := schema["properties"].(map[string]any)
 		tags, _ := props["tags"].(map[string]any)
 		desc, _ := tags["description"].(string)
-		if strings.Contains(desc, "at least one") || !strings.Contains(desc, "all") {
+		if strings.Contains(desc, "at least one") || !strings.Contains(desc, "all of these tags") {
 			t.Fatalf("history tags description must say all of: %q", desc)
 		}
 		return

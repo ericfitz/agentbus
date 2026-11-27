@@ -30,19 +30,21 @@ var searchPrefixes = []struct {
 
 // parseSearchInput splits the line on whitespace. A word with a known prefix
 // is a filter; a word wrapped in double quotes is text with the quotes
-// stripped (so a literal "tag:x" can be searched for); anything else is text.
+// stripped (so a literal "tag:x" can be searched for; an empty "" adds
+// nothing); anything else is text.
 func parseSearchInput(line string) (searchSpec, error) {
 	var spec searchSpec
 	var text []string
 words:
 	for _, w := range strings.Fields(line) {
 		if len(w) >= 2 && w[0] == '"' && w[len(w)-1] == '"' {
-			text = append(text, w[1:len(w)-1])
+			if len(w) > 2 {
+				text = append(text, w[1:len(w)-1])
+			}
 			continue
 		}
-		lw := strings.ToLower(w)
 		for _, p := range searchPrefixes {
-			if strings.HasPrefix(lw, p.prefix) {
+			if len(w) >= len(p.prefix) && strings.EqualFold(w[:len(p.prefix)], p.prefix) {
 				if err := p.apply(&spec, w[len(p.prefix):]); err != nil {
 					return searchSpec{}, err
 				}

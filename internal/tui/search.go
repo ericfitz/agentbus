@@ -82,9 +82,9 @@ func (m *Model) runSearch() tea.Cmd {
 	if q == "" {
 		return nil
 	}
-	m.search.query = q
 	spec, err := parseSearchInput(q)
 	if err != nil {
+		m.search.query = q
 		// No hits, so enter re-runs after the line is edited instead of jumping.
 		m.search.err = err
 		m.search.ran = true
@@ -97,12 +97,14 @@ func (m *Model) runSearch() tea.Cmd {
 	if spec.Query == "" && len(spec.Tags) == 0 {
 		return nil
 	}
+	m.search.query = q
 	m.search.tags = spec.Tags
+	noTerms := !bus.HasSearchTerms(spec.Query)
 	c := m.c
 	in := bus.SearchInput{Query: spec.Query, Tags: spec.Tags, Mode: m.search.mode, Count: searchCount}
 	return func() tea.Msg {
 		res, err := c.b.Search(c.as, in)
-		return searchMsg{query: q, res: res, err: err}
+		return searchMsg{query: q, noTerms: noTerms, res: res, err: err}
 	}
 }
 

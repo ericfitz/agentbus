@@ -70,12 +70,19 @@ func searchTerms(q string) []searchTerm {
 	return terms
 }
 
+// HasSearchTerms reports whether q holds at least one word once star-only
+// words are dropped. A search without terms is tags-only (or an error when
+// it has no tags either); callers such as the TUI use this so they read a
+// query the same way Search does.
+func HasSearchTerms(q string) bool { return len(searchTerms(q)) > 0 }
+
 // ftsQuery turns free text into an FTS5 query of quoted terms (implicit AND),
 // so user punctuation cannot produce a syntax error. A prefix term becomes a
 // quoted prefix phrase, "e159e8c"*: FTS5 applies the star to the phrase's
 // last token, so commit:e159e8c* and owner/repo@e159* work too. The result
-// is empty only when the query has no terms; Search refuses that before
-// textSearch builds a MATCH.
+// is empty only when the query has no terms; Search diverts that to a
+// tags-only search (or refuses it without tags) before textSearch builds a
+// MATCH.
 func ftsQuery(q string) string {
 	var terms []string
 	for _, st := range searchTerms(q) {
@@ -139,8 +146,8 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 
 // textSearch runs the FTS5 query joined back to messages (excluding
 // tombstones) and returns hits ranked by bm25, best match first. Every
-// caller reaches this through Search, which already rejects a blank query
-// and one left with no terms after dropping star-only words (ADR 0019), so
+// caller reaches this through Search, which sends a query left with no terms
+// (blank, or star-only words, ADR 0019) to tagsOnlySearch or rejects it, so
 // fq (derived from in.Query) is never empty here.
 func (b *Bus) textSearch(as string, in SearchInput, limit int) ([]SearchHit, error) {
 	fq := ftsQuery(in.Query)
@@ -192,25 +199,13 @@ func (b *Bus) tagsOnlySearch(as string, in SearchInput, limit int) ([]SearchHit,
 		return nil, internal(err)
 	}
 	defer func() { _ = rows.Close() }()
-	hits := []SearchHit{}
-	for rows.Next() {
-		var h SearchHit
-		var meta, tags *string
-		if err := rows.Scan(&h.Seq, &h.Channel, &h.Sender, &h.Context, &h.CreatedAt, &h.Type, &h.Subject, &h.Content, &h.ReplyTo, &meta, &h.MemoryID, &h.Revision, &tags); err != nil {
-			return nil, internal(err)
-		}
-		m, err := decodeJSONFields(h.Message, meta)
-		if err != nil {
-			return nil, internal(err)
-		}
-		h.Message = m
-		if tags != nil {
-			h.Tags = strings.Fields(*tags)
-		}
-		hits = append(hits, h)
-	}
-	if err := rows.Err(); err != nil {
+	msgs, err := scanMessages(rows)
+	if err != nil {
 		return nil, internal(err)
+	}
+	hits := make([]SearchHit, 0, len(msgs))
+	for _, m := range msgs {
+		hits = append(hits, SearchHit{Message: m})
 	}
 	return hits, nil
 }

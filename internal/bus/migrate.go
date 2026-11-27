@@ -33,6 +33,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	10: foldRefs,                                // fold messages.refs into content and drop the column (ADR 0019)
 	11: addTables,                               // meta (reset generation, ADR 0022)
 	12: addTables,                               // statuses (issue #43)
+	13: reindexTaskText,                         // FTS indexes task rows by subject and description (#52)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -126,6 +127,27 @@ func splitTagSets(tx *sql.Tx) error {
 	return err
 }
 
+// reindexTaskText (schema 13 -> 14, #52) replaces the FTS triggers and table
+// with the task-aware form (messagesFTSDDL) and repopulates it from every
+// live row, unconditionally: it drops whatever the older steps or a failed
+// earlier run left (old or new form), so a second run, or a run over
+// leftovers, ends in the same state. The repopulation is an explicit INSERT
+// because 'rebuild' would index raw task JSON.
+func reindexTaskText(tx *sql.Tx) error {
+	for _, s := range []string{
+		"DROP TRIGGER IF EXISTS messages_ai",
+		"DROP TRIGGER IF EXISTS messages_ad",
+		"DROP TABLE IF EXISTS messages_fts",
+		messagesFTSDDL,
+		"INSERT INTO messages_fts(rowid, subject, content) SELECT seq, subject, " + ftsContentExpr("messages") + " FROM messages",
+	} {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // addSubject (schema 5 -> 6, ADR 0010) adds messages.subject, backfills it
 // on task-list rows from the task document's subject (the same channel
 // predicate as IsTaskChannel), and rebuilds messages_fts and its triggers
@@ -150,7 +172,7 @@ func addSubject(tx *sql.Tx) error {
 		"DROP TRIGGER IF EXISTS messages_ai",
 		"DROP TRIGGER IF EXISTS messages_ad",
 		"DROP TABLE IF EXISTS messages_fts",
-		messagesFTSDDL,
+		messagesFTSDDLv6,
 		"INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
 	} {
 		if _, err := tx.Exec(s); err != nil {

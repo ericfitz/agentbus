@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -24,18 +24,51 @@ CREATE TABLE IF NOT EXISTS tag_subscription_tags (
 );
 `
 
-// messagesFTSDDL is shared by schema.go (fresh databases) and migrate.go's
-// addSubject step (v5 -> v6, ADR 0010): the full-text index over subject
-// and content, external-content on messages, kept in step by two triggers.
-// No update trigger: a message row is never rewritten after insert (an
-// edit inserts a new revision row).
-const messagesFTSDDL = `
+// messagesFTSDDLv6 is the frozen v6..v13 form of the full-text index (ADR
+// 0010): external-content on messages over subject and raw content, kept in
+// step by two triggers. migrate.go's addSubject step (v5 -> v6) uses it so
+// that historical step keeps its meaning; reindexTaskText (v13 -> v14)
+// replaces it. No update trigger: a message row is never rewritten after
+// insert (an edit inserts a new revision row).
+const messagesFTSDDLv6 = `
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(subject, content, content='messages', content_rowid='seq');
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
   INSERT INTO messages_fts(rowid, subject, content) VALUES (new.seq, new.subject, new.content);
 END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
   INSERT INTO messages_fts(messages_fts, rowid, subject, content) VALUES ('delete', old.seq, old.subject, old.content);
+END;
+`
+
+// ftsContentExpr is the SQL expression for the text indexed as a message's
+// FTS content column, with alias naming the row ("new", "old" or a table
+// alias). A task-channel row (the IsTaskChannel predicate) holds task JSON
+// in content; indexing it raw would make every task match words like
+// "status" or "pending", so only the description is indexed (subject has its
+// own column). json_valid guards json_extract, which raises on malformed
+// text; invalid JSON or a missing description indexes as the empty string. Every other row
+// indexes its content. Both triggers and reindexTaskText use this one
+// expression, so the delete trigger passes exactly what was inserted
+// (external-content FTS5 requires that).
+func ftsContentExpr(alias string) string {
+	return "CASE WHEN (" + alias + ".channel = 'tasks' OR " + alias + ".channel LIKE 'tasks/%') THEN " +
+		"CASE WHEN json_valid(" + alias + ".content) THEN COALESCE(json_extract(" + alias + ".content, '$.description'), '') ELSE '' END " +
+		"ELSE " + alias + ".content END"
+}
+
+// messagesFTSDDL is shared by schema.go (fresh databases) and migrate.go's
+// reindexTaskText step (v13 -> v14, #52): the full-text index over subject
+// and ftsContentExpr, external-content on messages (the table is read only
+// by rowid join, never for column values), kept in step by two triggers.
+// FTS5 'rebuild' reads raw content, so it must never repopulate this table
+// except over an empty messages table; reindexTaskText inserts explicitly.
+var messagesFTSDDL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(subject, content, content='messages', content_rowid='seq');
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, subject, content) VALUES (new.seq, new.subject, ` + ftsContentExpr("new") + `);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, subject, content) VALUES ('delete', old.seq, old.subject, ` + ftsContentExpr("old") + `);
 END;
 `
 
@@ -51,7 +84,7 @@ CREATE TABLE IF NOT EXISTS memory_access (
 );
 `
 
-const schema = `
+var schema = `
 CREATE TABLE IF NOT EXISTS channels (
   name TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('ordinary','memory')),

@@ -530,3 +530,67 @@ func TestSearchKindsWithFilters(t *testing.T) {
 	future := time.Now().Add(time.Hour).UnixMilli()
 	wantChannels(t, searchChannels(t, b, sam, SearchInput{Since: &future, Kinds: []string{"chat"}}))
 }
+
+// TestSearchTaskMatchesDescriptionNotJSON (#52): a task row is indexed by
+// subject and description, not by the field names and values of its JSON.
+func TestSearchTaskMatchesDescriptionNotJSON(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "Fix rotation", Description: "log the retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := func(q string) int {
+		t.Helper()
+		r, err := b.Search(sam, SearchInput{Query: q})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(r.Hits)
+	}
+	check := func(when string) {
+		t.Helper()
+		for q, want := range map[string]int{"status": 0, "pending": 0, "owner": 0, "retry": 1, "rotation": 1} {
+			if got := hits(q); got != want {
+				t.Fatalf("%s: query %q = %d hits, want %d", when, q, got, want)
+			}
+		}
+	}
+	check("after create")
+	st, owner := "in_progress", "Sam"
+	if _, err := b.TaskUpdate(sam, TaskPatch{ID: tk.ID, Status: &st, Owner: &owner}); err != nil {
+		t.Fatal(err)
+	}
+	check("after update")
+}
+
+// TestSearchTaskInvalidJSONRow (#52): a task-channel row whose content is
+// not JSON indexes with an empty description; the insert, a search by its
+// subject and the delete (the purge path) never error.
+func TestSearchTaskInvalidJSONRow(t *testing.T) {
+	b := newTestBus(t)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.db.Exec(`INSERT INTO messages(channel, sender, context, created_at, content, subject) VALUES ('tasks/w', 'Sam', 'c', 1, 'not json', 'brokenrow')`)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	seq, _ := res.LastInsertId()
+	for q, want := range map[string]int{"brokenrow": 1, "json": 0} {
+		r, err := b.Search(sam, SearchInput{Query: q})
+		if err != nil || len(r.Hits) != want {
+			t.Fatalf("query %q: %d hits, %v, want %d", q, len(r.Hits), err, want)
+		}
+	}
+	if _, err := b.db.Exec("DELETE FROM messages WHERE seq=?", seq); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if r, err := b.Search(sam, SearchInput{Query: "brokenrow"}); err != nil || len(r.Hits) != 0 {
+		t.Fatalf("after delete: %d hits, %v", len(r.Hits), err)
+	}
+}

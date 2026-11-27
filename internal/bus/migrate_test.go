@@ -1244,7 +1244,7 @@ func TestMigrate12To13(t *testing.T) {
 			t.Fatalf("Open %d: %v", i, err)
 		}
 		var uv, n int
-		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 13 {
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
 			t.Fatalf("user_version = %d, %v", uv, err)
 		}
 		if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='statuses'").Scan(&n); err != nil || n != 1 {
@@ -1287,10 +1287,100 @@ func TestMigrate12To13Leftovers(t *testing.T) {
 	}
 	defer func() { _ = b.Close() }()
 	var uv, n int
-	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 13 {
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
 		t.Fatalf("user_version = %d, %v", uv, err)
 	}
 	if err := b.db.QueryRow("SELECT count(*) FROM statuses").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("leftover row lost: %d %v", n, err)
 	}
+}
+
+// v13FTS recreates the version-13 full-text index (frozen DDL, raw content
+// via 'rebuild') on a bus whose tasks/w list holds one task.
+func v13FTS(t *testing.T, cfg config.Config) {
+	t.Helper()
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "Fix rotation", Description: "log the retry"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		"DROP TRIGGER messages_ai", "DROP TRIGGER messages_ad", "DROP TABLE messages_fts",
+		messagesFTSDDLv6,
+		"INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+		"PRAGMA user_version = 13",
+	} {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'status'").Scan(&n); err != nil || n == 0 {
+		t.Fatalf("v13 fixture must match status: %d %v", n, err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkV14FTS(t *testing.T, cfg config.Config, opens int) {
+	t.Helper()
+	for i := 0; i < opens; i++ {
+		b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatalf("Open %d: %v", i, err)
+		}
+		var uv int
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
+			t.Fatalf("user_version = %d, %v", uv, err)
+		}
+		for q, want := range map[string]int{"status": 0, "pending": 0, "retry": 1, "rotation": 1} {
+			var n int
+			if err := b.db.QueryRow("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH ?", q).Scan(&n); err != nil || n != want {
+				t.Fatalf("Open %d: %q matches %d, %v, want %d", i, q, n, err, want)
+			}
+		}
+		if err := b.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestMigrate13To14 (#52): a version-13 database indexed task JSON; the
+// step reindexes tasks by subject and description, and a second Open
+// changes nothing.
+func TestMigrate13To14(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	v13FTS(t, cfg)
+	checkV14FTS(t, cfg, 2)
+}
+
+// TestMigrate13To14Leftovers (#52, failed-run leftovers): a version-13 file
+// whose FTS table is already the new form (a run that rebuilt it but died
+// before stamping) migrates cleanly to the same result.
+func TestMigrate13To14Leftovers(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	v13FTS(t, cfg)
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Open migrated; put the file back to version 13 with the new-form index.
+	if _, err := b.db.Exec("PRAGMA user_version = 13"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	checkV14FTS(t, cfg, 2)
 }

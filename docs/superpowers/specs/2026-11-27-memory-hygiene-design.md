@@ -1,6 +1,8 @@
 # Memory hygiene: serve counter, memory_feedback, soft pruning (#53)
 
 Status: design approved section by section in conversation on 2026-11-27.
+Items marked "orchestrator's call during planning" were added on 2026-11-27 while the
+implementation plan was written; they are not human decisions.
 Amends ADR 0013 items 6-7 (a new ADR records the amendment).
 
 ## Intent
@@ -94,6 +96,25 @@ Settled as proposals Eric approved ("lgtm"):
     register instructions and the SessionStart hook text. No nudge in
     search or receive results.
 
+Orchestrator's calls during planning (2026-11-27; not human decisions,
+recorded so the spec and the plan agree):
+
+15. **The noise rule counts serves since the grace start.** `memory_access`
+    gains `grace_served_base`, set to `served_count` whenever `grace_from`
+    is set (create, edit, TUI restore, migration backfill). The noise rule
+    compares `served_count - grace_served_base` with `memory_noise_serves`,
+    so a restored or edited memory needs that many new serves, not only a
+    new grace period, before it can be pruned again. Refines items 8, 11
+    and 12.
+16. **`get_memory` carries the flag.** Its result has `incorrect: true` when
+    the memory is flagged (omitted otherwise), the same JSON field as search
+    hits. Extends item 13.
+17. **Accepted as they are, for a follow-up issue:** `list_channels` message
+    counts include pruned memories; `send` with `reply_to` naming a pruned
+    memory's seq still succeeds; `memory_feedback`, restore and clear-flag
+    do not run the inspection hook (the TUI delete does); the flagged-last
+    ordering applies within text search's existing 1000-candidate ceiling.
+
 ## Approaches considered
 
 - **A. Extend `memory_access` (chosen).** Add counters, feedback, flag and
@@ -126,6 +147,7 @@ fresh databases):
 | `used_count` | INTEGER NOT NULL DEFAULT 0 | `USED` verdicts, ever |
 | `used_at` | INTEGER (null) | last `USED`, unix ms |
 | `grace_from` | INTEGER NOT NULL DEFAULT 0 | start of the noise grace period |
+| `grace_served_base` | INTEGER NOT NULL DEFAULT 0 | `served_count` when `grace_from` was last set (orchestrator's call during planning) |
 | `incorrect_at` | INTEGER (null) | when the current INCORRECT flag was set |
 | `incorrect_by` | TEXT (null) | identity that set it |
 | `incorrect_served_base` | INTEGER NOT NULL DEFAULT 0 | `served_count` when the flag was set |
@@ -138,7 +160,9 @@ memories already past the 720-hour grace, so a memory served 20 times in the
 first days after upgrade, before agents have learned to send `USED`, would be
 pruned at once. Migration time gives every existing memory the full grace
 period, the same reasoning as ADR 0013's `accessed_at` backfill
-(migrate.go:206). The step is idempotent: re-running the
+(migrate.go:206). `grace_served_base` is backfilled to the row's
+`served_count` in the same statement (orchestrator's call during planning).
+The step is idempotent: re-running the
 version check finds user_version 15 and skips it, and the ADD COLUMN step
 only runs inside the 14 -> 15 migration under the existing write-lock
 re-read. `admin.go`'s table list needs no change (same table).
@@ -146,10 +170,10 @@ re-read. `admin.go`'s table list needs no change (same table).
 ### Write paths
 
 - **Create** (`insertMessage` on a memory channel): inserts the row as today
-  with counters 0 and `grace_from = now`.
+  with counters 0, `grace_from = now` and `grace_served_base = 0`.
 - **Edit** (`EditMemory`): as today sets `accessed_at = now`; also sets
-  `grace_from = now` and clears `incorrect_at`, `incorrect_by`,
-  `incorrect_served_base`. Counters carry over. An edit of a pruned memory
+  `grace_from = now` and `grace_served_base = served_count`, and clears
+  `incorrect_at`, `incorrect_by`, `incorrect_served_base`. Counters carry over. An edit of a pruned memory
   is refused as `not_found`, the same error and wording as a deleted memory
   (agents); the TUI restores first. Filtering in `liveRevision`'s agent path
   is the likely single place for edit, delete and feedback.
@@ -219,15 +243,18 @@ Agent search hits on a memory with `incorrect_at` set carry
 hits; order among flagged hits follows the normal score. The flag-last
 ordering is applied after text/semantic fusion and before the limit cut.
 `incorrect` is a JSON field on the shared hit struct, so the TUI sees it too.
-Counts are not included in hits.
+Counts are not included in hits. `get_memory` returns the same
+`incorrect: true` field on a flagged memory, omitted otherwise
+(orchestrator's call during planning).
 
 ### Maintenance tick
 
 A new "memory hygiene" step runs after "memory expiry", in chunks like
 `memoryExpiryChunk`, setting `pruned_at = now` and `pruned_reason`:
 
-- **Noise:** `pruned_at IS NULL AND used_count = 0 AND served_count >=
-  memory_noise_serves AND grace_from < now - memory_noise_grace_hours`.
+- **Noise:** `pruned_at IS NULL AND used_count = 0 AND served_count -
+  grace_served_base >= memory_noise_serves AND grace_from < now -
+  memory_noise_grace_hours` (serves since the grace start; orchestrator's call during planning).
 - **Incorrect:** `pruned_at IS NULL AND incorrect_at IS NOT NULL AND
   incorrect_at < now - memory_incorrect_prune_hours AND served_count -
   incorrect_served_base > memory_incorrect_prune_serves AND (used_at IS NULL
@@ -263,7 +290,8 @@ tests, install goldens) and updates them.
   pruned.
 - Pruned memories appear in their channel and in TUI search, dimmed.
 - Actions on a pruned memory: restore (clears `pruned_at` and
-  `pruned_reason`, sets `grace_from = now`; leaves the counters)
+  `pruned_reason`, sets `grace_from = now` and `grace_served_base =
+  served_count`; leaves the counters)
   and delete. The TUI has no memory delete today (only the MCP
   `delete_memory` handler calls `DeleteMemory`), so add a TUI delete for any
   memory, pruned or not (my call): a bus method that resolves the live
@@ -288,8 +316,8 @@ to pruned memories. Read-only; it does not touch counters.
 ### Docs and agent guidance
 
 - Tool descriptions: `memory_feedback` (new), `search` (the `incorrect`
-  field, pruned memories never appear), `get_memory`, `edit_memory` (clears
-  the flag).
+  field, pruned memories never appear), `get_memory` (the `incorrect`
+  field), `edit_memory` (clears the flag).
 - The using-agentbus skill, the register tool description or instructions,
   and the SessionStart hook text: after relying on a memory, send `USED`; on
   finding one wrong, correct it with `edit_memory`, or flag it `INCORRECT`
@@ -317,7 +345,9 @@ to pruned memories. Read-only; it does not touch counters.
   transaction; whichever commits first wins, and a feedback call that loses
   gets `not found`.
 - **Restore then immediate re-prune:** prevented by the fresh `grace_from`
-  (noise rule) and the cleared flag (incorrect rule).
+  (noise rule) and the cleared flag (incorrect rule). A later noise prune
+  also needs `memory_noise_serves` new serves, counted from
+  `grace_served_base`.
 
 ## Left to the builder
 

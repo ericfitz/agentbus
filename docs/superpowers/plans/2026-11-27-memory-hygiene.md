@@ -17,11 +17,11 @@
 - Shell is zsh: unquoted `$VAR` is not word-split; build lists as arrays. Always give `rg` an explicit path (`rg PATTERN internal`). No GNU `timeout`/`sha256sum`.
 - Pure Go only: no cgo, no new dependency.
 - American English in code, comments and docs. Wrap docs as the surrounding file does.
-- Schema: `schemaVersion` 15; new columns exactly as the spec's table (`served_count`, `used_count`, `used_at`, `grace_from`, `incorrect_at`, `incorrect_by`, `incorrect_served_base`, `pruned_at`, `pruned_reason`).
+- Schema: `schemaVersion` 15; new columns exactly as the spec's table (`served_count`, `used_count`, `used_at`, `grace_from`, `grace_served_base`, `incorrect_at`, `incorrect_by`, `incorrect_served_base`, `pruned_at`, `pruned_reason`).
 - Config keys and defaults: `memory_noise_grace_hours` 720, `memory_noise_serves` 20, `memory_incorrect_prune_hours` 336, `memory_incorrect_prune_serves` 5. Hours range 0 to 87600; serves range 0 to 1000000. Either key of a rule at 0 disables that rule.
 - Verdicts are the case-sensitive strings `USED` and `INCORRECT`. `pruned_reason` is `noise` or `incorrect`.
 - A pruned memory answers agents exactly as a deleted one: `not_found`, message `memory %d has no live revision`. No agent-visible text, field or error may differ between the two.
-- Agents never see counts; hits carry only `incorrect: true` (omitted when false).
+- Agents never see counts; search hits and the `get_memory` result carry only `incorrect: true` (omitted when false).
 - The include-pruned switch is never a JSON field and never reachable from an MCP input struct.
 - Task rows and task channels are unchanged: no `memory_access` row, no feedback, no counters, no pruning.
 - Tests that jump `b.Now` call `b.Heartbeat()` before `b.Tick` (the stale-session sweep would end the test's session otherwise), as `internal/bus/maintenance_test.go:627-633` does.
@@ -34,7 +34,7 @@
 2. A tags-only search and a channel-scoped search (paths the spec does not name) must not return a pruned memory (Task 3: `TestPrunedHiddenFromAgentReads`).
 3. `task_get`, `task_update`, `task_claim` and `task_release` given a pruned memory's id must answer exactly as for a deleted memory's id, not "is not a task" (Task 3: `TestPrunedRefusedLikeDeleted` and the MCP leak test).
 4. Setting only one of a rule's two keys to 0 must switch that whole rule off and leave the other rule running (Task 6: `TestHygieneZeroDisables`).
-5. A memory the human restores must not be pruned again by the next tick, whether it was pruned for noise (stale `grace_from`) or as incorrect (flag still set) (Task 7: `TestRestoreMemory`).
+5. A memory the human restores must not be pruned again by the next tick, whether it was pruned for noise (stale `grace_from`) or as incorrect (flag still set); and a memory restored with 20 or more old serves must not be pruned when its fresh grace ends with no new serves (Task 7: `TestRestoreMemory`, `TestRestoredMemoryNeedsNewServes`).
 
 ---
 
@@ -60,6 +60,7 @@ type MemoryStats struct {
 	UsedCount           int64   `json:"used_count"`
 	UsedAt              *int64  `json:"used_at"`
 	GraceFrom           int64   `json:"grace_from"`
+	GraceServedBase     int64   `json:"grace_served_base"`
 	IncorrectAt         *int64  `json:"incorrect_at"`
 	IncorrectBy         *string `json:"incorrect_by"`
 	IncorrectServedBase int64   `json:"incorrect_served_base"`
@@ -68,14 +69,14 @@ type MemoryStats struct {
 }
 
 // memoryStatsCols lists every memory_access column qualified by alias a.
-const memoryStatsCols = "a.memory_id, a.accessed_at, a.served_count, a.used_count, a.used_at, a.grace_from, a.incorrect_at, a.incorrect_by, a.incorrect_served_base, a.pruned_at, a.pruned_reason"
+const memoryStatsCols = "a.memory_id, a.accessed_at, a.served_count, a.used_count, a.used_at, a.grace_from, a.grace_served_base, a.incorrect_at, a.incorrect_by, a.incorrect_served_base, a.pruned_at, a.pruned_reason"
 
 func scanMemoryStats(rows *sql.Rows) ([]MemoryStats, error)
 
 // memoryAccessUpsertSQL takes (memory_id, now, now). Create and edit share it.
 const memoryAccessUpsertSQL = `INSERT INTO memory_access(memory_id, accessed_at, grace_from) VALUES(?,?,?)
   ON CONFLICT(memory_id) DO UPDATE SET accessed_at=excluded.accessed_at, grace_from=excluded.grace_from,
-  incorrect_at=NULL, incorrect_by=NULL, incorrect_served_base=0`
+  grace_served_base=served_count, incorrect_at=NULL, incorrect_by=NULL, incorrect_served_base=0`
 ```
 
 - Produces (test helpers in `hygiene_test.go`, reused by Tasks 2 to 7):
@@ -92,29 +93,29 @@ func clockAt(b *Bus, t0 time.Time, d time.Duration)             // b.Now = func(
 
 ```go
 // TestMigrate14To15
-//   user_version == 15; pragma_table_info('memory_access') has 11 columns
+//   user_version == 15; pragma_table_info('memory_access') has 12 columns
 //   rows keep accessed_at 111 and 222; served_count == 0; used_count == 0;
-//   incorrect_served_base == 0; used_at, incorrect_at, incorrect_by,
+//   grace_served_base == 0; incorrect_served_base == 0; used_at, incorrect_at, incorrect_by,
 //   pruned_at, pruned_reason are NULL
 //   before <= grace_from <= after (time.Now ms around the reopen), both rows
 // TestMigrate14To15SecondOpenIsNoop
 //   close, reopen again: every column of both rows is byte-identical
 // TestMigrate14To15Leftovers
-//   a fresh-DDL file (all 11 columns) with rows (1, grace_from=777) and
-//   (2, grace_from=0), stamped 14: Open succeeds, row 1 keeps 777, row 2 is
-//   backfilled to the migration time
+//   a fresh-DDL file (all 12 columns) with rows (1, grace_from=777, served_count=9) and
+//   (2, grace_from=0, served_count=4), stamped 14: Open succeeds; row 1 keeps 777 and
+//   grace_served_base 0; row 2 gets the migration time and grace_served_base == 4
 // TestMigrate14To15WithoutTable
 //   memory_access dropped, stamped 14: Open succeeds (the schema DDL
-//   recreates the table), 11 columns
+//   recreates the table), 12 columns
 ```
 
 Also add to the existing `TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions`: every backfilled row has `grace_from` between `before` and `after`.
 
 - [ ] **Step 2: Run** `go test ./internal/bus/ -run 'TestMigrate14To15|TestMigrateV6AddsMemoryAccess'`. Expected: FAIL (user_version 14, missing columns).
 
-- [ ] **Step 3: Implement the schema change.** `schemaVersion = 15`. `memoryAccessDDL` gains the nine columns with the spec's types and defaults. `migrations[14] = addMemoryHygiene`.
+- [ ] **Step 3: Implement the schema change.** `schemaVersion = 15`. `memoryAccessDDL` gains the ten columns with the spec's types and defaults. `migrations[14] = addMemoryHygiene`.
 
-`func addMemoryHygiene(tx *sql.Tx) error` (schema 14 -> 15, #53): return nil when the table is absent (as `addTagRanges` does); add each column only when `pragma_table_info('memory_access')` lacks it (as `addSessionHarness` does); then `UPDATE memory_access SET grace_from=? WHERE grace_from=0` with `time.Now().UnixMilli()` (migrate runs before the Bus clock exists, same as `addMemoryAccessAndDropTaskSubscriptions`).
+`func addMemoryHygiene(tx *sql.Tx) error` (schema 14 -> 15, #53): return nil when the table is absent (as `addTagRanges` does); add each column only when `pragma_table_info('memory_access')` lacks it (as `addSessionHarness` does); then `UPDATE memory_access SET grace_from=?, grace_served_base=served_count WHERE grace_from=0` with `time.Now().UnixMilli()` (migrate runs before the Bus clock exists, same as `addMemoryAccessAndDropTaskSubscriptions`).
 
 - [ ] **Step 4: Run** the Step 2 command. Expected: PASS. Run `go test ./internal/bus/ -run TestMigrate`. Expected: PASS (every older chain still ends at 15).
 
@@ -123,7 +124,7 @@ Also add to the existing `TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions
 ```go
 // TestCreateSetsGraceFromAndZeroCounters
 //   clockAt(b, t0, 0); id := remember(...); s := stats(t, b, id)
-//   s.ServedCount == 0 && s.UsedCount == 0 && s.IncorrectServedBase == 0
+//   s.ServedCount == 0 && s.UsedCount == 0 && s.GraceServedBase == 0 && s.IncorrectServedBase == 0
 //   s.GraceFrom == t0.UnixMilli() && s.AccessedAt == t0.UnixMilli()
 //   s.UsedAt == nil && s.IncorrectAt == nil && s.IncorrectBy == nil && s.PrunedAt == nil && s.PrunedReason == nil
 // TestEditRestartsGraceClearsFlagKeepsCounters
@@ -131,7 +132,7 @@ Also add to the existing `TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions
 //   clockAt(b, t0, time.Hour); EditMemory(sam, EditInput{ID: id, Content: "v2"})
 //   s.ServedCount == 7 && s.UsedCount == 2 && *s.UsedAt == 5
 //   s.IncorrectAt == nil && s.IncorrectBy == nil && s.IncorrectServedBase == 0
-//   s.GraceFrom == t0.Add(time.Hour).UnixMilli() && s.AccessedAt == s.GraceFrom
+//   s.GraceFrom == t0.Add(time.Hour).UnixMilli() && s.AccessedAt == s.GraceFrom && s.GraceServedBase == 7
 ```
 
 - [ ] **Step 6: Run** `go test ./internal/bus/ -run 'TestCreateSetsGraceFrom|TestEditRestartsGrace'`. Expected: FAIL (`MemoryStats` undefined, then `grace_from` 0).
@@ -384,11 +385,12 @@ git commit -m "feat(memory): memory_feedback tool records USED and INCORRECT (#5
 
 ---
 
-### Task 5: Search marks flagged hits and ranks them last
+### Task 5: Search marks flagged hits and ranks them last; `get_memory` carries the flag
 
 **Files:**
 - Modify: `internal/bus/search.go:71-74` (`SearchHit`), the shared search body after the mode switch and before `page := ranked[offset:]`
-- Test: `internal/bus/search_test.go`, `internal/mcpserver/server_test.go`
+- Modify: `internal/bus/hygiene.go` (`FlaggedMemory`, `GetMemoryFlagged`), `internal/mcpserver/server.go:541-550` (the `get_memory` handler)
+- Test: `internal/bus/search_test.go`, `internal/bus/hygiene_test.go`, `internal/mcpserver/server_test.go`
 
 **Interfaces:**
 - Consumes: `MemoryFeedback` (Task 4), `SearchAll`, `pruneRaw` (Task 3).
@@ -408,7 +410,20 @@ type SearchHit struct {
 // flagged and pruned ids) and moves flagged hits after every unflagged one,
 // keeping the existing order inside each group (sort.SliceStable).
 func (b *Bus) markHits(hits []SearchHit) ([]SearchHit, error)
+
+// FlaggedMemory is get_memory's result: the message plus the same incorrect
+// field search hits carry (spec item 16).
+type FlaggedMemory struct {
+	Message
+	Incorrect bool `json:"incorrect,omitempty"`
+}
+
+// GetMemoryFlagged is GetMemory plus one memory_access lookup; a row with
+// no memory_access entry (a task) is never flagged.
+func (b *Bus) GetMemoryFlagged(as string, id int64) (FlaggedMemory, error)
 ```
+
+  `GetMemory` keeps its signature. The `get_memory` handler calls `GetMemoryFlagged` and still calls `TouchMemoryAccess` on success, as today.
 
   `markHits` runs on the full ranked list of every mode (text, semantic, both after fusion, tags-only), before the cursor offset and the count cut. Task-channel hits are never marked.
 
@@ -434,23 +449,33 @@ func (b *Bus) markHits(hits []SearchHit) ([]SearchHit, error)
 // TestEditedMemoryLosesFlagInSearch
 //   EditMemory(a): the new revision's hit has Incorrect == false
 
+// internal/bus/hygiene_test.go
+// TestGetMemoryFlagged
+//   unflagged: Incorrect == false; json.Marshal(result) equals json.Marshal of GetMemory's Message (no "incorrect" key)
+//   after MemoryFeedback(kim, {id, INCORRECT}): Incorrect == true; the JSON has "incorrect":true and no count field
+//   after EditMemory: Incorrect == false
+//   pruned: not_found, "memory <id> has no live revision"
+
 // internal/mcpserver/server_test.go
 // TestSearchToolCarriesIncorrect
 //   after memory_feedback INCORRECT: the search result's hit has "incorrect": true;
 //   an unflagged hit's map has no "incorrect" key
+// TestGetMemoryToolCarriesIncorrect
+//   get_memory on a flagged memory: result["incorrect"] == true; on an unflagged one the key is absent;
+//   served_count still rises by 1 per call (raw connection)
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/bus/ ./internal/mcpserver/ -run 'TestSearchFlagged|TestSearchAllMarksPruned|TestEditedMemoryLosesFlag|TestSearchToolCarriesIncorrect'`. Expected: FAIL (fields undefined).
+- [ ] **Step 2: Run** `go test ./internal/bus/ ./internal/mcpserver/ -run 'TestSearchFlagged|TestSearchAllMarksPruned|TestEditedMemoryLosesFlag|TestGetMemoryFlagged|TestSearchToolCarriesIncorrect|TestGetMemoryToolCarriesIncorrect'`. Expected: FAIL (fields and `GetMemoryFlagged` undefined).
 
-- [ ] **Step 3: Implement** the two fields and `markHits`, and call it in the shared search body.
+- [ ] **Step 3: Implement** the two fields and `markHits`, and call it in the shared search body; implement `FlaggedMemory` and `GetMemoryFlagged` and switch the `get_memory` handler to it.
 
 - [ ] **Step 4: Run** `go vet ./... && go test ./internal/bus/ ./internal/mcpserver/ ./internal/tui/ && make fmt-check lint`. Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/bus/search.go internal/bus/search_test.go internal/mcpserver/server_test.go
-git commit -m "feat(search): hits on flagged memories carry incorrect and rank last (#53)"
+git add internal/bus/search.go internal/bus/search_test.go internal/bus/hygiene.go internal/bus/hygiene_test.go internal/mcpserver/server.go internal/mcpserver/server_test.go
+git commit -m "feat(search): flagged memories carry incorrect on search and get_memory, and rank last (#53)"
 ```
 
 ---
@@ -481,7 +506,7 @@ func (b *Bus) pruneChunk(now int64, reason, cond string, args ...any) (int, erro
 
   Tick step name: `"memory hygiene"`, directly after `"memory expiry"`. `memoryHygiene` runs the incorrect rule to completion (`loopChunks`), then the noise rule, so a row matching both gets reason `incorrect`; it skips a rule when either of its keys is 0. `pruneChunk` is one statement: `UPDATE memory_access SET pruned_at=?, pruned_reason=? WHERE memory_id IN (SELECT memory_id FROM memory_access WHERE pruned_at IS NULL AND <cond> LIMIT ?)` with `cleanupChunk`, returning rows affected, and logs `memories pruned` with `reason` and `count` when it pruned any. Conditions, verbatim from the spec:
   - incorrect: `incorrect_at IS NOT NULL AND incorrect_at < ? AND served_count - incorrect_served_base > ? AND (used_at IS NULL OR used_at < incorrect_at)` with `now - hours*3_600_000` and the serves key
-  - noise: `used_count = 0 AND served_count >= ? AND grace_from < ?` with the serves key and `now - hours*3_600_000`
+  - noise: `used_count = 0 AND served_count - grace_served_base >= ? AND grace_from < ?` with the serves key and `now - hours*3_600_000` (serves since the grace start, spec item 15)
 - Health lines after `memory expiry`: `noise prune 720 h · 20 serves` and `incorrect prune 336 h · 5 serves` (labels dim, like the lines above them).
 
 - [ ] **Step 1: Write the failing config tests** in `config_test.go`: `TestHygieneDefaults` (720, 20, 336, 5); `TestHygieneOverrideAcceptsZero` (all four at 0 load); `TestRejectsOutOfRangeHygieneKeys` (each key at -1, each hours key at 87601, each serves key at 1000001: the error names the key).
@@ -502,6 +527,9 @@ func (b *Bus) pruneChunk(now int64, reason, cond string, args ...any) (int, erro
 // TestNoiseNeedsServesAndZeroUsed
 //   served 19, used 0, t0+721H            -> not pruned
 //   served 500, used 1, t0+721H           -> not pruned
+// TestNoiseCountsServesSinceGraceStart
+//   served 34, grace_served_base 15 (19 since), t0+721H -> not pruned
+//   served 35, grace_served_base 15 (20 since), t0+721H -> pruned, reason "noise"
 // TestIncorrectPrune (flag at F = t0+1H via setAccess: incorrect_at=F, incorrect_by='Kim', incorrect_served_base=10)
 //   served 16, used_at NULL, now F+337H   -> pruned, reason "incorrect"
 //   served 15, now F+337H                 -> not pruned ("more than 5")
@@ -523,7 +551,9 @@ func (b *Bus) pruneChunk(now int64, reason, cond string, args ...any) (int, erro
 // TestPrunedMemoryStillExpiresAtOneYear
 //   pruned at t0+721H; tick at t0+8761H -> its memory_access row is gone and its message row has tombstone=1
 // TestEditRestartsNoiseGrace
-//   served 20; EditMemory at t0+719H; tick at t0+721H -> not pruned
+//   served 20; EditMemory at E = t0+719H; tick at t0+721H -> not pruned
+//   tick at E+721H with no new serve -> not pruned (the edit set grace_served_base to 20)
+//   20 TouchMemoryAccess calls, then tick at E+721H+1H -> pruned, reason "noise"
 ```
 
 - [ ] **Step 5: Run** `go test ./internal/bus/ -run 'TestNoise|TestIncorrectPrune|TestBothRules|TestHygiene|TestPrunedMemoryStillExpires|TestEditRestartsNoiseGrace'`. Expected: FAIL (nothing prunes).
@@ -558,7 +588,7 @@ git commit -m "feat(memory): tick soft-prunes noise and uncorrected incorrect me
 ```go
 // ChannelMemoryStats returns the memory_access row of every live memory on channel, pruned ones included, keyed by memory id.
 func (b *Bus) ChannelMemoryStats(as, channel string) (map[int64]MemoryStats, error)
-// RestoreMemory clears pruned_at, pruned_reason and the INCORRECT flag (all three columns) and sets grace_from=now; counters stay.
+// RestoreMemory clears pruned_at, pruned_reason and the INCORRECT flag (all three columns) and sets grace_from=now and grace_served_base=served_count; counters stay.
 func (b *Bus) RestoreMemory(as string, id int64) error
 // ClearMemoryIncorrect clears incorrect_at, incorrect_by, incorrect_served_base on any live memory, pruned or not; pruned state stays.
 func (b *Bus) ClearMemoryIncorrect(as string, id int64) error
@@ -578,12 +608,17 @@ func (b *Bus) DeleteMemoryAny(as string, id int64) error
 //   setAccess served_count=30, used_count=0, and the pruned and flag columns
 //   RestoreMemory(sam, id) at t0+1000H:
 //     s.PrunedAt == nil && s.PrunedReason == nil && s.IncorrectAt == nil && s.IncorrectBy == nil
-//     s.IncorrectServedBase == 0 && s.GraceFrom == now && s.ServedCount == 30
+//     s.IncorrectServedBase == 0 && s.GraceFrom == now && s.ServedCount == 30 && s.GraceServedBase == 30
 //   GetMemory(sam, id) succeeds
 //   b.Heartbeat(); b.Tick(ctx) at the same instant and at +1H -> still not pruned
 //   RestoreMemory again -> validation "memory <id> is not pruned"; stats unchanged
+// TestRestoredMemoryNeedsNewServes (spec item 15)
+//   pruned "noise" with served_count=30, used_count=0; RestoreMemory at R = t0+1000H
+//   b.Heartbeat(); b.Tick at R+721H with no new serve -> PrunedAt == nil
+//   19 TouchMemoryAccess calls; tick at R+722H -> PrunedAt == nil
+//   1 more TouchMemoryAccess (20 since the restore); tick at R+723H -> pruned, reason "noise"
 // TestClearMemoryIncorrect
-//   flagged -> the three columns cleared, counters and grace_from unchanged
+//   flagged -> the three columns cleared; counters, grace_from and grace_served_base unchanged
 //   flagged and pruned -> flag cleared, PrunedAt still set
 //   unflagged -> validation "memory <id> is not flagged incorrect"
 // TestDeleteMemoryAny
@@ -593,7 +628,7 @@ func (b *Bus) DeleteMemoryAny(as string, id int64) error
 //   with a refusing hook (hookScript, internal/bus/inspect_test.go) -> refused, the memory is still live
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/bus/ -run 'TestChannelMemoryStatsIncludesPruned|TestRestoreMemory|TestClearMemoryIncorrect|TestDeleteMemoryAny'`. Expected: FAIL (methods undefined).
+- [ ] **Step 2: Run** `go test ./internal/bus/ -run 'TestChannelMemoryStatsIncludesPruned|TestRestore|TestClearMemoryIncorrect|TestDeleteMemoryAny'`. Expected: FAIL (methods undefined).
 
 - [ ] **Step 3: Implement** the four methods in `hygiene.go`.
 
@@ -750,9 +785,9 @@ func ExportMemories(cfg config.Config, prunedOnly bool, out io.Writer) error
 
 // internal/cli/exportcmd_test.go (statusEnv(t) for the config; a peer bus seeds two memories)
 // TestExportMemoriesWritesOneObjectPerLine
-//   two lines; each decodes into map[string]any holding all 18 keys: channel, revision, sender, created_at,
+//   two lines; each decodes into map[string]any holding all 19 keys: channel, revision, sender, created_at,
 //   subject, content, tags, memory_id, accessed_at, served_count, used_count, used_at, grace_from,
-//   incorrect_at, incorrect_by, incorrect_served_base, pruned_at, pruned_reason
+//   grace_served_base, incorrect_at, incorrect_by, incorrect_served_base, pruned_at, pruned_reason
 //   "used_at" is present with value nil on a never-used memory
 // TestExportMemoriesPrunedOnly
 //   one of the two pruned through a raw connection: -pruned output is that one line
@@ -801,7 +836,7 @@ git commit -m "feat(cli): agentbus export-memories writes memories with their co
     ```
   - `register` description, appended: ` After relying on a memory call memory_feedback with USED; correct a wrong memory with edit_memory, or flag it INCORRECT when you do not know the right answer.`
   - `search` description, appended: ` A hit on a memory flagged INCORRECT carries incorrect=true and ranks after every unflagged hit; verify it before relying on it. Memories retired by maintenance (served often but never reported USED, or flagged INCORRECT and left uncorrected) do not appear. Report the memories you relied on with memory_feedback.`
-  - `get_memory` description, appended: ` If you rely on it, report USED with memory_feedback; if it is wrong, correct it with edit_memory or flag it INCORRECT.`
+  - `get_memory` description, appended: ` If you rely on it, report USED with memory_feedback; if it is wrong, correct it with edit_memory or flag it INCORRECT. A memory flagged INCORRECT comes back with incorrect=true.`
   - `edit_memory` description, appended: ` Editing clears an INCORRECT flag.`
 
 - [ ] **Step 1: Write the failing text tests.**
@@ -817,7 +852,7 @@ git commit -m "feat(cli): agentbus export-memories writes memories with their co
 //   "- After relying on a memory, report it with memory_feedback (verdict USED)."
 // internal/mcpserver/agent_text_test.go
 // TestMemoryToolDescriptionsExplainFeedback
-//   search mentions "incorrect=true" and "memory_feedback"; get_memory and register mention "memory_feedback";
+//   search mentions "incorrect=true" and "memory_feedback"; get_memory mentions "incorrect=true"; get_memory and register mention "memory_feedback";
 //   edit_memory mentions "clears an INCORRECT flag"; no description contains "served_count" or "used_count"
 ```
 
@@ -839,7 +874,7 @@ Expected: second command PASS; the diff touches only the hash columns of `SKILL.
 
 - [ ] **Step 6: Human docs.** `README.md`: the "Harness-independent memory" paragraph gains two sentences (agents report `USED` or `INCORRECT` with `memory_feedback`; memories that are only noise, or wrong and uncorrected, are hidden from agents and kept for the human, who can restore or delete them in the TUI); `:172` lists `memory_feedback` with the memory tools; "From the shell" gains `agentbus export-memories [-pruned]`. `docs/install.md`: a paragraph after `:351` documenting the four keys with defaults, ranges, the two rules and "either key at 0 disables the rule"; the TUI key reference gains the header label (`served N · used N`, `incorrect by <who> <when>`, `pruned (<reason>)`, dimmed rows) and the keys `R`, `f`, `x`; the command list gains `export-memories` with its field list. Check each sentence against the code from Tasks 1 to 9, not against this plan.
 
-- [ ] **Step 7: ADR.** Write `docs/adr/0033-memory-hygiene.md` in the form of `docs/adr/0032-embed-every-kind.md`: status line `Accepted (Eric, 2026-11-27). Human decision, recorded by Claude.`; context (ADR 0013 items 6 and 7, the gap); a "Decision (Eric, 2026-11-27)" section quoting human decisions 1 to 6 from the spec verbatim, then the approved proposals 7 to 14 labeled as proposals Eric approved; consequences (schema 15, all sessions restart; pruned memories still hard-deleted by the 1-year rule; agents cannot see or revive a pruned memory). State that it amends ADR 0013 items 6 and 7. Add `Amended by ADR 0033 (items 6 and 7: serving, feedback, soft pruning).` to ADR 0013, placed and worded like the "Superseded in part" line in ADR 0030. Search the new and changed docs for private hostnames, IPs and account names before committing: `rg -n '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.local\b|@' docs/adr/0033-memory-hygiene.md`.
+- [ ] **Step 7: ADR.** Write `docs/adr/0033-memory-hygiene.md` in the form of `docs/adr/0032-embed-every-kind.md`: status line `Accepted (Eric, 2026-11-27). Human decision, recorded by Claude.`; context (ADR 0013 items 6 and 7, the gap); a "Decision (Eric, 2026-11-27)" section quoting human decisions 1 to 6 from the spec verbatim, then the approved proposals 7 to 14 labeled as proposals Eric approved, then spec items 15 to 17 under their own heading labeled as the orchestrator's calls during planning, not human decisions; consequences (schema 15, all sessions restart; pruned memories still hard-deleted by the 1-year rule; agents cannot see or revive a pruned memory). State that it amends ADR 0013 items 6 and 7. Add `Amended by ADR 0033 (items 6 and 7: serving, feedback, soft pruning).` to ADR 0013, placed and worded like the "Superseded in part" line in ADR 0030. Search the new and changed docs for private hostnames, IPs and account names before committing: `rg -n '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|\.local\b|@' docs/adr/0033-memory-hygiene.md`.
 
 - [ ] **Step 8: Full gate.** Run `make verify`. Expected: ends with `verify: OK`. Paste the tail of its output in the task report.
 
@@ -852,13 +887,18 @@ git commit -m "docs(memory): feedback guidance for agents, hygiene docs, ADR 003
 
 ---
 
-## Spec gaps found while planning (not resolved here)
+## Spec gaps found while planning
 
-Each is listed for a human decision; the plan follows the spec's literal text until one is made.
+Decided by the orchestrator on 2026-11-27 and recorded in the spec as "orchestrator's call during planning" (items 15 to 17); none is a human decision.
 
-1. `list_channels` reports `messages` as a count of live rows (`internal/bus/admin.go:72`), so a pruned memory still counts while a deleted one does not. The spec's list of tools that treat a pruned memory as nonexistent does not include it. The plan leaves the count unchanged.
-2. `send` with `reply_to` set to a pruned memory's seq succeeds for as long as the row exists (`validateSendRefs` only checks the row exists), while a deleted memory's seq stops working once the tombstone purge removes it after `tombstone_min_hours`. The plan leaves it unchanged.
-3. The noise rule uses the lifetime `served_count`. A memory restored by the human, or edited, that already has 20 or more serves and never gets a `USED` is pruned again when the fresh grace period ends, with no new serves. The spec only guarantees no immediate re-prune; the plan implements and tests exactly that.
-4. The spec does not say whether `memory_feedback`, restore or clear-flag run the inspection hook. The plan runs it only for the TUI delete (the spec asks for that); feedback carries no content.
-5. `get_memory` returns a bare message with no `incorrect` field, so an agent fetching a flagged memory by id is not told it is flagged. The spec puts the flag on search hits only; the plan follows it.
-6. Text search ranks only the best 1000 matches (`searchPageMax`) before the flagged-last reorder, so the reorder applies inside that ceiling. No behavior change is planned.
+Resolved, and in the tasks above:
+
+- Gap 3: the noise rule counts serves since the grace start (`grace_served_base`, spec item 15; Tasks 1, 6 and 7).
+- Gap 5: `get_memory` returns `incorrect: true` on a flagged memory (spec item 16; Tasks 5 and 10).
+
+Accepted, follow-up issue (no task changes them):
+
+- Gap 1: `list_channels` reports `messages` as a count of live rows (`internal/bus/admin.go:72`), so a pruned memory still counts while a deleted one does not.
+- Gap 2: `send` with `reply_to` set to a pruned memory's seq succeeds for as long as the row exists (`validateSendRefs` only checks the row exists), while a deleted memory's seq stops working once the tombstone purge removes it after `tombstone_min_hours`.
+- Gap 4: `memory_feedback`, restore and clear-flag do not run the inspection hook; only the TUI delete does.
+- Gap 6: text search ranks only the best 1000 matches (`searchPageMax`) before the flagged-last reorder, so the reorder applies inside that ceiling.

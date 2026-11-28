@@ -20,3 +20,9 @@ func TestStopwatchIconHasNoEscapesWindows(t *testing.T) {
 		t.Fatalf("stopwatchIcon = %q", stopwatchIcon)
 	}
 }
+
+func TestWastebasketIconHasNoEscapesWindows(t *testing.T) {
+	if strings.Contains(wastebasketIcon, "\x1b") || wastebasketIcon != "\U0001F5D1\uFE0F " {
+		t.Fatalf("wastebasketIcon = %q", wastebasketIcon)
+	}
+}

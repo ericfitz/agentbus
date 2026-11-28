@@ -261,8 +261,8 @@ var (
 	iconArrow = " \u2192 "          // rightwards arrow; ambiguous width, 1 column in Western setups
 	iconError = "\u2717 "           // ballot X, the toast and overlay-footer error prefix
 
-	iconPruned    = "\U0001F5D1\uFE0F " // wastebasket, a pruned memory
-	iconIncorrect = "\u274C "           // cross mark (red X), a memory flagged incorrect
+	iconPruned    = wastebasketIcon // wastebasket; per OS, see icons_unix.go and icons_windows.go
+	iconIncorrect = "\u274C "       // cross mark (red X), a memory flagged incorrect
 )
 
 // statusIcons are the agent status icons, in statusIconTags order; iconVars
@@ -946,7 +946,7 @@ func (m *Model) renderStream() string {
 		if pruned {
 			// Dim the whole row: the header's own colors would survive a
 			// wrapping style, so flatten them first.
-			head, text = rowDim.Render(ansi.Strip(head)), rowDim.Render(text)
+			head, text = dimKeepingIcon(rowDim, head), rowDim.Render(text)
 		}
 		line := head + "\n" + text
 		if r.hidden > 0 {

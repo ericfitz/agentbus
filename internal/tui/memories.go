@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -224,4 +226,11 @@ func (m *Model) updateConfirmMemory(msg tea.Msg) tea.Cmd {
 // confirmMemoryLine is the compose-row text while modeConfirmMemory is up.
 func (m Model) confirmMemoryLine() string {
 	return m.theme.Style(m.theme.Error).Render(fmt.Sprintf("delete memory #%d \"%s\" PERMANENTLY? no undo · y yes  any other key no", m.confirmMem.id, m.confirmMem.title))
+}
+
+// dimKeepingIcon renders s in one dim style, dropping its own colors, but
+// leaves the pruned icon as iconPruned so its cursor escapes (see
+// wastebasketIcon) survive the strip.
+func dimKeepingIcon(dim lipgloss.Style, s string) string {
+	return strings.Replace(dim.Render(ansi.Strip(s)), ansi.Strip(iconPruned), iconPruned, 1)
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -240,7 +239,7 @@ func (m Model) viewSearch() string {
 		// The marks sit before the text so a long subject cannot clip them.
 		line := fmt.Sprintf("%s%s #%d%s %s %s%s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(senderName(hit.Sender)), dim.Render(clock(hit.CreatedAt)), marks, first)
 		if hit.Pruned {
-			line = dim.Render(ansi.Strip(line))
+			line = dimKeepingIcon(dim, line)
 		}
 		if i == m.search.cursor {
 			line = th.Style(th.Agent).Render(markSel+" ") + line

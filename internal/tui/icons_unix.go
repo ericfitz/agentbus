@@ -12,6 +12,10 @@ package tui
 // cells, cursor stays, also uncounted) blanks both cells first.
 const gearIcon = "\x1b[2X\u2699\uFE0F\x1b[1C "
 
+// wastebasketIcon is the pruned-memory mark. U+1F5D1 is Neutral width and
+// text-presentation like the gear, so it gets the same CSI 2X / CSI 1C.
+const wastebasketIcon = "\x1b[2X\U0001F5D1\uFE0F\x1b[1C "
+
 // stopwatchIcon is the in-progress task mark. U+23F1 is Neutral width like
 // the gear, and Terminal.app advances one cell for it with U+FE0F too
 // (measured with CSI 6n, 2026-11-21), so it gets the same CSI 2X / CSI 1C.

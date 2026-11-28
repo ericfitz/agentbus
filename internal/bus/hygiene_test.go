@@ -742,7 +742,19 @@ func TestDeleteMemoryAny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	calls := b.inspectCalls.Load()
 	wantCode(t, b.DeleteMemoryAny(sam, tk.ID), "validation")
+	if got := b.inspectCalls.Load(); got != calls+1 {
+		t.Fatalf("task id: inspectCalls = %d, want %d (the hook runs before the task check)", got, calls+1)
+	}
+	wantCode(t, b.RestoreMemory(sam, tk.ID), "validation")
+	wantCode(t, b.ClearMemoryIncorrect(sam, tk.ID), "validation")
+	for _, err := range []error{b.RestoreMemory(sam, tk.ID), b.ClearMemoryIncorrect(sam, tk.ID)} {
+		var be *Error
+		if !errors.As(err, &be) || !strings.Contains(be.Message, "is a task list") {
+			t.Fatalf("task id error = %v, want the task-list text", err)
+		}
+	}
 
 	keep := remember(t, b, sam, "keep")
 	b.cfg.InspectionCommand = []string{hookScript(t, `cat >/dev/null; echo '{"allow": false, "reason": "no"}'`)}

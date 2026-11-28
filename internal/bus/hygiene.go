@@ -240,8 +240,12 @@ func (b *Bus) memoryAccessWrite(as string, id int64, update string, args []any, 
 	if err := b.auth(tx, as); err != nil {
 		return err
 	}
-	if _, _, _, err := liveRevisionAny(tx, id); err != nil {
+	_, _, channel, err := liveRevisionAny(tx, id)
+	if err != nil {
 		return err
+	}
+	if IsTaskChannel(channel) {
+		return errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
 	}
 	r, err := tx.Exec(update, args...)
 	if err != nil {

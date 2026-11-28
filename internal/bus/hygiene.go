@@ -158,3 +158,25 @@ func (b *Bus) MemoryFeedback(as string, items []FeedbackItem) (FeedbackResult, e
 	}
 	return FeedbackResult{Applied: items}, nil
 }
+
+// FlaggedMemory is get_memory's result: the message plus the same incorrect
+// field search hits carry.
+type FlaggedMemory struct {
+	Message
+	Incorrect bool `json:"incorrect,omitempty"`
+}
+
+// GetMemoryFlagged is GetMemory plus one memory_access lookup; a row with
+// no memory_access entry (a task) is never flagged.
+func (b *Bus) GetMemoryFlagged(as string, id int64) (FlaggedMemory, error) {
+	m, err := b.GetMemory(as, id)
+	if err != nil {
+		return FlaggedMemory{}, err
+	}
+	var flagged bool
+	err = b.db.QueryRow("SELECT incorrect_at IS NOT NULL FROM memory_access WHERE memory_id=?", id).Scan(&flagged)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return FlaggedMemory{}, internal(err)
+	}
+	return FlaggedMemory{Message: m, Incorrect: flagged}, nil
+}

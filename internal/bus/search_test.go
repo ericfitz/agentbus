@@ -617,3 +617,163 @@ func TestSearchKindsWithUntilAndThread(t *testing.T) {
 	wantChannels(t, searchChannels(t, b, sam, SearchInput{Until: &future, Kinds: []string{"memories"}}), "mem")
 	wantChannels(t, searchChannels(t, b, sam, SearchInput{Until: &future, Kinds: []string{"tasks"}}), "tasks/w")
 }
+
+// flagSetup is memories a, b, c on "mem"; a repeats the query word so it
+// scores best, then b, then c.
+func flagSetup(t *testing.T) (b *Bus, sam, kim string, a, bb, c int64) {
+	t.Helper()
+	b, sam, kim = memBus(t)
+	a = remember(t, b, sam, "widget widget widget alpha")
+	bb = remember(t, b, sam, "widget widget beta")
+	c = remember(t, b, sam, "widget gamma")
+	return b, sam, kim, a, bb, c
+}
+
+func flag(t *testing.T, b *Bus, as string, ids ...int64) {
+	t.Helper()
+	var items []FeedbackItem
+	for _, id := range ids {
+		items = append(items, FeedbackItem{MemoryID: id, Verdict: "INCORRECT"})
+	}
+	if _, err := b.MemoryFeedback(as, items); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hitIDs(hits []SearchHit) []int64 {
+	var ids []int64
+	for _, h := range hits {
+		ids = append(ids, *h.MemoryID)
+	}
+	return ids
+}
+
+func TestSearchFlaggedHitsRankLast(t *testing.T) {
+	b, sam, kim, a, bb, c := flagSetup(t)
+	flag(t, b, kim, a)
+	r, err := b.Search(sam, SearchInput{Query: "widget", Mode: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hitIDs(r.Hits); !slices.Equal(got, []int64{bb, c, a}) {
+		t.Fatalf("order = %v, want %v", got, []int64{bb, c, a})
+	}
+	for _, h := range r.Hits {
+		if h.Incorrect != (*h.MemoryID == a) {
+			t.Fatalf("Incorrect on %d = %v", *h.MemoryID, h.Incorrect)
+		}
+		j, _ := json.Marshal(h)
+		if *h.MemoryID != a && strings.Contains(string(j), "incorrect") {
+			t.Fatalf("unflagged hit carries incorrect: %s", j)
+		}
+		for _, k := range []string{"served_count", "used_count", "pruned"} {
+			if strings.Contains(string(j), k) {
+				t.Fatalf("hit leaks %q: %s", k, j)
+			}
+		}
+	}
+}
+
+func TestSearchFlaggedOrderAmongFlagged(t *testing.T) {
+	b, sam, kim, a, bb, c := flagSetup(t)
+	flag(t, b, kim, a, bb)
+	r, err := b.Search(sam, SearchInput{Query: "widget", Mode: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hitIDs(r.Hits); !slices.Equal(got, []int64{c, a, bb}) {
+		t.Fatalf("order = %v, want %v", got, []int64{c, a, bb})
+	}
+}
+
+func TestSearchFlaggedLastBeforeLimit(t *testing.T) {
+	b, sam, kim, a, bb, c := flagSetup(t)
+	flag(t, b, kim, a)
+	r, err := b.Search(sam, SearchInput{Query: "widget", Mode: "text", Count: 1})
+	if err != nil || len(r.Hits) != 1 || r.Hits[0].Incorrect || r.Next == "" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	var got []int64
+	got = append(got, *r.Hits[0].MemoryID)
+	for r.Next != "" {
+		if r, err = b.Search(sam, SearchInput{Query: "widget", Mode: "text", Count: 1, Cursor: r.Next}); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, hitIDs(r.Hits)...)
+	}
+	if !slices.Equal(got, []int64{bb, c, a}) {
+		t.Fatalf("paged order = %v", got)
+	}
+}
+
+func TestSearchFlaggedLastTagsOnly(t *testing.T) {
+	b, sam, kim := memBus(t)
+	x := *sendTagged(t, b, sam, "mem", "one", "kind:gotcha").MemoryID
+	y := *sendTagged(t, b, sam, "mem", "two", "kind:gotcha").MemoryID
+	z := *sendTagged(t, b, sam, "mem", "three", "kind:gotcha").MemoryID
+	flag(t, b, kim, z)
+	r, err := b.Search(sam, SearchInput{Tags: []string{"kind:gotcha"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hitIDs(r.Hits); !slices.Equal(got, []int64{y, x, z}) || !r.Hits[2].Incorrect {
+		t.Fatalf("order = %v (newest z flagged must be last)", got)
+	}
+}
+
+func TestSearchFlaggedLastBothMode(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	kim := reg(t, b, "Kim")
+	if _, err := b.CreateChannel(sam, "mem", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	red := remember(t, b, sam, "roses are red")
+	blue := remember(t, b, sam, "violets are blue")
+	drainEmbed(t, b)
+	flag(t, b, kim, red)
+	r, err := b.Search(sam, SearchInput{Query: "roses are red", Mode: "both"})
+	if err != nil || r.SemanticUnavailable || len(r.Hits) != 2 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if got := hitIDs(r.Hits); !slices.Equal(got, []int64{blue, red}) || !r.Hits[1].Incorrect {
+		t.Fatalf("order = %v, want flagged %d last", got, red)
+	}
+}
+
+func TestSearchAllMarksPruned(t *testing.T) {
+	b, sam, _, _, _, c := flagSetup(t)
+	pruneRaw(t, b, c, "noise")
+	r, err := b.SearchAll(sam, SearchInput{Query: "widget", Mode: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range r.Hits {
+		if h.Pruned != (*h.MemoryID == c) {
+			t.Fatalf("Pruned on %d = %v", *h.MemoryID, h.Pruned)
+		}
+		found = found || *h.MemoryID == c
+	}
+	if !found {
+		t.Fatal("SearchAll must return the pruned memory")
+	}
+	r, _ = b.Search(sam, SearchInput{Query: "widget", Mode: "text"})
+	if slices.Contains(hitIDs(r.Hits), c) {
+		t.Fatal("Search returned a pruned memory")
+	}
+}
+
+func TestEditedMemoryLosesFlagInSearch(t *testing.T) {
+	b, sam, kim, a, _, _ := flagSetup(t)
+	flag(t, b, kim, a)
+	if _, err := b.EditMemory(sam, EditInput{ID: a, Content: "widget corrected"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Search(sam, SearchInput{Query: "corrected", Mode: "text"})
+	if err != nil || len(r.Hits) != 1 || *r.Hits[0].MemoryID != a || r.Hits[0].Incorrect {
+		t.Fatalf("%+v %v", r, err)
+	}
+}

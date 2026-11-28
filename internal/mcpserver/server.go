@@ -544,7 +544,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "get_memory", Description: "Agentbus: get the current revision of a memory by memory_id."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in memoryIn) (*mcp.CallToolResult, any, error) {
-			msg, err := b.GetMemory(in.As, in.ID)
+			msg, err := b.GetMemoryFlagged(in.As, in.ID)
 			if err == nil {
 				if terr := b.TouchMemoryAccess([]int64{in.ID}); terr != nil && log != nil {
 					b.WarnLimited("memory touch:"+bus.NormText(terr.Error()), "memory access touch failed", "err", terr)

@@ -1582,3 +1582,79 @@ func TestMemoryFeedbackTool(t *testing.T) {
 		t.Fatalf("empty items: error=%v text=%s", res.IsError, txt)
 	}
 }
+
+// flaggedMemSession registers Sam, makes memory channel "mem" with two
+// memories ("widget flagged", "widget fine") and flags the first.
+func flaggedMemSession(t *testing.T) (cs *mcp.ClientSession, dir string, flagged, fine int64) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cs = sessionOn(t, cfg)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "mem", "kind": "memory"})
+	sent := func(content string) int64 {
+		out, _ := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "mem", "content": content})
+		return int64(out["memory_id"].(float64))
+	}
+	flagged = sent("widget flagged")
+	fine = sent("widget fine")
+	out, res := call(t, cs, "memory_feedback", map[string]any{"as": "Sam", "items": []map[string]any{{"memory_id": flagged, "verdict": "INCORRECT"}}})
+	if res.IsError {
+		t.Fatalf("feedback: %+v", out)
+	}
+	return cs, cfg.DataDirectory, flagged, fine
+}
+
+func TestSearchToolCarriesIncorrect(t *testing.T) {
+	cs, _, flagged, fine := flaggedMemSession(t)
+	out, _ := call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
+	hits, _ := out["hits"].([]any)
+	if len(hits) != 2 {
+		t.Fatalf("hits: %+v", out)
+	}
+	for _, h := range hits {
+		m := h.(map[string]any)
+		id := int64(m["memory_id"].(float64))
+		switch id {
+		case flagged:
+			if m["incorrect"] != true {
+				t.Fatalf("flagged hit lacks incorrect: %+v", m)
+			}
+		case fine:
+			if _, ok := m["incorrect"]; ok {
+				t.Fatalf("unflagged hit carries incorrect: %+v", m)
+			}
+		}
+	}
+	if int64(hits[1].(map[string]any)["memory_id"].(float64)) != flagged {
+		t.Fatalf("flagged hit must rank last: %+v", hits)
+	}
+}
+
+func TestGetMemoryToolCarriesIncorrect(t *testing.T) {
+	cs, dir, flagged, fine := flaggedMemSession(t)
+	raw := openDirectDB(t, dir)
+	served := func(id int64) int {
+		var n int
+		if err := raw.QueryRow("SELECT served_count FROM memory_access WHERE memory_id=?", id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := served(flagged)
+	out, res := call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": flagged})
+	if res.IsError || out["incorrect"] != true {
+		t.Fatalf("flagged get_memory: %+v", out)
+	}
+	out, res = call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": fine})
+	if res.IsError {
+		t.Fatalf("get_memory: %+v", out)
+	}
+	if _, ok := out["incorrect"]; ok {
+		t.Fatalf("unflagged get_memory carries incorrect: %+v", out)
+	}
+	call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": flagged})
+	if got := served(flagged); got != before+2 {
+		t.Fatalf("served_count = %d, want %d", got, before+2)
+	}
+}

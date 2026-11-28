@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -491,5 +492,44 @@ func TestFeedbackRateLimited(t *testing.T) {
 	wantCode(t, err, "rate_limited")
 	if n := stats(t, b, id).UsedCount; n != 1 {
 		t.Fatalf("used_count = %d, want 1", n)
+	}
+}
+
+func TestGetMemoryFlagged(t *testing.T) {
+	b, sam, kim := memBus(t)
+	id := remember(t, b, sam, "alpha")
+	plain, err := b.GetMemory(sam, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.GetMemoryFlagged(sam, id)
+	if err != nil || got.Incorrect {
+		t.Fatalf("%+v %v", got, err)
+	}
+	gj, _ := json.Marshal(got)
+	pj, _ := json.Marshal(plain)
+	if string(gj) != string(pj) {
+		t.Fatalf("unflagged JSON differs:\n%s\n%s", gj, pj)
+	}
+	flag(t, b, kim, id)
+	got, err = b.GetMemoryFlagged(sam, id)
+	if err != nil || !got.Incorrect {
+		t.Fatalf("%+v %v", got, err)
+	}
+	gj, _ = json.Marshal(got)
+	if !strings.Contains(string(gj), `"incorrect":true`) || strings.Contains(string(gj), "count") {
+		t.Fatalf("flagged JSON: %s", gj)
+	}
+	if _, err := b.EditMemory(sam, EditInput{ID: id, Content: "alpha fixed"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = b.GetMemoryFlagged(sam, id); err != nil || got.Incorrect {
+		t.Fatalf("edit must clear the flag: %+v %v", got, err)
+	}
+	pruneRaw(t, b, id, "noise")
+	_, err = b.GetMemoryFlagged(sam, id)
+	var be *Error
+	if !errors.As(err, &be) || be.Code != "not_found" || be.Message != fmt.Sprintf("memory %d has no live revision", id) {
+		t.Fatalf("pruned: %v", err)
 	}
 }

@@ -75,6 +75,10 @@ func kindsPredicate(kinds []string) string {
 type SearchHit struct {
 	Message
 	Score float64 `json:"score"`
+	// Incorrect marks a memory flagged INCORRECT and not yet corrected.
+	Incorrect bool `json:"incorrect,omitempty"`
+	// Pruned is true only on SearchAll hits; it never reaches JSON.
+	Pruned bool `json:"-"`
 }
 
 type SearchResult struct {
@@ -347,6 +351,9 @@ func (b *Bus) search(as string, in SearchInput) (SearchResult, error) {
 	if err != nil {
 		return SearchResult{}, err
 	}
+	if ranked, err = b.markHits(ranked); err != nil {
+		return SearchResult{}, err
+	}
 	if offset > len(ranked) {
 		offset = len(ranked)
 	}
@@ -374,6 +381,57 @@ func (b *Bus) search(as string, in SearchInput) (SearchResult, error) {
 	}
 	res.Hits = page
 	return res, nil
+}
+
+// markHits sets Incorrect and Pruned from memory_access (one query for the
+// flagged and pruned ids) and moves flagged hits after every unflagged one,
+// keeping the existing order inside each group.
+func (b *Bus) markHits(hits []SearchHit) ([]SearchHit, error) {
+	seen := map[int64]bool{}
+	var ids []any
+	for _, h := range hits {
+		if h.MemoryID != nil && !seen[*h.MemoryID] {
+			seen[*h.MemoryID] = true
+			ids = append(ids, *h.MemoryID)
+		}
+	}
+	if len(ids) == 0 {
+		return hits, nil
+	}
+	q := "SELECT memory_id, incorrect_at IS NOT NULL, pruned_at IS NOT NULL FROM memory_access" +
+		" WHERE memory_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")" +
+		" AND (incorrect_at IS NOT NULL OR pruned_at IS NOT NULL)"
+	rows, err := b.db.Query(q, ids...)
+	if err != nil {
+		return nil, internal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	incorrect := map[int64]bool{}
+	pruned := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		var inc, pr bool
+		if err := rows.Scan(&id, &inc, &pr); err != nil {
+			return nil, internal(err)
+		}
+		incorrect[id], pruned[id] = inc, pr
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	flagged := false
+	for i := range hits {
+		if hits[i].MemoryID == nil {
+			continue
+		}
+		hits[i].Incorrect = incorrect[*hits[i].MemoryID]
+		hits[i].Pruned = pruned[*hits[i].MemoryID]
+		flagged = flagged || hits[i].Incorrect
+	}
+	if flagged {
+		sort.SliceStable(hits, func(i, j int) bool { return !hits[i].Incorrect && hits[j].Incorrect })
+	}
+	return hits, nil
 }
 
 // rankedSearch serves the semantic and both modes. If the embedder is unset or

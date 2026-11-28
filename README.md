@@ -159,7 +159,7 @@ one when you start an effort. After that, most work uses five tools:
 - `search` — messages, memories and tasks by text (`mode: text`), by meaning
   (`semantic`, over every kind), or both; filter by channel (one channel of
   any kind), `kinds` (`memories`, `chat`, `tasks`; default all; ignored when
-  `channel` is set), sender, time, thread, or tags.
+  `channel` is set, but an unknown kind is still an error), sender, time, thread, or tags.
   A word ending in `*` matches by prefix (`e159e8c*` finds a full hash).
   Every tag given must match, and `tags` alone works without a `query`
   (newest first).

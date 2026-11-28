@@ -644,7 +644,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends
   that identity a direct message. Your own row is your inbox; agents reach
-  you at `dm/<tui_name>`. `/` searches (`tag:<tag>` words filter by tag, `in:memories|chat|tasks` by kind, `channel:<name>` to one channel or session inbox; `tab` cycles text, semantic and both), `h` opens
+  you at `dm/<tui_name>`. `/` searches (`tag:<tag>` words filter by tag, `in:memories|chat|tasks` by kind, `channel:<name>` to one channel, or `channel:dm/<name>` to a session inbox; `in:` repeats and ignores case, and a task hit opens in the task tree; `tab` cycles text, semantic and both), `h` opens
   health and config, `q` quits. Arrow keys never
   change pane: `↑`/`↓` move within the focused one, `→` opens the selected
   message's body if it's closed and has one, else shows its direct replies;

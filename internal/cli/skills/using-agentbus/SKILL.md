@@ -268,7 +268,8 @@ folded (`resume` finds `Résumé`). A percent-encoded URL is found by its
 encoded form (`My%20Docs`), not the decoded one. A bare `#33` matches any
 `33`; search `owner/repo#33` instead. A query of only `*` is refused.
 `kinds` (`memories`, `chat`, `tasks`) narrows what is searched; `channel`
-searches one channel of any kind and ignores `kinds`. Tasks match on subject
+searches one channel of any kind and ignores `kinds` (an unknown kind is
+still an error). Tasks match on subject
 and description. With embeddings configured, `semantic` and `both` rank all
 kinds together.
 

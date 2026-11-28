@@ -20,7 +20,7 @@ type SearchInput struct {
 	Tags    []string `json:"tags,omitempty" jsonschema:"only messages carrying all of these tags; a tag ending in * matches every tag with that prefix (env:*)"`
 	Count   int      `json:"count,omitempty"`
 	Cursor  string   `json:"cursor,omitempty"`
-	Kinds   []string `json:"kinds,omitempty" jsonschema:"narrow to these kinds: memories, chat, tasks; default all; ignored when channel is set"`
+	Kinds   []string `json:"kinds,omitempty" jsonschema:"narrow to these kinds: memories, chat, tasks; default all; ignored when channel is set, but an unknown kind is still an error"`
 }
 
 // SearchKinds lists the values SearchInput.Kinds accepts.

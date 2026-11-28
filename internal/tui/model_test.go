@@ -344,9 +344,9 @@ func TestTabCyclesPanesAndHomeReturnsToChannels(t *testing.T) {
 func TestHelpOverlayListsKeysAndHealthIsSeparate(t *testing.T) {
 	f := newFixture(t)
 	f.key("esc")
-	// The help body gets height-8 = 44 lines: enough for every key asserted
+	// The help body gets height-8 = 48 lines: enough for every key asserted
 	// below, but the last rows still clip; helpScroll reveals them.
-	f.m.height = 52
+	f.m.height = 56
 	f.key("?")
 	if f.m.mode != modeHelp {
 		t.Fatalf("? opens help, got mode %v", f.m.mode)

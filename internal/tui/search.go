@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -226,6 +227,12 @@ func (m Model) viewSearch() string {
 			first = strings.SplitN(hit.Content, "\n", 2)[0]
 		}
 		line := fmt.Sprintf("%s%s #%d%s %s %s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(senderName(hit.Sender)), dim.Render(clock(hit.CreatedAt)), first)
+		if hit.Pruned {
+			line = dim.Render(ansi.Strip(line) + " pruned")
+		}
+		if hit.Incorrect {
+			line += " " + th.Style(th.Warn).Render("incorrect")
+		}
 		if i == m.search.cursor {
 			line = th.Style(th.Agent).Render(markSel+" ") + line
 		} else {

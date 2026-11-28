@@ -908,6 +908,12 @@ func (m *Model) renderStream() string {
 			}
 			label = "r" + rev + " · " + strconv.Itoa(len(m.mem.revs)) + " kept"
 		}
+		st, hasStats := bus.MemoryStats{}, false
+		if x.MemoryID != nil {
+			st, hasStats = m.memStats[ch][*x.MemoryID]
+		}
+		label = memLabel(label, st, hasStats)
+		pruned := hasStats && st.PrunedAt != nil
 		// The row line is the subject or the first line, cut to fit; the
 		// body (what that line leaves out) shows only once opened with →,
 		// as the subject line (when set) and the full content.
@@ -933,7 +939,13 @@ func (m *Model) renderStream() string {
 			prefix += "  "
 		}
 		pw := lipgloss.Width(prefix)
-		line := m.header(x, ch, label, stampStyle, avail) + "\n" + text
+		head := m.header(x, ch, label, stampStyle, avail)
+		if pruned {
+			// Dim the whole row: the header's own colors would survive a
+			// wrapping style, so flatten them first.
+			head, text = rowDim.Render(ansi.Strip(head)), rowDim.Render(text)
+		}
+		line := head + "\n" + text
 		if r.hidden > 0 {
 			summary := strconv.Itoa(r.hidden) + " replies"
 			if r.hidden == 1 {
@@ -984,6 +996,9 @@ func (m Model) renderCompose() string {
 	th := m.theme
 	if m.mode == modeConfirmChannel {
 		return m.confirmChannelLine()
+	}
+	if m.mode == modeConfirmMemory {
+		return m.confirmMemoryLine()
 	}
 	if m.prompt.active {
 		return th.Style(th.Agent).Render(m.prompt.label+" › ") + m.prompt.input.View()

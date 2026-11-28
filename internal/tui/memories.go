@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
@@ -76,4 +81,150 @@ func (m *Model) applyRevisions(msg revisionsMsg) tea.Cmd {
 	m.mem.idx = max(len(msg.revs)-2, 0)
 	m.refreshStream()
 	return nil
+}
+
+// memoryChannel reports whether ch is a memory-kind channel the rail lists
+// that is not a task list (task rows carry no counters or flags).
+func (m *Model) memoryChannel(ch string) bool {
+	if bus.IsTaskChannel(ch) {
+		return false
+	}
+	return slices.ContainsFunc(m.channels, func(c bus.Channel) bool { return c.Name == ch && c.Kind == "memory" })
+}
+
+// loadMemStats fetches ch's memory counters and flag state; nil unless ch is
+// a memory channel.
+func (m *Model) loadMemStats(ch string) tea.Cmd {
+	if !m.memoryChannel(ch) {
+		return nil
+	}
+	c := m.c
+	return func() tea.Msg {
+		st, err := c.b.ChannelMemoryStats(c.as, ch)
+		return memStatsMsg{channel: ch, stats: st, err: err}
+	}
+}
+
+// applyMemStats replaces the channel's stats; a failed load keeps the old
+// ones.
+func (m *Model) applyMemStats(msg memStatsMsg) tea.Cmd {
+	if msg.err != nil {
+		return m.showToast("memory stats: " + errText(msg.err))
+	}
+	m.memStats[msg.channel] = msg.stats
+	m.refreshStream()
+	return nil
+}
+
+// memLabel is a memory row's header label: the revision label rev, then the
+// served and used counts, the incorrect flag and the pruned state. Without
+// stats (ok false) it is rev unchanged.
+func memLabel(rev string, st bus.MemoryStats, ok bool) string {
+	if !ok {
+		return rev
+	}
+	var parts []string
+	if rev != "" {
+		parts = append(parts, rev)
+	}
+	parts = append(parts, "served "+strconv.FormatInt(st.ServedCount, 10), "used "+strconv.FormatInt(st.UsedCount, 10))
+	if st.IncorrectAt != nil {
+		by := ""
+		if st.IncorrectBy != nil {
+			by = *st.IncorrectBy
+		}
+		parts = append(parts, "incorrect by "+by+" "+stamp(*st.IncorrectAt))
+	}
+	if st.PrunedAt != nil {
+		reason := ""
+		if st.PrunedReason != nil {
+			reason = *st.PrunedReason
+		}
+		parts = append(parts, "pruned ("+reason+")")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// cursorMemory is the stream's cursor row when it is a memory of a memory
+// channel (not a task list or a tag pane).
+func (m *Model) cursorMemory() (bus.Message, bool) {
+	if m.pane() != paneStream || m.boardActive() || m.sessSel >= 0 || isTagPane(m.selName()) || !m.memoryChannel(m.selName()) {
+		return bus.Message{}, false
+	}
+	r, ok := m.cursorRow()
+	if !ok || r.msg.MemoryID == nil {
+		return bus.Message{}, false
+	}
+	return r.msg, true
+}
+
+// memTitle is the subject or first line of x, cut to 40 columns.
+func memTitle(x bus.Message) string {
+	t := x.Subject
+	if t == "" {
+		t = strings.SplitN(x.Content, "\n", 2)[0]
+	}
+	if rs := []rune(t); len(rs) > 40 {
+		t = string(rs[:40]) + "…"
+	}
+	return t
+}
+
+func (m *Model) restoreMemory() tea.Cmd {
+	r, ok := m.cursorMemory()
+	if !ok {
+		return nil
+	}
+	id := *r.MemoryID
+	if st, has := m.memStats[r.Channel][id]; has && st.PrunedAt == nil {
+		return m.showToast("memory is not pruned")
+	}
+	if err := m.c.b.RestoreMemory(m.c.as, id); err != nil {
+		return m.showToast("restore: " + errText(err))
+	}
+	return tea.Batch(m.showHint("restored memory #"+strconv.FormatInt(id, 10)), m.loadMemStats(r.Channel))
+}
+
+func (m *Model) clearIncorrect() tea.Cmd {
+	r, ok := m.cursorMemory()
+	if !ok {
+		return nil
+	}
+	id := *r.MemoryID
+	if st, has := m.memStats[r.Channel][id]; has && st.IncorrectAt == nil {
+		return m.showToast("memory is not flagged incorrect")
+	}
+	if err := m.c.b.ClearMemoryIncorrect(m.c.as, id); err != nil {
+		return m.showToast("clear flag: " + errText(err))
+	}
+	return tea.Batch(m.showHint("cleared the incorrect flag on memory #"+strconv.FormatInt(id, 10)), m.loadMemStats(r.Channel))
+}
+
+// updateConfirmMemory answers the delete-memory prompt: y deletes, any other
+// key cancels.
+func (m *Model) updateConfirmMemory(msg tea.Msg) tea.Cmd {
+	k := keyString(msg)
+	if k == "" {
+		return nil
+	}
+	m.mode = modeNormal
+	if k != "y" {
+		return nil
+	}
+	id, ch := m.confirmMem.id, m.confirmMem.ch
+	if err := m.c.b.DeleteMemoryAny(m.c.as, id); err != nil {
+		return m.showToast("delete: " + errText(err))
+	}
+	m.msgs[ch] = slices.DeleteFunc(m.msgs[ch], func(x bus.Message) bool { return x.MemoryID != nil && *x.MemoryID == id })
+	delete(m.memStats[ch], id)
+	if n := len(m.rows(m.selName())); m.cursor >= n {
+		m.cursor = n - 1
+	}
+	m.refreshStream()
+	return tea.Batch(m.showHint("deleted memory #"+strconv.FormatInt(id, 10)), m.loadMemStats(ch))
+}
+
+// confirmMemoryLine is the compose-row text while modeConfirmMemory is up.
+func (m Model) confirmMemoryLine() string {
+	return m.theme.Style(m.theme.Error).Render(fmt.Sprintf("delete memory #%d \"%s\" PERMANENTLY? no undo · y yes  any other key no", m.confirmMem.id, m.confirmMem.title))
 }

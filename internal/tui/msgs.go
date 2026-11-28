@@ -48,6 +48,12 @@ type (
 		revs []bus.Message
 		err  error
 	}
+	// memStatsMsg carries one memory channel's counters and flag state.
+	memStatsMsg struct {
+		channel string
+		stats   map[int64]bus.MemoryStats
+		err     error
+	}
 	configEditedMsg struct{ err error }
 	toastClearMsg   struct{ seq int }
 	subscribedMsg   struct {

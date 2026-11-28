@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
 )
 
@@ -639,5 +640,43 @@ func TestSearchChannelTokenAcceptsASessionInbox(t *testing.T) {
 	}
 	if v := f.m.View(); !strings.Contains(v, "in dm/Sam") {
 		t.Fatalf("title must show the inbox scope:\n%s", v)
+	}
+}
+
+func TestSearchOverlayMarksPrunedAndIncorrect(t *testing.T) {
+	f := newFixture(t)
+	p := f.agentSend(t, "dev-notes", "zebra pruned note")
+	g := f.agentSend(t, "dev-notes", "zebra flagged note")
+	if _, err := rawDB(t, f.c.cfg).Exec("UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), *p.MemoryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: *g.MemoryID, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.key("esc")
+	f.key("/")
+	f.key("zebra")
+	f.key("enter")
+	if len(f.m.search.hits) != 2 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	seen := 0
+	for _, l := range strings.Split(ansi.Strip(f.m.View()), "\n") {
+		l = strings.TrimRight(strings.Trim(l, "│ "), " ")
+		switch {
+		case strings.Contains(l, "pruned note"):
+			seen++
+			if !strings.HasSuffix(l, " pruned") || strings.Contains(l, "incorrect") {
+				t.Fatalf("pruned hit line wrong: %q", l)
+			}
+		case strings.Contains(l, "flagged note"):
+			seen++
+			if !strings.HasSuffix(l, " incorrect") || strings.Contains(l, " pruned") {
+				t.Fatalf("flagged hit line wrong: %q", l)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("saw %d of the 2 hit lines", seen)
 	}
 }

@@ -166,7 +166,7 @@ func TestMemoryRevisionIndicatorIsOnTheHeader(t *testing.T) {
 				body = l
 			}
 		}
-		if !strings.HasSuffix(strings.TrimRight(head, " "), "Sam  "+tc.label) {
+		if !strings.HasSuffix(strings.TrimRight(head, " "), "Sam  "+tc.label+" · served 0 · used 0") {
 			t.Fatalf("header %q must end with the sender then %q", head, tc.label)
 		}
 		if strings.Contains(body, " r") && strings.Contains(body, tc.label) {
@@ -261,5 +261,185 @@ func TestTUIShowsPrunedMemoryInChannelAndSearch(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("search lost the pruned memory: hits=%d err=%v", len(g.m.search.hits), g.m.search.err)
+	}
+}
+
+// otherMemory is the id of dev-notes' second memory (the one under no
+// cursor in onMemory).
+func otherMemory(t *testing.T, f *fixture, id int64) int64 {
+	t.Helper()
+	for _, r := range f.m.rows("dev-notes") {
+		if r.msg.MemoryID != nil && *r.msg.MemoryID != id {
+			return *r.msg.MemoryID
+		}
+	}
+	t.Fatal("no second memory")
+	return 0
+}
+
+func (f *fixture) reloadMem(t *testing.T) {
+	t.Helper()
+	f.run(f.m.loadHistory("dev-notes", nil))
+	f.run(f.m.loadMemStats("dev-notes"))
+}
+
+func rawExec(t *testing.T, f *fixture, q string, args ...any) {
+	t.Helper()
+	if _, err := rawDB(t, f.c.cfg).Exec(q, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMemoryHeaderShowsCounts(t *testing.T) {
+	f, id := onMemory(t)
+	f.streamHas(t, "served 0 · used 0")
+	rawExec(t, f, "UPDATE memory_access SET served_count=12, used_count=2 WHERE memory_id=?", id)
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.streamHas(t, "r3 · served 12 · used 2")
+	rawExec(t, f, "UPDATE memory_access SET served_count=13 WHERE memory_id=?", id)
+	f.send(statusTickMsg{})
+	f.streamHas(t, "served 13 · used 2")
+	f.key(".")
+	f.streamHas(t, "r2 · 3 kept · served 13 · used 2")
+}
+
+func TestMemoryHeaderShowsIncorrect(t *testing.T) {
+	f, id := onMemory(t)
+	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.streamHas(t, "incorrect by Sam")
+}
+
+func TestPrunedMemoryShownDimmedAndLabeled(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	f, id := onMemory(t)
+	other := otherMemory(t, f, id)
+	dimOpen, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Dim).Render("\x00"), "\x00")
+	if dimOpen == "" || strings.Contains(f.m.renderStream(), dimOpen+"Reviewer checklist") {
+		t.Fatalf("an unpruned row must not be dim: %q", f.m.renderStream())
+	}
+	rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), other)
+	f.reloadMem(t)
+	f.streamHas(t, "pruned (noise)")
+	if !strings.Contains(f.m.renderStream(), dimOpen+"Reviewer checklist") {
+		t.Fatalf("pruned row text lacks the dim color: %q", f.m.renderStream())
+	}
+	if strings.Contains(ansi.Strip(f.m.renderStream()), "Release v3") && strings.Count(ansi.Strip(f.m.renderStream()), "pruned") != 1 {
+		t.Fatal("only the pruned memory is labeled")
+	}
+}
+
+func TestRestoreKey(t *testing.T) {
+	f, id := onMemory(t)
+	f.key("R")
+	if f.m.toast != "memory is not pruned" {
+		t.Fatalf("toast=%q", f.m.toast)
+	}
+	rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id)
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.streamHas(t, "pruned (noise)")
+	f.key("R")
+	if _, err := f.ab.GetMemory(f.sam, id); err != nil {
+		t.Fatalf("restore did not unprune: %v", err)
+	}
+	if !strings.Contains(f.m.toast, "restored memory #") {
+		t.Fatalf("toast=%q", f.m.toast)
+	}
+	if strings.Contains(ansi.Strip(f.m.renderStream()), "pruned") {
+		t.Fatalf("stream still pruned:\n%s", ansi.Strip(f.m.renderStream()))
+	}
+}
+
+func TestClearFlagKey(t *testing.T) {
+	f, id := onMemory(t)
+	f.key("f")
+	if f.m.toast != "memory is not flagged incorrect" {
+		t.Fatalf("toast=%q", f.m.toast)
+	}
+	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.streamHas(t, "incorrect by")
+	f.key("f")
+	var at sql.NullInt64
+	if err := rawDB(t, f.c.cfg).QueryRow("SELECT incorrect_at FROM memory_access WHERE memory_id=?", id).Scan(&at); err != nil || at.Valid {
+		t.Fatalf("incorrect_at=%v err=%v", at, err)
+	}
+	if strings.Contains(ansi.Strip(f.m.renderStream()), "incorrect") {
+		t.Fatal("stream still shows the flag")
+	}
+}
+
+func TestDeleteMemoryKeyConfirms(t *testing.T) {
+	for _, pruned := range []bool{false, true} {
+		f, id := onMemory(t)
+		if pruned {
+			rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id)
+			f.run(f.m.loadMemStats("dev-notes"))
+		}
+		f.key("x")
+		if f.m.mode != modeConfirmMemory || !strings.Contains(f.m.View(), "PERMANENTLY") || !strings.Contains(ansi.Strip(f.m.View()), `"Release v3"`) {
+			t.Fatalf("x: mode=%v view=%s", f.m.mode, f.m.View())
+		}
+		f.key("n")
+		if f.m.mode != modeNormal {
+			t.Fatalf("n: mode=%v", f.m.mode)
+		}
+		if !pruned {
+			if _, err := f.ab.GetMemory(f.sam, id); err != nil {
+				t.Fatalf("cancel deleted the memory: %v", err)
+			}
+		}
+		f.key("x")
+		f.key("y")
+		if f.m.mode != modeNormal {
+			t.Fatalf("y: mode=%v", f.m.mode)
+		}
+		if _, err := f.ab.GetMemory(f.sam, id); err == nil {
+			t.Fatal("memory survived the delete")
+		}
+		for _, r := range f.m.rows("dev-notes") {
+			if r.msg.MemoryID != nil && *r.msg.MemoryID == id {
+				t.Fatalf("row of the deleted memory remains: %+v", r.msg)
+			}
+		}
+		var n int
+		if err := rawDB(t, f.c.cfg).QueryRow("SELECT COUNT(*) FROM messages WHERE memory_id=? AND tombstone=0", id).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("live rows=%d err=%v", n, err)
+		}
+		if !strings.Contains(f.m.toast, "deleted memory #") {
+			t.Fatalf("toast=%q", f.m.toast)
+		}
+	}
+}
+
+func TestMemoryKeysIgnoredOffMemoryRows(t *testing.T) {
+	f := newFixture(t)
+	a := f.agentSend(t, "dev", "hello")
+	f.key("esc")
+	f.run(f.m.loadHistory("dev", nil))
+	for i, c := range f.m.channels {
+		if c.Name == "dev" {
+			f.run(f.m.selectChannel(i))
+		}
+	}
+	f.m.placeCursor(a.Seq)
+	for _, k := range []string{"x", "R", "f"} {
+		f.key(k)
+		if f.m.mode != modeNormal || f.m.toast != "" {
+			t.Fatalf("%s on a chat row: mode=%v toast=%q", k, f.m.mode, f.m.toast)
+		}
+	}
+	f.m.cursor = -1
+	for _, k := range []string{"x", "R", "f"} {
+		f.key(k)
+		if f.m.mode != modeNormal {
+			t.Fatalf("%s with no cursor: mode=%v", k, f.m.mode)
+		}
 	}
 }

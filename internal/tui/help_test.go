@@ -24,3 +24,17 @@ func TestTaskListsHelpRowIsItsOwnGroup(t *testing.T) {
 	}
 	t.Fatal("(task lists) row not found in helpLines")
 }
+
+func TestHelpListsMemoryActions(t *testing.T) {
+	f := newFixture(t)
+	help := strings.Join(f.m.helpLines(), "\n")
+	for _, want := range []string{
+		"memory: restore the pruned cursor memory (agents see it again; its noise grace restarts)",
+		"memory: clear the cursor memory's incorrect flag",
+		"memory: delete the cursor memory, pruned or not (asks first)",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help lacks %q", want)
+		}
+	}
+}

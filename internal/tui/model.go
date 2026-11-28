@@ -27,6 +27,7 @@ const (
 	modeHelp
 	modeConfirmChannel // d on the channel list; y deletes, anything else cancels
 	modeAssign         // a in a task list: pick who the cursor task goes to
+	modeConfirmMemory  // x on a memory row; y deletes, anything else cancels
 )
 
 // pane is the focused main-screen region; tab and shift+tab cycle them
@@ -121,6 +122,11 @@ type Model struct {
 
 	search     searchState
 	mem        memView
+	memStats   map[string]map[int64]bus.MemoryStats // by channel, then memory id; each memStatsMsg replaces its channel's map
+	confirmMem struct {
+		id        int64
+		ch, title string
+	}
 	health     healthState
 	helpScroll int
 }
@@ -158,6 +164,7 @@ func New(c *client, th Theme) Model {
 		gaps:         map[string][]bus.Gap{},
 		loaded:       map[string]bool{},
 		seen:         map[string]int64{},
+		memStats:     map[string]map[int64]bus.MemoryStats{},
 		sessionsSeen: map[string]time.Time{},
 		stream:       viewport.New(80, 20),
 		compose:      ta,
@@ -215,7 +222,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The one periodic chain: Init starts it, and only this case
 		// re-arms it, so opening Health (which also calls statusCmd) never
 		// doubles the tick rate.
-		cmds = append(cmds, m.statusCmd(), statusTick())
+		cmds = append(cmds, m.statusCmd(), statusTick(), m.loadMemStats(m.selName()))
 	case statusMsg:
 		cmds = append(cmds, m.onStatus(msg))
 	case statusHistoryMsg:
@@ -264,6 +271,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.markSeen(msg.channel)
 			}
 		}
+		cmds = append(cmds, m.loadMemStats(msg.channel))
 		m.refreshStream()
 		switch {
 		case cursorSeq > 0:
@@ -356,6 +364,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.onConfigEdited(msg))
 	case revisionsMsg:
 		cmds = append(cmds, m.applyRevisions(msg))
+	case memStatsMsg:
+		cmds = append(cmds, m.applyMemStats(msg))
 	}
 	switch m.mode {
 	case modeInsert:
@@ -372,6 +382,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateHelp(msg))
 	case modeAssign:
 		cmds = append(cmds, m.updateAssign(msg))
+	case modeConfirmMemory:
+		cmds = append(cmds, m.updateConfirmMemory(msg))
 	}
 	// A draft lives only on the cursor row of the focused task pane (ADR
 	// 0011 decision 2): whatever the message above did, if that is no longer
@@ -640,6 +652,16 @@ func (m *Model) updateNormal(msg tea.Msg) tea.Cmd {
 		m.mode = modeConfirmChannel
 	case "/":
 		return m.openSearch()
+	case "R":
+		return m.restoreMemory()
+	case "f":
+		return m.clearIncorrect()
+	case "x":
+		if r, ok := m.cursorMemory(); ok {
+			m.confirmMem.id, m.confirmMem.ch = *r.MemoryID, r.Channel
+			m.confirmMem.title = memTitle(r)
+			m.mode = modeConfirmMemory
+		}
 	case ".":
 		return m.stepVersion(true)
 	case ",":

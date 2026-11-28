@@ -419,24 +419,29 @@ func (b *Bus) tombstoneMemoryRow(tx *sql.Tx, memoryID, seq int64) (ok bool, err 
 	return true, nil
 }
 
-// TouchMemoryAccess sets accessed_at to now for every id already carrying a
-// memory_access row (ADR 0013): get_memory and a search hit call it once,
-// batched, after their results are known. It only updates, never inserts:
-// a memory with no row — every task, by construction (insertMessage skips
-// one for a task channel) — stays without one, since giving a task row a
-// memory_access row would let memory expiry delete it. Called from the
-// mcpserver tool handlers only, so the TUI and CLI, which call Search and
-// GetMemory directly on the bus, never touch it; history and receive never
-// call it either.
+// TouchMemoryAccess records a serve for every id already carrying a live
+// memory_access row (ADR 0013, #53): it sets accessed_at to now and adds 1
+// to served_count, once per distinct id per call. get_memory and a search
+// hit call it once, batched, after their results are known. It only
+// updates, never inserts: a memory with no row (every task, by construction:
+// insertMessage skips one for a task channel) stays without one, since
+// giving a task row a memory_access row would let memory expiry delete it.
+// A pruned row is skipped. Called from the mcpserver tool handlers only, so
+// the TUI and CLI, which call Search and GetMemory directly on the bus,
+// never touch it; history and receive never call it either.
 func (b *Bus) TouchMemoryAccess(ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
+	seen := make(map[int64]bool, len(ids))
 	args := make([]any, 0, len(ids)+1)
 	args = append(args, b.nowMs())
 	for _, id := range ids {
-		args = append(args, id)
+		if !seen[id] {
+			seen[id] = true
+			args = append(args, id)
+		}
 	}
-	_, err := b.db.Exec("UPDATE memory_access SET accessed_at=? WHERE memory_id IN (?"+strings.Repeat(",?", len(ids)-1)+")", args...)
+	if len(args) == 1 {
+		return nil
+	}
+	_, err := b.db.Exec("UPDATE memory_access SET accessed_at=?, served_count=served_count+1 WHERE pruned_at IS NULL AND memory_id IN (?"+strings.Repeat(",?", len(args)-2)+")", args...)
 	return internal(err)
 }

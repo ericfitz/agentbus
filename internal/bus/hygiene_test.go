@@ -108,3 +108,35 @@ func TestEditRestartsGraceClearsFlagKeepsCounters(t *testing.T) {
 		t.Fatalf("grace_from=%d accessed_at=%d grace_served_base=%d, want %d, %d, 7", s.GraceFrom, s.AccessedAt, s.GraceServedBase, want, want)
 	}
 }
+
+// TestTouchCountsOncePerDistinctID (#53): a serve counts once per distinct id
+// per call, however often the id repeats in the list.
+func TestTouchCountsOncePerDistinctID(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	if err := b.TouchMemoryAccess([]int64{id, id, id}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stats(t, b, id).ServedCount; got != 1 {
+		t.Fatalf("served_count after a repeated id = %d, want 1", got)
+	}
+	if err := b.TouchMemoryAccess([]int64{id}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stats(t, b, id).ServedCount; got != 2 {
+		t.Fatalf("served_count after a second call = %d, want 2", got)
+	}
+}
+
+// TestTouchSkipsPrunedMemory (#53): a pruned memory's row is left alone.
+func TestTouchSkipsPrunedMemory(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	setAccess(t, b, id, "pruned_at=1, pruned_reason='noise', accessed_at=50, served_count=3")
+	if err := b.TouchMemoryAccess([]int64{id}); err != nil {
+		t.Fatal(err)
+	}
+	if s := stats(t, b, id); s.ServedCount != 3 || s.AccessedAt != 50 {
+		t.Fatalf("a pruned memory must not be touched: %+v", s)
+	}
+}

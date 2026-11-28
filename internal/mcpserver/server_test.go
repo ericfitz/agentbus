@@ -927,6 +927,88 @@ func TestSearchAndGetMemoryToolsUpdateAccessedAt(t *testing.T) {
 	}
 }
 
+// TestSearchAndGetMemoryToolsCountServes (#53): each search hit and each
+// get_memory counts one serve, once per call; history and a failed
+// get_memory count nothing.
+func TestSearchAndGetMemoryToolsCountServes(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	raw := openDirectDB(t, cfg.DataDirectory)
+
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "mem", "kind": "memory"})
+	sent := func(content string) int64 {
+		out, _ := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "mem", "content": content})
+		return int64(out["memory_id"].(float64))
+	}
+	a := sent("widget alpha")
+	bb := sent("widget beta")
+	served := func(id int64) int {
+		var n int
+		if err := raw.QueryRow("SELECT served_count FROM memory_access WHERE memory_id=?", id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	want := map[int64]int{a: 0, bb: 0}
+	check := func(step string) {
+		t.Helper()
+		for id, n := range want {
+			if got := served(id); got != n {
+				t.Fatalf("%s: served_count(%d) = %d, want %d", step, id, got, n)
+			}
+		}
+	}
+	check("after send")
+
+	call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
+	want[a]++
+	want[bb]++
+	check("search")
+
+	out, _ := call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget", "count": 1})
+	hits := out["hits"].([]any)
+	if len(hits) != 1 {
+		t.Fatalf("count=1 returned %d hits", len(hits))
+	}
+	want[int64(hits[0].(map[string]any)["memory_id"].(float64))]++
+	check("search count=1")
+
+	call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget", "channel": "mem"})
+	want[a]++
+	want[bb]++
+	check("search channel=mem")
+
+	call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": a})
+	want[a]++
+	check("get_memory")
+
+	call(t, cs, "history", map[string]any{"as": "Sam", "channel": "mem"})
+	check("history")
+
+	_, bad := call(t, cs, "get_memory", map[string]any{"as": "Sam", "id": 999999})
+	if !bad.IsError {
+		t.Fatalf("get_memory on an unknown id must error: %+v", bad)
+	}
+	check("get_memory unknown id")
+}
+
 // TestSearchToolOverTaskRowDoesNotCreateAccessRow (ADR 0013): a search hit
 // on a task never creates a memory_access row for it — an insert there
 // would let memory expiry delete tasks.

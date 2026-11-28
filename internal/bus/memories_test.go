@@ -277,4 +277,14 @@ func TestBusReadPathsNeverTouchMemoryAccess(t *testing.T) {
 	if after != before {
 		t.Fatalf("Bus GetMemory/Search/History/Receive must never touch memory_access: before=%d after=%d", before, after)
 	}
+	if _, err := b.MemoryRevisions(sam, *c.MemoryID); err != nil {
+		t.Fatal(err)
+	}
+	var served int64
+	if err := b.db.QueryRow("SELECT served_count FROM memory_access WHERE memory_id=?", *c.MemoryID).Scan(&served); err != nil {
+		t.Fatal(err)
+	}
+	if served != 0 {
+		t.Fatalf("Bus read paths must never count a serve: served_count=%d", served)
+	}
 }

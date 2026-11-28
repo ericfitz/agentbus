@@ -2,12 +2,14 @@ package tui
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ericfitz/agentbus/internal/bus"
+	"github.com/ericfitz/agentbus/internal/config"
 	"github.com/muesli/termenv"
 )
 
@@ -182,5 +184,42 @@ func TestMemoryRevisionIndicatorKeepsMemColor(t *testing.T) {
 	open, _, _ := strings.Cut(f.m.theme.Style(f.m.theme.Mem).Render("\x00"), "\x00")
 	if open == "" || !strings.Contains(f.m.renderStream(), open+"r3") {
 		t.Fatalf("header lost the memory color on r3: %q", f.m.renderStream())
+	}
+}
+
+// rawDB opens a second connection to cfg's database, for tests that read
+// memory_access, which the bus does not export.
+func rawDB(t *testing.T, cfg config.Config) *sql.DB {
+	t.Helper()
+	dsn, err := bus.SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// TestTUIReadsDoNotCountServes (#53): the TUI's search overlay and version
+// stepping read memories without counting a serve.
+func TestTUIReadsDoNotCountServes(t *testing.T) {
+	f, id := onMemory(t)
+	f.key("/")
+	f.key("Release")
+	f.key("enter")
+	if len(f.m.search.hits) == 0 {
+		t.Fatalf("search found nothing: err=%v", f.m.search.err)
+	}
+	f.key("esc")
+	f.key(".")
+	var n int
+	if err := rawDB(t, f.c.cfg).QueryRow("SELECT served_count FROM memory_access WHERE memory_id=?", id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("TUI reads counted %d serves, want 0", n)
 	}
 }

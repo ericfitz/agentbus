@@ -1410,3 +1410,62 @@ func TestHistoryTagsSchemaSaysAll(t *testing.T) {
 	}
 	t.Fatal("history tool not registered")
 }
+
+// TestSearchToolKinds (#52): kinds narrows a search through the MCP tool,
+// the schema advertises it, an unknown kind is a tool error, and the
+// description documents kinds and channel scope.
+func TestSearchToolKinds(t *testing.T) {
+	cs := testSession(t)
+	sam, _ := call(t, cs, "register", map[string]any{"name": "Sam"})
+	as := sam["as"]
+	call(t, cs, "create_channel", map[string]any{"as": as, "name": "tasks/work", "kind": "memory"})
+	call(t, cs, "create_channel", map[string]any{"as": as, "name": "notes", "kind": "memory"})
+	call(t, cs, "create_channel", map[string]any{"as": as, "name": "talk"})
+	created, _ := call(t, cs, "task_create", map[string]any{"as": as, "channel": "tasks/work", "subject": "ship the widget"})
+	taskID := int64(created["id"].(float64))
+	call(t, cs, "send", map[string]any{"as": as, "channel": "notes", "body": "widget memory"})
+	call(t, cs, "send", map[string]any{"as": as, "channel": "talk", "body": "widget chat"})
+
+	out, res := call(t, cs, "search", map[string]any{"as": as, "query": "widget", "kinds": []string{"tasks"}})
+	if res.IsError {
+		t.Fatalf("kinds=tasks failed: %+v", out)
+	}
+	hits, _ := out["hits"].([]any)
+	if len(hits) != 1 {
+		t.Fatalf("kinds=tasks want 1 hit, got %d: %+v", len(hits), out)
+	}
+	h := hits[0].(map[string]any)
+	if mid, _ := h["memory_id"].(float64); int64(mid) != taskID {
+		t.Fatalf("kinds=tasks returned %+v, want task %d", h, taskID)
+	}
+
+	_, res = call(t, cs, "search", map[string]any{"as": as, "query": "widget", "kinds": []string{"bogus"}})
+	if !res.IsError {
+		t.Fatal("kinds=bogus must be a tool error")
+	}
+	if txt := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(txt, "bogus") {
+		t.Fatalf("error must name the bad kind: %s", txt)
+	}
+
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if tl.Name != "search" {
+			continue
+		}
+		schema, _ := json.Marshal(tl.InputSchema)
+		if !strings.Contains(string(schema), `"kinds"`) {
+			t.Fatalf("search input schema lacks kinds: %s", schema)
+		}
+		if !strings.Contains(tl.Description, "kinds") {
+			t.Fatalf("description must document kinds: %s", tl.Description)
+		}
+		if strings.Contains(tl.Description, "ranks memories by meaning") {
+			t.Fatalf("description still says semantic ranks only memories: %s", tl.Description)
+		}
+		return
+	}
+	t.Fatal("search tool not registered")
+}

@@ -77,7 +77,7 @@ func TestToolsRegisteredWithPrefixDescriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"register": true, "create_channel": true, "list_channels": true, "subscribe": true, "unsubscribe": true, "send": true, "receive": true, "history": true, "search": true, "get_memory": true, "edit_memory": true, "delete_memory": true, "discover": true, "task_create": true, "task_claim": true, "task_release": true, "task_update": true, "task_get": true, "task_list": true, "set_status": true, "status_history": true}
+	want := map[string]bool{"register": true, "create_channel": true, "list_channels": true, "subscribe": true, "unsubscribe": true, "send": true, "receive": true, "history": true, "search": true, "get_memory": true, "edit_memory": true, "delete_memory": true, "memory_feedback": true, "discover": true, "task_create": true, "task_claim": true, "task_release": true, "task_update": true, "task_get": true, "task_list": true, "set_status": true, "status_history": true}
 	for _, tl := range tools.Tools {
 		if !strings.HasPrefix(tl.Description, "Agentbus:") {
 			t.Fatalf("%s description must start with Agentbus:", tl.Name)
@@ -1550,4 +1550,35 @@ func TestSearchToolKinds(t *testing.T) {
 		return
 	}
 	t.Fatal("search tool not registered")
+}
+
+// TestMemoryFeedbackTool (#53): one call carries USED and INCORRECT verdicts;
+// bad verdicts and empty input are validation errors.
+func TestMemoryFeedbackTool(t *testing.T) {
+	cs := testSession(t)
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "mem", "kind": "memory"})
+	var ids []int64
+	for _, c := range []string{"one", "two"} {
+		out, _ := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "mem", "content": c})
+		ids = append(ids, int64(out["memory_id"].(float64)))
+	}
+	out, res := call(t, cs, "memory_feedback", map[string]any{"as": "Sam", "items": []map[string]any{
+		{"memory_id": ids[0], "verdict": "USED"}, {"memory_id": ids[1], "verdict": "INCORRECT"},
+	}})
+	if res.IsError {
+		t.Fatalf("feedback: %+v", res)
+	}
+	if applied, _ := out["applied"].([]any); len(applied) != 2 {
+		t.Fatalf("applied = %v, want 2 items", out["applied"])
+	}
+	_, res = call(t, cs, "memory_feedback", map[string]any{"as": "Sam", "items": []map[string]any{{"memory_id": ids[0], "verdict": "MAYBE"}}})
+	txt := res.Content[0].(*mcp.TextContent).Text
+	if !res.IsError || !strings.Contains(txt, "validation") || !strings.Contains(txt, "unknown verdict") {
+		t.Fatalf("MAYBE: error=%v text=%s", res.IsError, txt)
+	}
+	_, res = call(t, cs, "memory_feedback", map[string]any{"as": "Sam", "items": []map[string]any{}})
+	if txt := res.Content[0].(*mcp.TextContent).Text; !res.IsError || !strings.Contains(txt, "validation") {
+		t.Fatalf("empty items: error=%v text=%s", res.IsError, txt)
+	}
 }

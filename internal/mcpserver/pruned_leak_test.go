@@ -116,7 +116,10 @@ func TestPrunedMemoryNeverLeaksThroughAnyTool(t *testing.T) {
 		"get_memory":    sameAsDeleted("get_memory", func(id int64) map[string]any { return as(map[string]any{"id": id}) }),
 		"edit_memory":   sameAsDeleted("edit_memory", func(id int64) map[string]any { return as(map[string]any{"id": id, "content": "x"}) }),
 		"delete_memory": sameAsDeleted("delete_memory", func(id int64) map[string]any { return as(map[string]any{"id": id}) }),
-		"task_get":      sameAsDeleted("task_get", func(id int64) map[string]any { return as(map[string]any{"task_id": id}) }),
+		"memory_feedback": sameAsDeleted("memory_feedback", func(id int64) map[string]any {
+			return as(map[string]any{"items": []map[string]any{{"memory_id": id, "verdict": "USED"}}})
+		}),
+		"task_get": sameAsDeleted("task_get", func(id int64) map[string]any { return as(map[string]any{"task_id": id}) }),
 		"task_update": sameAsDeleted("task_update", func(id int64) map[string]any {
 			return as(map[string]any{"task_id": id, "status": "completed"})
 		}),

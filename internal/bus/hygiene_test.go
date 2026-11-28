@@ -306,3 +306,190 @@ func TestPrunedRefusedLikeDeleted(t *testing.T) {
 		t.Fatalf("p lost its live revision: %v", err)
 	}
 }
+
+// TestFeedbackUsed (#53): USED counts a use and stamps used_at and
+// accessed_at.
+func TestFeedbackUsed(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "fact")
+	clockAt(b, t0, time.Hour)
+	now := t0.Add(time.Hour).UnixMilli()
+	res, err := b.MemoryFeedback(sam, []FeedbackItem{{MemoryID: id, Verdict: "USED"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := stats(t, b, id)
+	if s.UsedCount != 1 || s.UsedAt == nil || *s.UsedAt != now || s.AccessedAt != now {
+		t.Fatalf("stats = %+v, want used_count 1 and used_at = accessed_at = %d", s, now)
+	}
+	if want := []FeedbackItem{{MemoryID: id, Verdict: "USED"}}; !reflect.DeepEqual(res.Applied, want) {
+		t.Fatalf("applied = %+v, want %+v", res.Applied, want)
+	}
+}
+
+// TestFeedbackIncorrectAndReflag (#53): INCORRECT records who and when and
+// the serve count at that moment; a later INCORRECT replaces all three.
+func TestFeedbackIncorrectAndReflag(t *testing.T) {
+	b, sam, kim := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "fact")
+	setAccess(t, b, id, "served_count=3")
+	clockAt(b, t0, time.Hour)
+	if _, err := b.MemoryFeedback(kim, []FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	s := stats(t, b, id)
+	if s.IncorrectAt == nil || *s.IncorrectAt != t0.Add(time.Hour).UnixMilli() || s.IncorrectBy == nil || *s.IncorrectBy != "Kim" || s.IncorrectServedBase != 3 {
+		t.Fatalf("first flag: %+v", s)
+	}
+	setAccess(t, b, id, "served_count=5")
+	clockAt(b, t0, 2*time.Hour)
+	if _, err := b.MemoryFeedback(sam, []FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	s = stats(t, b, id)
+	if s.IncorrectAt == nil || *s.IncorrectAt != t0.Add(2*time.Hour).UnixMilli() || s.IncorrectBy == nil || *s.IncorrectBy != "Sam" || s.IncorrectServedBase != 5 {
+		t.Fatalf("reflag: %+v", s)
+	}
+}
+
+// TestFeedbackDuplicateIdsApplyInOrder (#53): the same id may appear more
+// than once; items apply in list order under one timestamp.
+func TestFeedbackDuplicateIdsApplyInOrder(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	_, err := b.MemoryFeedback(sam, []FeedbackItem{{id, "USED"}, {id, "INCORRECT"}, {id, "USED"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := stats(t, b, id)
+	if s.UsedCount != 2 || s.UsedAt == nil || s.IncorrectAt == nil || *s.UsedAt != *s.IncorrectAt {
+		t.Fatalf("stats = %+v, want used_count 2 and one shared timestamp", s)
+	}
+}
+
+// TestFeedbackAllOrNothing (#53): one error names every bad item in list
+// order, nothing is applied, and a pruned memory reads as a deleted one.
+func TestFeedbackAllOrNothing(t *testing.T) {
+	b, sam, _ := memBus(t)
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.CreateChannel(sam, "chat", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	good := remember(t, b, sam, "good")
+	deleted := remember(t, b, sam, "deleted")
+	if err := b.DeleteMemory(sam, deleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	pruned := remember(t, b, sam, "pruned")
+	pruneRaw(t, b, pruned, "noise")
+	tk, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "job"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr, err := b.Send(sam, SendInput{Channel: "chat", Content: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatSeq := cr.Seq
+	_, err = b.MemoryFeedback(sam, []FeedbackItem{
+		{good, "USED"}, {deleted, "USED"}, {tk.ID, "INCORRECT"}, {pruned, "USED"}, {good, "used"}, {chatSeq, "USED"},
+	})
+	wantCode(t, err, "validation")
+	var be *Error
+	if !errors.As(err, &be) {
+		t.Fatal(err)
+	}
+	msg := be.Message
+	wants := []string{
+		fmt.Sprintf("item 1 (memory %d): not found", deleted),
+		fmt.Sprintf("item 2 (memory %d): task row", tk.ID),
+		fmt.Sprintf("item 3 (memory %d): not found", pruned),
+		fmt.Sprintf(`item 4 (memory %d): unknown verdict "used"`, good),
+		fmt.Sprintf("item 5 (memory %d): not found", chatSeq),
+	}
+	at := 0
+	for _, w := range wants {
+		i := strings.Index(msg[at:], w)
+		if i < 0 {
+			t.Fatalf("message %q lacks %q in order", msg, w)
+		}
+		at += i + len(w)
+	}
+	if strings.Contains(msg, "item 0") {
+		t.Fatalf("message names the valid item 0: %q", msg)
+	}
+	if n := stats(t, b, good).UsedCount; n != 0 {
+		t.Fatalf("used_count = %d after a refused call, want 0", n)
+	}
+	// Pruned and deleted read identically.
+	_, e1 := b.MemoryFeedback(sam, []FeedbackItem{{deleted, "USED"}})
+	_, e2 := b.MemoryFeedback(sam, []FeedbackItem{{pruned, "USED"}})
+	if e1 == nil || e2 == nil || strings.ReplaceAll(e1.Error(), fmt.Sprint(deleted), "N") != strings.ReplaceAll(e2.Error(), fmt.Sprint(pruned), "N") {
+		t.Fatalf("deleted %v, pruned %v: texts differ", e1, e2)
+	}
+}
+
+// TestFeedbackBounds (#53): 1 to 50 items.
+func TestFeedbackBounds(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	_, err := b.MemoryFeedback(sam, nil)
+	wantCode(t, err, "validation")
+	_, err = b.MemoryFeedback(sam, []FeedbackItem{})
+	wantCode(t, err, "validation")
+	items := make([]FeedbackItem, 51)
+	for i := range items {
+		items[i] = FeedbackItem{MemoryID: id, Verdict: "USED"}
+	}
+	_, err = b.MemoryFeedback(sam, items)
+	wantCode(t, err, "validation")
+	if n := stats(t, b, id).UsedCount; n != 0 {
+		t.Fatalf("used_count = %d after a refused call, want 0", n)
+	}
+	if _, err := b.MemoryFeedback(sam, items[:50]); err != nil {
+		t.Fatal(err)
+	}
+	if n := stats(t, b, id).UsedCount; n != 50 {
+		t.Fatalf("used_count = %d, want 50", n)
+	}
+}
+
+// TestFeedbackEditClearsFlag (#53): an edit clears INCORRECT and keeps the
+// use counter.
+func TestFeedbackEditClearsFlag(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	if _, err := b.MemoryFeedback(sam, []FeedbackItem{{id, "USED"}, {id, "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.EditMemory(sam, EditInput{ID: id, Content: "fixed"}); err != nil {
+		t.Fatal(err)
+	}
+	s := stats(t, b, id)
+	if s.IncorrectAt != nil || s.IncorrectBy != nil || s.UsedCount != 1 {
+		t.Fatalf("stats = %+v, want flag cleared and used_count 1", s)
+	}
+}
+
+// TestFeedbackRateLimited (#53): a call is charged once; a refused call
+// applies nothing.
+func TestFeedbackRateLimited(t *testing.T) {
+	b, sam, _ := memBus(t)
+	id := remember(t, b, sam, "fact")
+	b.cfg.SendMessagesPerSecond = 1
+	b.limits = newLimiter(b.cfg)
+	if _, err := b.MemoryFeedback(sam, []FeedbackItem{{id, "USED"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.MemoryFeedback(sam, []FeedbackItem{{id, "USED"}})
+	wantCode(t, err, "rate_limited")
+	if n := stats(t, b, id).UsedCount; n != 1 {
+		t.Fatalf("used_count = %d, want 1", n)
+	}
+}

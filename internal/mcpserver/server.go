@@ -94,6 +94,10 @@ type deleteIn struct {
 	ID             int64  `json:"id"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
+type feedbackIn struct {
+	As    string             `json:"as,omitempty"`
+	Items []bus.FeedbackItem `json:"items" jsonschema:"1 to 50 pairs of memory_id and verdict (USED or INCORRECT)"`
+}
 type setStatusIn struct {
 	As      string `json:"as,omitempty"`
 	Tag     string `json:"tag"`
@@ -555,6 +559,10 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{Name: "delete_memory", Description: "Agentbus: delete a memory by memory_id. Its content stops appearing in get, receive, and search."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
 			return result(map[string]any{"deleted": in.ID}, b.DeleteMemory(in.As, in.ID, in.IdempotencyKey))
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_feedback", Description: "Agentbus: report on memories you were served, in one call. items is 1 to 50 {memory_id, verdict} pairs. USED: you relied on the memory and it was right. INCORRECT: it is wrong and you do not know the right answer; when you do know it, correct the memory with edit_memory instead, which also clears the flag. Nothing is applied unless every item is valid; the error names each bad item. Task ids are not accepted."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in feedbackIn) (*mcp.CallToolResult, any, error) {
+			return result(b.MemoryFeedback(in.As, in.Items))
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "discover", Description: "Agentbus: list live registered identities with their repository context."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in asIn) (*mcp.CallToolResult, any, error) {

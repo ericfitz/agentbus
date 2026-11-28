@@ -6,9 +6,9 @@ Amends ADR 0013 items 6 and 7 (memory expiry and what counts as access).
 
 ## Context
 
-ADR 0013 expires a memory that no `get_memory` call or `search` hit has
-touched for `memory_expiry_hours` (item 6), and counts a search hit as a
-touch (item 7). A memory that matches unrelated searches but never helps
+ADR 0013 gives each memory a last-accessed time that only `get_memory` and a
+`search` hit update (item 6), and a maintenance tick removes a memory not
+accessed for a year (item 7). A memory that matches unrelated searches but never helps
 therefore lives forever, and a wrong memory is never demoted. Nothing records
 whether a memory was useful. The live bus held 583 memories after seven
 weeks, and under the 1-year rule nothing expires before October 2027.
@@ -41,7 +41,7 @@ Human decisions, as the spec records them:
 5. **Pruned memories follow the same 1-year rule.** No exemption and no
    separate purge setting: a pruned memory is hard-deleted when its
    `accessed_at` is older than `memory_expiry_hours`, like any other.
-6. **Approach A** (below): extend `memory_access`.
+6. **Approach A** (see the spec): extend `memory_access`.
 
 Proposals Eric approved ("lgtm"):
 
@@ -95,7 +95,7 @@ Human decision during execution (Eric, 2026-11-27):
     incorrect, in both the emoji and Nerd Font sets, under new icon names
     `memory_pruned` and `memory_incorrect` that `icon_map` can override.
     State markers come before the counts so a narrow pane keeps them
-    (orchestrator's call during execution, after the Task 8 review).
+    (orchestrator's call during execution).
 
 ## Consequences
 
@@ -105,6 +105,8 @@ Human decision during execution (Eric, 2026-11-27):
 - Agents see no counts. A flagged memory carries `incorrect: true` on search
   hits and `get_memory`; a pruned memory answers `not_found` exactly as a
   deleted one, so an agent can neither see nor revive it.
+- A `USED` report now also refreshes `accessed_at`, so it counts as an access
+  for the 1-year rule (a change to ADR 0013 item 6).
 - Pruning is soft: a pruned memory keeps its row, its embedding and its
   full-text row, so a TUI restore needs no re-embed. The 1-year rule still
   hard-deletes a pruned memory, counted from its last access.

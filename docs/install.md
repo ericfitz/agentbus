@@ -681,7 +681,10 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   `<icon>incorrect by <who> <when>` when flagged, then `served N` and
   `used N` (serves through MCP `search` and `get_memory`, and `USED`
   reports); the state markers come first so a narrow pane keeps them. A
-  pruned memory's row is dimmed. `R` restores a pruned memory (clears the
+  pruned memory's row is dimmed. The `/` search overlay marks a pruned hit
+  `<icon>pruned` and a flagged hit `<icon>incorrect`, and the health overlay
+  (`h`) shows `noise prune` and `incorrect prune` lines with each rule's hours
+  and serves. `R` restores a pruned memory (clears the
   pruned state and any incorrect flag and restarts its noise grace), `f`
   clears an incorrect flag, and `x` deletes the memory, pruned or not, after
   a `y` confirmation. `R` on a memory that is not pruned and `f` on one that

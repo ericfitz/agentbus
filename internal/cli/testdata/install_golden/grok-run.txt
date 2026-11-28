@@ -14,4 +14,4 @@ grok mcp add --scope user agentbus -- agentbus mcp
 .grok/hooks/agentbus.json f92df386a73b
 .grok/hooks/agentbus.json.bak 2c23b4899fab
 .grok/rules/agentbus.md d53c46fbc18a
-.grok/skills/using-agentbus/SKILL.md 6f9ac6782e6d
+.grok/skills/using-agentbus/SKILL.md e4a69550f5f7

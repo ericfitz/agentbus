@@ -107,7 +107,8 @@ by `get_memory`, a `search` hit or a `USED` report for `memory_expiry_hours`
 (default 1 year) is deleted. Two more rules stop a memory being returned to
 agents: one served `memory_noise_serves` times with no `USED` report after
 `memory_noise_grace_hours`, and one flagged `INCORRECT` and left uncorrected
-for `memory_incorrect_prune_hours` while still being served. Both are kept
+for `memory_incorrect_prune_hours` and served more than
+`memory_incorrect_prune_serves` times since the flag. Both are kept
 for the human to review, not deleted.
 
 If `register`'s result has `ignored_channels`, your `.local/agentbus.json`

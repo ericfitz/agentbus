@@ -666,17 +666,36 @@ func TestSearchOverlayMarksPrunedAndIncorrect(t *testing.T) {
 		switch {
 		case strings.Contains(l, "pruned note"):
 			seen++
-			if !strings.HasSuffix(l, " pruned") || strings.Contains(l, "incorrect") {
+			if !strings.Contains(l, " pruned  zebra") || strings.Contains(l, "incorrect") {
 				t.Fatalf("pruned hit line wrong: %q", l)
 			}
 		case strings.Contains(l, "flagged note"):
 			seen++
-			if !strings.HasSuffix(l, " incorrect") || strings.Contains(l, " pruned") {
+			if !strings.Contains(l, " incorrect  zebra") || strings.Contains(l, " pruned") {
 				t.Fatalf("flagged hit line wrong: %q", l)
 			}
 		}
 	}
 	if seen != 2 {
 		t.Fatalf("saw %d of the 2 hit lines", seen)
+	}
+}
+
+func TestSearchOverlayMarksSurviveLongSubject(t *testing.T) {
+	f := newFixture(t)
+	long := "zebra " + strings.Repeat("very long subject text ", 12)
+	g := f.agentSend(t, "dev-notes", long)
+	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: *g.MemoryID, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	f.key("esc")
+	f.key("/")
+	f.key("zebra")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	if v := ansi.Strip(f.m.View()); !strings.Contains(v, " incorrect") {
+		t.Fatalf("incorrect mark clipped:\n%s", v)
 	}
 }

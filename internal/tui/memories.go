@@ -127,14 +127,8 @@ func memLabel(rev string, st bus.MemoryStats, ok bool) string {
 	if rev != "" {
 		parts = append(parts, rev)
 	}
-	parts = append(parts, "served "+strconv.FormatInt(st.ServedCount, 10), "used "+strconv.FormatInt(st.UsedCount, 10))
-	if st.IncorrectAt != nil {
-		by := ""
-		if st.IncorrectBy != nil {
-			by = *st.IncorrectBy
-		}
-		parts = append(parts, "incorrect by "+by+" "+stamp(*st.IncorrectAt))
-	}
+	// State markers come before the counts so header truncation drops
+	// the counts first.
 	if st.PrunedAt != nil {
 		reason := ""
 		if st.PrunedReason != nil {
@@ -142,6 +136,14 @@ func memLabel(rev string, st bus.MemoryStats, ok bool) string {
 		}
 		parts = append(parts, "pruned ("+reason+")")
 	}
+	if st.IncorrectAt != nil {
+		by := ""
+		if st.IncorrectBy != nil {
+			by = *st.IncorrectBy
+		}
+		parts = append(parts, "incorrect by "+by+" "+strings.Join(strings.Fields(stamp(*st.IncorrectAt)), " "))
+	}
+	parts = append(parts, "served "+strconv.FormatInt(st.ServedCount, 10), "used "+strconv.FormatInt(st.UsedCount, 10))
 	return strings.Join(parts, " · ")
 }
 
@@ -176,9 +178,6 @@ func (m *Model) restoreMemory() tea.Cmd {
 		return nil
 	}
 	id := *r.MemoryID
-	if st, has := m.memStats[r.Channel][id]; has && st.PrunedAt == nil {
-		return m.showToast("memory is not pruned")
-	}
 	if err := m.c.b.RestoreMemory(m.c.as, id); err != nil {
 		return m.showToast("restore: " + errText(err))
 	}
@@ -191,9 +190,6 @@ func (m *Model) clearIncorrect() tea.Cmd {
 		return nil
 	}
 	id := *r.MemoryID
-	if st, has := m.memStats[r.Channel][id]; has && st.IncorrectAt == nil {
-		return m.showToast("memory is not flagged incorrect")
-	}
 	if err := m.c.b.ClearMemoryIncorrect(m.c.as, id); err != nil {
 		return m.showToast("clear flag: " + errText(err))
 	}

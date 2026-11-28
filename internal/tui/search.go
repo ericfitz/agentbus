@@ -226,12 +226,21 @@ func (m Model) viewSearch() string {
 		if first == "" {
 			first = strings.SplitN(hit.Content, "\n", 2)[0]
 		}
-		line := fmt.Sprintf("%s%s #%d%s %s %s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(senderName(hit.Sender)), dim.Render(clock(hit.CreatedAt)), first)
+		marks := ""
 		if hit.Pruned {
-			line = dim.Render(ansi.Strip(line) + " pruned")
+			marks += " pruned"
 		}
 		if hit.Incorrect {
-			line += " " + th.Style(th.Warn).Render("incorrect")
+			if hit.Pruned {
+				marks += " incorrect"
+			} else {
+				marks += " " + th.Style(th.Warn).Render("incorrect")
+			}
+		}
+		// The marks sit before the text so a long subject cannot clip them.
+		line := fmt.Sprintf("%s%s #%d%s %s %s%s  %s", mark, hit.Channel, hit.Seq, rev, th.Style(th.Agent).Render(senderName(hit.Sender)), dim.Render(clock(hit.CreatedAt)), marks, first)
+		if hit.Pruned {
+			line = dim.Render(ansi.Strip(line))
 		}
 		if i == m.search.cursor {
 			line = th.Style(th.Agent).Render(markSel+" ") + line

@@ -328,15 +328,15 @@ func TestPrunedMemoryShownDimmedAndLabeled(t *testing.T) {
 	if !strings.Contains(f.m.renderStream(), dimOpen+"Reviewer checklist") {
 		t.Fatalf("pruned row text lacks the dim color: %q", f.m.renderStream())
 	}
-	if strings.Contains(ansi.Strip(f.m.renderStream()), "Release v3") && strings.Count(ansi.Strip(f.m.renderStream()), "pruned") != 1 {
-		t.Fatal("only the pruned memory is labeled")
+	if n := strings.Count(ansi.Strip(f.m.renderStream()), "pruned ("); n != 1 {
+		t.Fatalf("want exactly one pruned label, got %d", n)
 	}
 }
 
 func TestRestoreKey(t *testing.T) {
 	f, id := onMemory(t)
 	f.key("R")
-	if f.m.toast != "memory is not pruned" {
+	if !strings.Contains(f.m.toast, "is not pruned") {
 		t.Fatalf("toast=%q", f.m.toast)
 	}
 	rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id)
@@ -357,7 +357,7 @@ func TestRestoreKey(t *testing.T) {
 func TestClearFlagKey(t *testing.T) {
 	f, id := onMemory(t)
 	f.key("f")
-	if f.m.toast != "memory is not flagged incorrect" {
+	if !strings.Contains(f.m.toast, "is not flagged incorrect") {
 		t.Fatalf("toast=%q", f.m.toast)
 	}
 	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
@@ -440,6 +440,25 @@ func TestMemoryKeysIgnoredOffMemoryRows(t *testing.T) {
 		f.key(k)
 		if f.m.mode != modeNormal {
 			t.Fatalf("%s with no cursor: mode=%v", k, f.m.mode)
+		}
+	}
+}
+
+// The state markers precede the counts, so a narrow pane keeps them.
+func TestMemoryHeaderKeepsStateWhenNarrow(t *testing.T) {
+	f, id := onMemory(t)
+	if _, err := f.ab.MemoryFeedback(f.sam, []bus.FeedbackItem{{MemoryID: id, Verdict: "INCORRECT"}}); err != nil {
+		t.Fatal(err)
+	}
+	rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id)
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.m.width = 70
+	f.m.layout()
+	f.m.refreshStream()
+	f.streamHas(t, "pruned (")
+	for _, l := range strings.Split(ansi.Strip(f.m.renderStream()), "\n") {
+		if strings.Contains(l, "pruned (") && strings.Contains(l, "served") {
+			t.Fatalf("pane not narrow enough to truncate the counts: %q", l)
 		}
 	}
 }

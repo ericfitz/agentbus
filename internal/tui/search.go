@@ -228,13 +228,13 @@ func (m Model) viewSearch() string {
 		}
 		marks := ""
 		if hit.Pruned {
-			marks += " pruned"
+			marks += " " + iconPruned + "pruned"
 		}
 		if hit.Incorrect {
 			if hit.Pruned {
-				marks += " incorrect"
+				marks += " " + iconIncorrect + "incorrect"
 			} else {
-				marks += " " + th.Style(th.Warn).Render("incorrect")
+				marks += " " + iconIncorrect + th.Style(th.Warn).Render("incorrect")
 			}
 		}
 		// The marks sit before the text so a long subject cannot clip them.

@@ -117,8 +117,9 @@ func (m *Model) applyMemStats(msg memStatsMsg) tea.Cmd {
 }
 
 // memLabel is a memory row's header label: the revision label rev, then the
-// served and used counts, the incorrect flag and the pruned state. Without
-// stats (ok false) it is rev unchanged.
+// pruned state, the incorrect flag and the served and used counts (state
+// first, so header truncation drops the counts first). Pruned and incorrect
+// carry their icons. Without stats (ok false) it is rev unchanged.
 func memLabel(rev string, st bus.MemoryStats, ok bool) string {
 	if !ok {
 		return rev
@@ -134,14 +135,14 @@ func memLabel(rev string, st bus.MemoryStats, ok bool) string {
 		if st.PrunedReason != nil {
 			reason = *st.PrunedReason
 		}
-		parts = append(parts, "pruned ("+reason+")")
+		parts = append(parts, iconPruned+"pruned ("+reason+")")
 	}
 	if st.IncorrectAt != nil {
 		by := ""
 		if st.IncorrectBy != nil {
 			by = *st.IncorrectBy
 		}
-		parts = append(parts, "incorrect by "+by+" "+strings.Join(strings.Fields(stamp(*st.IncorrectAt)), " "))
+		parts = append(parts, iconIncorrect+"incorrect by "+by+" "+strings.Join(strings.Fields(stamp(*st.IncorrectAt)), " "))
 	}
 	parts = append(parts, "served "+strconv.FormatInt(st.ServedCount, 10), "used "+strconv.FormatInt(st.UsedCount, 10))
 	return strings.Join(parts, " · ")

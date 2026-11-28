@@ -793,6 +793,8 @@ does.
 | `expanded` | a thread whose replies are shown | ▼ | U+F0D7 fa-caret-down |
 | `error` | the toast and overlay error prefix | ✗ | U+F06A fa-circle-exclamation |
 | `arrow` | sender → recipient, a pending task's owner | → | U+F061 fa-arrow-right |
+| `memory_pruned` | a pruned memory's header and search hit | wastebasket | U+F1F8 fa-trash |
+| `memory_incorrect` | a memory flagged incorrect | cross mark | U+F057 fa-circle-xmark |
 
 The `agent` and `user` icons are drawn in the sender's color (the `user` theme
 color for your own name, `agent` for everyone else) wherever they appear: message

@@ -462,3 +462,19 @@ func TestMemoryHeaderKeepsStateWhenNarrow(t *testing.T) {
 		}
 	}
 }
+
+// A custom icon_map override of memory_pruned shows in the header.
+func TestMemoryPrunedIconOverride(t *testing.T) {
+	t.Cleanup(func() { setIcons(emojiIcons) })
+	f, id := onMemory(t)
+	rawExec(t, f, "UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id)
+	cfg := config.Default()
+	cfg.IconMap = map[string]string{"memory_pruned": "Z"}
+	var warn strings.Builder
+	LoadIcons(cfg, &warn)
+	if warn.Len() != 0 {
+		t.Fatalf("warn=%q", warn.String())
+	}
+	f.run(f.m.loadMemStats("dev-notes"))
+	f.streamHas(t, "Z  pruned (noise)")
+}

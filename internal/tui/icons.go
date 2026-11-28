@@ -19,6 +19,7 @@ var iconVars = map[string]*string{
 	"status_idle": &statusIcons[0], "status_planning": &statusIcons[1], "status_implementing": &statusIcons[2],
 	"status_reviewing": &statusIcons[3], "status_waiting": &statusIcons[4], "status_blocked": &statusIcons[5],
 	"status_needs-human": &statusIcons[6], "status_offline": &statusIcons[7],
+	"memory_pruned": &iconPruned, "memory_incorrect": &iconIncorrect,
 }
 
 // emojiIcons is the default set, captured from the variables' initial values.
@@ -57,6 +58,8 @@ var nerdIcons = map[string]string{
 	"status_blocked":      "\uf05e",     // fa-ban
 	"status_needs-human":  "\uf256",     // fa-hand (nf fa-hand_stop_o)
 	"status_offline":      "\uf011",     // fa-power-off
+	"memory_pruned":       "\uf1f8",     // fa-trash (nf fa-trash)
+	"memory_incorrect":    "\uf057",     // fa-circle-xmark (nf fa-times_circle)
 }
 
 // padIcon pads a glyph to its emoji counterpart's layout: the wide icons

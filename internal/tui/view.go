@@ -260,6 +260,9 @@ var (
 	iconTasks = "\U0001F4CB\uFE0F " // clipboard; Wide like chat and memory, so no CSI trick
 	iconArrow = " \u2192 "          // rightwards arrow; ambiguous width, 1 column in Western setups
 	iconError = "\u2717 "           // ballot X, the toast and overlay-footer error prefix
+
+	iconPruned    = "\U0001F5D1\uFE0F " // wastebasket, a pruned memory
+	iconIncorrect = "\u274C "           // cross mark (red X), a memory flagged incorrect
 )
 
 // statusIcons are the agent status icons, in statusIconTags order; iconVars

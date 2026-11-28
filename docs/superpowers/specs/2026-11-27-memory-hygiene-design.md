@@ -115,6 +115,16 @@ recorded so the spec and the plan agree):
     do not run the inspection hook (the TUI delete does); the flagged-last
     ordering applies within text search's existing 1000-candidate ceiling.
 
+Human decision during execution (Eric, 2026-11-27):
+
+18. **TUI markers are an icon plus the word.** The pruned and incorrect
+    markers in memory headers and search hits are icons from the TUI icon
+    system, followed by the word: a trash can for pruned and a red X for
+    incorrect, in both the emoji and Nerd Font sets, under new icon names
+    `memory_pruned` and `memory_incorrect` that `icon_map` can override.
+    State markers come before the counts so a narrow pane keeps them
+    (orchestrator's call during execution, after the Task 8 review).
+
 ## Approaches considered
 
 - **A. Extend `memory_access` (chosen).** Add counters, feedback, flag and

@@ -159,7 +159,11 @@ func (b *Bus) fixUpAbandoned(as, channel string, ids []int64) error {
 	if _, err := b.reclaimAbandoned(tx, as, rctx, channel, ids); err != nil {
 		return err
 	}
-	return internal(tx.Commit())
+	if err := tx.Commit(); err != nil {
+		return internal(err)
+	}
+	b.embedSoon()
+	return nil
 }
 
 // tickBegin opens the tick's per-channel write transaction; a package-level
@@ -217,6 +221,7 @@ func (b *Bus) reclaimAllAbandonedTasks(ctx context.Context) error {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		b.embedSoon()
 	}
 	return nil
 }

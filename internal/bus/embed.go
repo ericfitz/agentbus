@@ -282,12 +282,26 @@ func embedText(subject, content string) string {
 	return subject + "\n\n" + content
 }
 
-// unembeddedFrom selects live memories that still need an embedding under the
-// model bound as ?1. Task rows are never embedded, and a row the endpoint
-// rejected on its own under that model (embed_failures, ADR 0018) is not
-// retried. StatusReport counts the same rows, so its backlog drains to 0.
+// taskEmbedText is what a task revision embeds: its subject and the
+// description from the task JSON (never the raw JSON, ADR 0032). Content
+// that is not a task document embeds as is.
+func taskEmbedText(subject, content string) string {
+	var doc struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		return embedText(subject, content)
+	}
+	return embedText(subject, doc.Description)
+}
+
+// unembeddedFrom selects live rows of every kind (memories, chat, DMs and
+// task revisions, ADR 0032) that still need an embedding under the model
+// bound as ?1. A row the endpoint rejected on its own under that model
+// (embed_failures, ADR 0018) is not retried. StatusReport counts the same
+// rows, so its backlog drains to 0.
 const unembeddedFrom = `FROM messages m LEFT JOIN embeddings e ON e.seq=m.seq AND e.model=?1
-	  WHERE m.memory_id IS NOT NULL AND m.tombstone=0 AND e.seq IS NULL AND m.channel <> 'tasks' AND m.channel NOT LIKE 'tasks/%'
+	  WHERE m.tombstone=0 AND e.seq IS NULL
 	  AND NOT EXISTS (SELECT 1 FROM embed_failures f WHERE f.seq=m.seq AND f.model=?1)`
 
 // embedHTTPError is a non-2xx answer from the embeddings endpoint, with the
@@ -385,7 +399,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 			}
 		}
 	}
-	rows, err := b.db.Query(`SELECT m.seq, m.subject, m.content `+unembeddedFrom+` ORDER BY m.seq LIMIT ?2`, b.embedder.model, embedBatchSize)
+	rows, err := b.db.Query(`SELECT m.seq, m.channel, m.subject, m.content `+unembeddedFrom+` ORDER BY m.seq LIMIT ?2`, b.embedder.model, embedBatchSize)
 	if err != nil {
 		return 0, internal(err)
 	}
@@ -394,12 +408,16 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	var texts []string
 	for rows.Next() {
 		var s int64
-		var subject, c string
-		if err := rows.Scan(&s, &subject, &c); err != nil {
+		var ch, subject, c string
+		if err := rows.Scan(&s, &ch, &subject, &c); err != nil {
 			return 0, internal(err)
 		}
 		seqs = append(seqs, s)
-		texts = append(texts, embedText(subject, c))
+		if IsTaskChannel(ch) {
+			texts = append(texts, taskEmbedText(subject, c))
+		} else {
+			texts = append(texts, embedText(subject, c))
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return 0, internal(err)
@@ -459,11 +477,11 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 		var res sql.Result
 		if reason, bad := rejected[i]; bad {
 			res, err = tx.Exec(`INSERT OR REPLACE INTO embed_failures(seq,model,error,failed_at)
-			  SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE seq=? AND memory_id IS NOT NULL AND tombstone=0)`,
+			  SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE seq=? AND tombstone=0)`,
 				s, b.embedder.model, reason, b.nowMs(), s)
 		} else {
 			res, err = tx.Exec(`INSERT OR REPLACE INTO embeddings(seq,model,vector)
-			  SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE seq=? AND memory_id IS NOT NULL AND tombstone=0)`,
+			  SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM messages WHERE seq=? AND tombstone=0)`,
 				s, b.embedder.model, encodeVec(vecs[i]), s)
 		}
 		if err != nil {

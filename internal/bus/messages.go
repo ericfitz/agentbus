@@ -412,9 +412,7 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	if err := tx.Commit(); err != nil {
 		return SendResult{}, internal(err)
 	}
-	if kind == "memory" {
-		b.embedSoon()
-	}
+	b.embedSoon()
 	return res, nil
 }
 

@@ -287,12 +287,27 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 	if err != nil {
 		return Task{}, internal(err)
 	}
+	var oldSubject, oldContent string
+	if err := tx.QueryRow("SELECT subject, content FROM messages WHERE seq=?", t.seq).Scan(&oldSubject, &oldContent); err != nil {
+		return Task{}, internal(err)
+	}
 	if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), t.seq); err != nil {
 		return Task{}, internal(err)
 	}
 	seq, err := b.insertMessage(tx, as, context, SendInput{Channel: t.Channel, Type: typ, Subject: t.Subject, Content: doc}, "ordinary")
 	if err != nil {
 		return Task{}, internal(err)
+	}
+	// A revision with the same subject and description as the previous one
+	// reuses its vectors, so a claim, release or status change costs no
+	// endpoint call (ADR 0032). Unparseable old content counts as changed.
+	var old struct {
+		Description string `json:"description"`
+	}
+	if oldSubject == t.Subject && json.Unmarshal([]byte(oldContent), &old) == nil && old.Description == t.Description {
+		if _, err := tx.Exec("INSERT INTO embeddings(seq,model,vector) SELECT ?,model,vector FROM embeddings WHERE seq=?", seq, t.seq); err != nil {
+			return Task{}, internal(err)
+		}
 	}
 	if _, err := tx.Exec("UPDATE messages SET memory_id=?, revision=? WHERE seq=?", t.ID, t.Revision+1, seq); err != nil {
 		return Task{}, internal(err)
@@ -473,6 +488,11 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 			if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), marker.seq); err != nil {
 				return TaskUpdateResult{}, internal(err)
 			}
+			// writeTaskRevision copied the vector onto the marker; a
+			// tombstoned row must not carry one.
+			if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", marker.seq); err != nil {
+				return TaskUpdateResult{}, internal(err)
+			}
 		} else {
 			if !b.limits.allow(as, 0, b.Now()) {
 				return TaskUpdateResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
@@ -488,6 +508,7 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 		if err := tx.Commit(); err != nil {
 			return TaskUpdateResult{}, internal(err)
 		}
+		b.embedSoon()
 		return res, nil
 	}
 
@@ -537,6 +558,7 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 	if err := tx.Commit(); err != nil {
 		return TaskUpdateResult{}, internal(err)
 	}
+	b.embedSoon()
 	return res, nil
 }
 

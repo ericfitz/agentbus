@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -356,7 +355,9 @@ func TestTaskCreateReplaySurvivesChannelDeletion(t *testing.T) {
 	}
 }
 
-func TestEmbedderSkipsTaskRows(t *testing.T) {
+// Task rows are embedded like every other kind (ADR 0032, which removed the
+// exclusion of #31); the backlog drains to 0 with them counted.
+func TestEmbedderEmbedsTaskRows(t *testing.T) {
 	srv := fakeEmbeddings(t)
 	defer srv.Close()
 	b := newEmbedBus(t, srv.URL)
@@ -364,39 +365,16 @@ func TestEmbedderSkipsTaskRows(t *testing.T) {
 	if _, err := b.CreateChannel(sam, "tasks/work", "memory"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.CreateChannel(sam, "mem", "memory"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/work", Subject: "roses are red"}); err != nil {
-		t.Fatal(err)
-	}
-	memRes, err := b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
+	tk, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/work", Subject: "roses are red"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.waitEmbed()
-	if _, err := b.embedBatch(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Fatalf("embeddings=%d", n)
-	}
-	var seq int64
-	if err := b.db.QueryRow("SELECT seq FROM embeddings").Scan(&seq); err != nil {
-		t.Fatal(err)
-	}
-	if seq != *memRes.MemoryID {
-		t.Fatalf("embedded seq=%d want memory seq=%d", seq, *memRes.MemoryID)
+	drainEmbed(t, b)
+	if embeddedCount(t, b, tk.seq) != 1 {
+		t.Fatal("the task row must be embedded")
 	}
 	st, err := b.StatusReport()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.EmbeddingBacklog != 0 {
-		t.Fatalf("backlog=%d; task rows are never embedded, so they must not count", st.EmbeddingBacklog)
+	if err != nil || st.EmbeddingBacklog != 0 {
+		t.Fatalf("backlog=%d (%v), want 0", st.EmbeddingBacklog, err)
 	}
 }

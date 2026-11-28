@@ -528,7 +528,7 @@ func newServer(b *bus.Bus, cfg config.Config, log *slog.Logger) *mcp.Server {
 			if err == nil {
 				var ids []int64
 				for _, h := range res.Hits {
-					if h.MemoryID != nil {
+					if h.MemoryID != nil && !bus.IsTaskChannel(h.Channel) {
 						ids = append(ids, *h.MemoryID)
 					}
 				}

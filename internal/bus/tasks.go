@@ -630,6 +630,7 @@ func (b *Bus) TaskCreate(as string, in TaskCreateInput) (Task, error) {
 	if err := tx.Commit(); err != nil {
 		return Task{}, internal(err)
 	}
+	b.embedSoon()
 	return *created, nil
 }
 

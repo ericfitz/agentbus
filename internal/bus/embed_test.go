@@ -112,7 +112,7 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	_, _ = b.Send(sam, SendInput{Channel: "mem", Content: "roses are red"})
 	_, _ = b.Send(sam, SendInput{Channel: "mem", Content: "violets are blue"})
 	_, _ = b.Send(sam, SendInput{Channel: "mem", Content: "git rebase"})
-	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "roses are red"}) // ordinary: never embedded
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "roses are red"}) // ordinary: embedded too (ADR 0032)
 	// embedSoon runs a background pass per memory Send above; wait for any
 	// in-flight pass before asserting, and assert on the committed total
 	// rather than this call's own n, since the background pass may have
@@ -125,7 +125,7 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
 		t.Fatal(err)
 	}
-	if embedded != 3 {
+	if embedded != 4 {
 		t.Fatalf("embedded=%d", embedded)
 	}
 	b.waitEmbed()
@@ -133,7 +133,7 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 		t.Fatal("second pass must find nothing")
 	}
 	r, err := b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic"})
-	if err != nil || len(r.Hits) != 3 || r.Hits[2].Content != "git rebase" || r.SemanticUnavailable {
+	if err != nil || len(r.Hits) != 4 || r.Hits[3].Content != "git rebase" || r.SemanticUnavailable {
 		t.Fatalf("%+v %v", r, err)
 	}
 	r, _ = b.Search(sam, SearchInput{Query: "roses", Mode: "both"})
@@ -150,7 +150,7 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
 		t.Fatal(err)
 	}
-	if embedded != 4 {
+	if embedded != 5 {
 		t.Fatalf("embedded=%d", embedded)
 	}
 	first, _ := b.Search(sam, SearchInput{Query: "roses are red", Mode: "semantic"})
@@ -167,7 +167,7 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	b.cfg.EmbeddingModel = "fake-2"
 	b.embedder.model = "fake-2"
 	b.waitEmbed()
-	if n, _ := b.embedBatch(context.Background()); n != 4 {
+	if n, _ := b.embedBatch(context.Background()); n != 5 {
 		t.Fatalf("model change must re-embed, got %d", n)
 	}
 	var stale int
@@ -177,14 +177,13 @@ func TestEmbedBatchAndSemanticSearch(t *testing.T) {
 	}
 }
 
-// TestEmbedBatchSkipsBareTasksChannel: the bare "tasks" list is a task
-// channel too (ADR 0007, bus.IsTaskChannel), same as tasks/*, so its task
-// descriptions must not be embedded either (#14 root cause). "tasks" is no
+// TestEmbedBatchEmbedsBareTasksChannel: the bare "tasks" list is a task
+// channel too (ADR 0007, bus.IsTaskChannel), so its rows embed subject plus
+// description, not JSON (ADR 0032 removed the #14 exclusion). "tasks" is no
 // longer a default (ADR 0013); the row is shaped directly, like a leftover
 // from before the upgrade, since create_channel still refuses the name.
-func TestEmbedBatchSkipsBareTasksChannel(t *testing.T) {
-	srv := fakeEmbeddings(t)
-	defer srv.Close()
+func TestEmbedBatchEmbedsBareTasksChannel(t *testing.T) {
+	srv, rec := recordEmbeddings(t, nil)
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
 	if _, err := b.db.Exec("INSERT INTO channels(name,kind,created_seq) VALUES('tasks','memory',0)"); err != nil {
@@ -193,16 +192,16 @@ func TestEmbedBatchSkipsBareTasksChannel(t *testing.T) {
 	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks", Subject: "a", Description: "roses are red"}); err != nil {
 		t.Fatal(err)
 	}
-	b.waitEmbed()
-	if _, err := b.embedBatch(context.Background()); err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	drainEmbed(t, b)
 	var embedded int
 	if err := b.db.QueryRow("SELECT count(*) FROM embeddings").Scan(&embedded); err != nil {
 		t.Fatal(err)
 	}
-	if embedded != 0 {
-		t.Fatalf("embedded=%d, want 0: the bare tasks list must not be embedded", embedded)
+	if embedded != 1 {
+		t.Fatalf("embedded=%d, want 1", embedded)
+	}
+	if _, in := rec.snapshot(); !slices.Contains(in, "a\n\nroses are red") {
+		t.Fatalf("inputs %q", in)
 	}
 }
 
@@ -581,5 +580,327 @@ func TestReadKeyFileRejects(t *testing.T) {
 		if !strings.Contains(err.Error(), p) {
 			t.Errorf("%s: error does not name the file: %v", name, err)
 		}
+	}
+}
+
+// embedRecorder is a fake embeddings endpoint that records every input it
+// receives and counts requests. Texts missing from table get {0.1,0.1,0.1}.
+type embedRecorder struct {
+	mu     sync.Mutex
+	inputs []string
+	calls  int
+}
+
+func (r *embedRecorder) snapshot() (calls int, inputs []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, slices.Clone(r.inputs)
+}
+
+func recordEmbeddings(t *testing.T, table map[string][]float64) (*httptest.Server, *embedRecorder) {
+	t.Helper()
+	rec := &embedRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+			Model string   `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		rec.mu.Lock()
+		rec.calls++
+		rec.inputs = append(rec.inputs, req.Input...)
+		rec.mu.Unlock()
+		type item struct {
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		}
+		data := make([]item, len(req.Input))
+		for i, s := range req.Input {
+			v, ok := table[s]
+			if !ok {
+				v = []float64{0.1, 0.1, 0.1}
+			}
+			data[i] = item{Index: i, Embedding: v}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "model": req.Model})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// quietly runs fn with the embedder detached, so writes inside it start no
+// background pass and the backlog can be observed deterministically.
+func quietly(b *Bus, fn func()) {
+	e := b.embedder
+	b.embedder = nil
+	fn()
+	b.embedder = e
+}
+
+// drainEmbed runs embedding passes until nothing is left.
+func drainEmbed(t *testing.T, b *Bus) {
+	t.Helper()
+	b.waitEmbed()
+	for i := 0; i < 20; i++ {
+		n, err := b.embedBatch(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
+	}
+	t.Fatal("embedding backlog did not drain")
+}
+
+func embeddedCount(t *testing.T, b *Bus, seq int64) int {
+	t.Helper()
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM embeddings WHERE seq=?", seq).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestEmbedBacklogCoversAllKinds(t *testing.T) {
+	srv, rec := recordEmbeddings(t, nil)
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	ann := reg(t, b, "Ann")
+	if _, err := b.CreateChannel(sam, "dev", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	list := taskList(t, b)
+	quietly(b, func() {
+		if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "chat line"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Send(ann, SendInput{Channel: "dm/Sam", Content: "dm line"}); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "Fix it", Description: "the long story"})
+	})
+	st, err := b.StatusReport()
+	if err != nil || st.EmbeddingBacklog != 3 {
+		t.Fatalf("backlog before = %d (%v), want 3", st.EmbeddingBacklog, err)
+	}
+	drainEmbed(t, b)
+	if st, err = b.StatusReport(); err != nil || st.EmbeddingBacklog != 0 {
+		t.Fatalf("backlog after = %d (%v), want 0", st.EmbeddingBacklog, err)
+	}
+	_, inputs := rec.snapshot()
+	for _, want := range []string{"chat line", "dm line", "Fix it\n\nthe long story"} {
+		if !slices.Contains(inputs, want) {
+			t.Fatalf("inputs %q lack %q", inputs, want)
+		}
+	}
+	for _, in := range inputs {
+		if strings.Contains(in, `"status"`) {
+			t.Fatalf("task JSON was embedded: %q", in)
+		}
+	}
+}
+
+func TestSemanticSearchFindsChatAndTasks(t *testing.T) {
+	srv, _ := recordEmbeddings(t, map[string][]float64{
+		"flowers":                {1, 0, 0},
+		"roses are red":          {1, 0, 0},
+		"Water\n\nroses are red": {1, 0, 0},
+		"git rebase":             {0, 0, 1},
+		"Other\n\nviolets":       {0, 1, 0},
+	})
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	list := taskList(t, b)
+	if _, err := b.Send(sam, SendInput{Channel: "dev", Content: "roses are red"}); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "Water", Description: "roses are red"})
+	drainEmbed(t, b)
+	r, err := b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic"})
+	if err != nil || r.SemanticUnavailable {
+		t.Fatalf("%+v %v", r, err)
+	}
+	var chat, task bool
+	for _, h := range r.Hits {
+		chat = chat || h.Channel == "dev"
+		task = task || h.Channel == list
+	}
+	if !chat || !task {
+		t.Fatalf("want a chat and a task hit: %+v", r.Hits)
+	}
+	r, err = b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic", Kinds: []string{"tasks"}})
+	if err != nil || len(r.Hits) != 1 || r.Hits[0].Channel != list {
+		t.Fatalf("kinds=tasks: %+v %v", r.Hits, err)
+	}
+}
+
+func TestSemanticSearchDMVisibility(t *testing.T) {
+	srv, _ := recordEmbeddings(t, map[string][]float64{"flowers": {1, 0, 0}, "roses are red": {1, 0, 0}})
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	ann := reg(t, b, "Ann")
+	bob := reg(t, b, "Bob")
+	if _, err := b.Send(ann, SendInput{Channel: "dm/Sam", Content: "roses are red"}); err != nil {
+		t.Fatal(err)
+	}
+	drainEmbed(t, b)
+	for _, mode := range []string{"semantic", "both", "text"} {
+		q := "flowers"
+		if mode == "text" {
+			q = "roses"
+		}
+		r, err := b.Search(bob, SearchInput{Query: q, Mode: mode})
+		if err != nil || len(r.Hits) != 0 {
+			t.Fatalf("Bob mode %s saw %+v (%v)", mode, r.Hits, err)
+		}
+	}
+	r, err := b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic"})
+	if err != nil || len(r.Hits) != 1 {
+		t.Fatalf("Sam must see the DM: %+v %v", r.Hits, err)
+	}
+}
+
+func TestTaskStatusChangeReusesEmbedding(t *testing.T) {
+	srv, rec := recordEmbeddings(t, nil)
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	list := taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "Fix", Description: "story"})
+	drainEmbed(t, b)
+	calls, _ := rec.snapshot()
+	done := "completed"
+	res, err := b.TaskUpdate(sam, TaskPatch{ID: tk.ID, Status: &done})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.waitEmbed()
+	if embeddedCount(t, b, res.Task.seq) != 1 {
+		t.Fatal("status-only revision must carry the copied embedding at commit")
+	}
+	if c, _ := rec.snapshot(); c != calls {
+		t.Fatalf("server calls %d -> %d, want unchanged", calls, c)
+	}
+	desc := "new story"
+	res, err = b.TaskUpdate(sam, TaskPatch{ID: tk.ID, Description: &desc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.waitEmbed()
+	// The background pass may already have run; what matters is that the
+	// endpoint was called for the new text and the row ends embedded.
+	drainEmbed(t, b)
+	if embeddedCount(t, b, res.Task.seq) != 1 {
+		t.Fatal("changed description must be embedded by the backlog")
+	}
+	if c, in := rec.snapshot(); c <= calls || !slices.Contains(in, "Fix\n\nnew story") {
+		t.Fatalf("expected a call for the new text, calls=%d inputs=%q", c, in)
+	}
+}
+
+func TestTaskDescriptionChangeNotCopied(t *testing.T) {
+	srv, _ := recordEmbeddings(t, nil)
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	list := taskList(t, b)
+	tk := mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "Fix", Description: "story"})
+	drainEmbed(t, b)
+	desc := "new story"
+	var seq int64
+	quietly(b, func() {
+		res, err := b.TaskUpdate(sam, TaskPatch{ID: tk.ID, Description: &desc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq = res.Task.seq
+	})
+	if embeddedCount(t, b, seq) != 0 {
+		t.Fatal("a changed description must not inherit the old vector")
+	}
+	drainEmbed(t, b)
+	if embeddedCount(t, b, seq) != 1 {
+		t.Fatal("backlog must embed the changed revision")
+	}
+}
+
+func TestDeletedTaskLeavesSemantic(t *testing.T) {
+	srv, _ := recordEmbeddings(t, map[string][]float64{"flowers": {1, 0, 0}, "Water\n\nroses": {1, 0, 0}})
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	ann := reg(t, b, "Ann")
+	list := taskList(t, b)
+	for _, force := range []bool{false, true} {
+		tk := mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "Water", Description: "roses"})
+		drainEmbed(t, b)
+		if force {
+			// An in-progress task owned by someone else makes the delete a
+			// forced one (marker row).
+			if _, err := b.TaskClaim(ann, tk.ID, time.Now().Add(time.Hour).UnixMilli(), ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := b.TaskUpdate(sam, TaskPatch{ID: tk.ID, Delete: true, Force: force}); err != nil {
+			t.Fatalf("force=%v: %v", force, err)
+		}
+		b.waitEmbed()
+		r, err := b.Search(sam, SearchInput{Query: "flowers", Mode: "semantic"})
+		if err != nil || len(r.Hits) != 0 {
+			t.Fatalf("force=%v: deleted task still found: %+v %v", force, r.Hits, err)
+		}
+		// The forced marker revision is tombstoned in the same transaction
+		// as the vector copy; it must not keep the copy.
+		var n int
+		if err := b.db.QueryRow(`SELECT count(*) FROM embeddings e JOIN messages m ON m.seq=e.seq
+		  WHERE m.memory_id=? AND m.tombstone=1 AND m.type='forced'`, tk.ID).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("force=%v: %d forced marker rows carry a vector (%v)", force, n, err)
+		}
+		if err := b.db.QueryRow(`SELECT count(*) FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE m.memory_id=? AND m.tombstone=0`, tk.ID).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("force=%v: live rows with vectors: %d %v", force, n, err)
+		}
+	}
+}
+
+func TestSendChatTriggersEmbedSoon(t *testing.T) {
+	srv, _ := recordEmbeddings(t, nil)
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	list := taskList(t, b)
+	r, err := b.Send(sam, SendInput{Channel: "dev", Content: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitEmbedded(t, b, r.Seq)
+	// Overlapping embedSoon calls collapse, so the task is created only
+	// after the chat pass finished.
+	b.waitEmbed()
+	tk := mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "T", Description: "d"})
+	waitEmbedded(t, b, tk.seq)
+}
+
+// waitEmbedded polls (bounded) until seq has an embedding, without calling
+// the maintenance tick: embedSoon alone must get it there.
+func waitEmbedded(t *testing.T, b *Bus, seq int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for embeddedCount(t, b, seq) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("seq %d was not embedded by embedSoon", seq)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSemanticFallbackForChatKind(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	b := newEmbedBus(t, srv.URL)
+	srv.Close()
+	sam := reg(t, b, "Sam")
+	_, _ = b.CreateChannel(sam, "dev", "ordinary")
+	_, _ = b.Send(sam, SendInput{Channel: "dev", Content: "roses are red"})
+	r, err := b.Search(sam, SearchInput{Query: "roses", Mode: "both", Kinds: []string{"chat"}})
+	if err != nil || !r.SemanticUnavailable || len(r.Hits) != 1 || r.Hits[0].Channel != "dev" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }

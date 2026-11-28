@@ -384,7 +384,7 @@ func (b *Bus) rankedSearch(as string, in SearchInput) ([]SearchHit, bool, error)
 	return rrf(text, sem), false, nil
 }
 
-// semanticSearch ranks live memory revisions by dot product against the query
+// semanticSearch ranks live rows of every kind by dot product against the query
 // embedding, brute-force in Go over candidates selected by the SQL filters.
 func (b *Bus) semanticSearch(ctx context.Context, as string, in SearchInput) ([]SearchHit, error) {
 	qv, err := b.embedder.embed(ctx, []string{semanticQuery(in.Query)})
@@ -392,7 +392,7 @@ func (b *Bus) semanticSearch(ctx context.Context, as string, in SearchInput) ([]
 		return nil, err
 	}
 	filters, fargs := b.searchFilters(as, in)
-	candidateWhere := " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0 AND m.memory_id IS NOT NULL" + filters
+	candidateWhere := " FROM embeddings e JOIN messages m ON m.seq=e.seq WHERE e.model=? AND m.tombstone=0" + filters
 
 	vecRows, err := b.db.Query("SELECT e.seq, e.vector"+candidateWhere, append([]any{b.embedder.model}, fargs...)...)
 	if err != nil {

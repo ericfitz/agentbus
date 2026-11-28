@@ -27,9 +27,20 @@ type Config struct {
 	// inactivity periods of ADR 0013: the TUI's idle marker for a task
 	// channel, the maintenance tick's deletion of an inactive task channel,
 	// and its tombstoning of an unaccessed memory. 0 disables the rule.
+	// The four MemoryNoise* and MemoryIncorrectPrune* keys drive the tick's
+	// memory hygiene (#53): a memory never reported USED is soft-pruned once
+	// it has been served MemoryNoiseServes times since its grace period
+	// began and that period (MemoryNoiseGraceHours) is over; a memory
+	// flagged INCORRECT and not re-confirmed is soft-pruned after
+	// MemoryIncorrectPruneHours and more than MemoryIncorrectPruneServes
+	// serves. Either key of a rule at 0 disables that rule.
 	TaskIdleHours                int               `json:"task_idle_hours"`
 	TaskExpiryHours              int               `json:"task_expiry_hours"`
 	MemoryExpiryHours            int               `json:"memory_expiry_hours"`
+	MemoryNoiseGraceHours        int               `json:"memory_noise_grace_hours"`
+	MemoryNoiseServes            int               `json:"memory_noise_serves"`
+	MemoryIncorrectPruneHours    int               `json:"memory_incorrect_prune_hours"`
+	MemoryIncorrectPruneServes   int               `json:"memory_incorrect_prune_serves"`
 	ReceiptRetentionMinutes      int               `json:"receipt_retention_minutes"`
 	MaxMessageKiB                int               `json:"max_message_kib"`
 	SendMessagesPerSecond        int               `json:"send_messages_per_second"`
@@ -77,6 +88,10 @@ func Default() Config {
 		TaskIdleHours:                168,
 		TaskExpiryHours:              336,
 		MemoryExpiryHours:            8760,
+		MemoryNoiseGraceHours:        720,
+		MemoryNoiseServes:            20,
+		MemoryIncorrectPruneHours:    336,
+		MemoryIncorrectPruneServes:   5,
 		StatusHistoryCount:           20,
 		StatusOfflineHours:           24,
 		StatusStaleMinutes:           30,
@@ -352,6 +367,10 @@ func (c *Config) validate() error {
 		{"task_idle_hours", c.TaskIdleHours, 0, 87600},
 		{"task_expiry_hours", c.TaskExpiryHours, 0, 87600},
 		{"memory_expiry_hours", c.MemoryExpiryHours, 0, 87600},
+		{"memory_noise_grace_hours", c.MemoryNoiseGraceHours, 0, 87600},
+		{"memory_noise_serves", c.MemoryNoiseServes, 0, 1000000},
+		{"memory_incorrect_prune_hours", c.MemoryIncorrectPruneHours, 0, 87600},
+		{"memory_incorrect_prune_serves", c.MemoryIncorrectPruneServes, 0, 1000000},
 		{"status_history_count", c.StatusHistoryCount, 1, 200},
 		{"status_offline_hours", c.StatusOfflineHours, 0, 720},
 		{"status_stale_minutes", c.StatusStaleMinutes, 0, 1440},

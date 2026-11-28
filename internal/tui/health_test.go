@@ -12,14 +12,14 @@ import (
 func TestHealthOverlayShowsStorageSessionsThemeAndConfig(t *testing.T) {
 	f := newFixture(t)
 	f.run(f.m.statusCmd())
-	f.m.height = 77 // tall enough that the whole body (plus #15's version line, #17's icons line, the selection_text theme key, ADR 0013's three expiry config JSON lines, and its three task/memory expiry summary lines, and ADR 0015's per-agent harness line) fits without scrolling
+	f.m.height = 83 // tall enough that the whole body (plus #15's version line, #17's icons line, the selection_text theme key, ADR 0013's three expiry config JSON lines, and its three task/memory expiry summary lines, and ADR 0015's per-agent harness line) fits without scrolling
 	f.key("esc")
 	f.key("h")
 	if f.m.mode != modeHealth {
 		t.Fatal("h opens health")
 	}
 	v := f.m.View()
-	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 6 (2 memory)", "embeddings unset", "receive", "log ·", "agentbus.log", "theme · default", "agent cyan", "config ·", filepath.Base(f.c.cfg.Path), "\"tui_name\"", "task idle 168 h", "task expiry 336 h", "memory expiry 8760 h"} {
+	for _, want := range []string{"storage", "2.0 GiB", "sessions 2 live", "channels 6 (2 memory)", "embeddings unset", "receive", "log ·", "agentbus.log", "theme · default", "agent cyan", "config ·", filepath.Base(f.c.cfg.Path), "\"tui_name\"", "task idle 168 h", "task expiry 336 h", "memory expiry 8760 h", "noise prune 720 h · 20 serves", "incorrect prune 336 h · 5 serves"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("health lacks %q:\n%s", want, v)
 		}

@@ -151,6 +151,8 @@ func (m Model) healthLines() []string {
 	p("%s %d h\n", dim.Render("task idle"), cfg.TaskIdleHours)
 	p("%s %d h\n", dim.Render("task expiry"), cfg.TaskExpiryHours)
 	p("%s %d h\n", dim.Render("memory expiry"), cfg.MemoryExpiryHours)
+	p("%s %d h · %d serves\n", dim.Render("noise prune"), cfg.MemoryNoiseGraceHours, cfg.MemoryNoiseServes)
+	p("%s %d h · %d serves\n", dim.Render("incorrect prune"), cfg.MemoryIncorrectPruneHours, cfg.MemoryIncorrectPruneServes)
 	recv := ok.Render("long-poll connected")
 	if m.receiveErr != nil {
 		recv = th.Style(th.Error).Render(errText(m.receiveErr))

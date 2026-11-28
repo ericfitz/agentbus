@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -446,5 +447,53 @@ func TestStatusConfig(t *testing.T) {
 	}
 	if _, _, err := Load(write(t, t.TempDir(), `{"status_offline_hours": 0, "status_stale_minutes": 0}`)); err != nil {
 		t.Errorf("zero rejected: %v", err)
+	}
+}
+
+// TestHygieneDefaults (#53): the four memory-hygiene keys default to 720 h,
+// 20 serves, 336 h and 5 serves.
+func TestHygieneDefaults(t *testing.T) {
+	t.Setenv("AGENTBUS_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("AGENTBUS_DATA_DIR", "")
+	c, _, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MemoryNoiseGraceHours != 720 || c.MemoryNoiseServes != 20 || c.MemoryIncorrectPruneHours != 336 || c.MemoryIncorrectPruneServes != 5 {
+		t.Fatalf("hygiene defaults wrong: %+v", c)
+	}
+}
+
+// TestHygieneOverrideAcceptsZero: 0 disables a rule, so it must load.
+func TestHygieneOverrideAcceptsZero(t *testing.T) {
+	p := write(t, t.TempDir(), `{"memory_noise_grace_hours": 0, "memory_noise_serves": 0, "memory_incorrect_prune_hours": 0, "memory_incorrect_prune_serves": 0}`)
+	c, _, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MemoryNoiseGraceHours != 0 || c.MemoryNoiseServes != 0 || c.MemoryIncorrectPruneHours != 0 || c.MemoryIncorrectPruneServes != 0 {
+		t.Fatalf("hygiene overrides wrong: %+v", c)
+	}
+}
+
+// TestRejectsOutOfRangeHygieneKeys: each key rejects -1, hours keys reject
+// 87601 and serves keys reject 1000001, and the error names the key.
+func TestRejectsOutOfRangeHygieneKeys(t *testing.T) {
+	cases := []struct {
+		key  string
+		high int
+	}{
+		{"memory_noise_grace_hours", 87601},
+		{"memory_noise_serves", 1000001},
+		{"memory_incorrect_prune_hours", 87601},
+		{"memory_incorrect_prune_serves", 1000001},
+	}
+	for _, c := range cases {
+		for _, v := range []int{-1, c.high} {
+			p := write(t, t.TempDir(), fmt.Sprintf(`{"%s": %d}`, c.key, v))
+			if _, _, err := Load(p); err == nil || !strings.Contains(err.Error(), c.key) {
+				t.Fatalf("%s=%d: want range error naming the key, got %v", c.key, v, err)
+			}
+		}
 	}
 }

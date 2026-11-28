@@ -96,6 +96,7 @@ func (b *Bus) Tick(ctx context.Context) {
 			cutoff := now - int64(b.cfg.MemoryExpiryHours)*3_600_000
 			return b.loopChunks(tickCtx, func() (int, error) { return b.memoryExpiryChunk(cutoff) })
 		}},
+		{"memory hygiene", func() error { return b.memoryHygiene(tickCtx, now) }},
 		{"capacity", func() error { return b.evictToBudget(tickCtx, deadline) }},
 		{"vacuum", func() error {
 			_, err := b.db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumPages))
@@ -430,4 +431,53 @@ func (b *Bus) embedSoon() {
 		// A failure is logged, with diagnostics, inside embedBatch.
 		_, _ = b.embedBatch(ctx)
 	}()
+}
+
+// memoryHygiene soft-prunes memories by the two #53 rules. The incorrect
+// rule runs to completion first, so a row eligible for both is recorded as
+// "incorrect". A rule with either of its keys at 0 is skipped. Pruning only
+// sets pruned_at and pruned_reason: the message row, its FTS row and its
+// memory_access row stay, so the TUI can still show it and ADR 0013's
+// expiry still removes it.
+func (b *Bus) memoryHygiene(ctx context.Context, now int64) error {
+	if b.cfg.MemoryIncorrectPruneHours > 0 && b.cfg.MemoryIncorrectPruneServes > 0 {
+		cutoff := now - int64(b.cfg.MemoryIncorrectPruneHours)*3_600_000
+		err := b.loopChunks(ctx, func() (int, error) {
+			return b.pruneChunk(now, "incorrect",
+				"incorrect_at IS NOT NULL AND incorrect_at < ? AND served_count - incorrect_served_base > ? AND (used_at IS NULL OR used_at < incorrect_at)",
+				cutoff, b.cfg.MemoryIncorrectPruneServes)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if b.cfg.MemoryNoiseGraceHours > 0 && b.cfg.MemoryNoiseServes > 0 {
+		cutoff := now - int64(b.cfg.MemoryNoiseGraceHours)*3_600_000
+		return b.loopChunks(ctx, func() (int, error) {
+			return b.pruneChunk(now, "noise",
+				"used_count = 0 AND served_count - grace_served_base >= ? AND grace_from < ?",
+				b.cfg.MemoryNoiseServes, cutoff)
+		})
+	}
+	return nil
+}
+
+// pruneChunk soft-prunes up to cleanupChunk unpruned memory_access rows
+// matching cond (whose placeholders args fill) in one statement, returning
+// the rows affected so loopChunks knows whether another chunk may remain.
+func (b *Bus) pruneChunk(now int64, reason, cond string, args ...any) (int, error) {
+	full := append([]any{now, reason}, args...)
+	full = append(full, cleanupChunk)
+	r, err := b.db.Exec("UPDATE memory_access SET pruned_at=?, pruned_reason=? WHERE memory_id IN (SELECT memory_id FROM memory_access WHERE pruned_at IS NULL AND "+cond+" LIMIT ?)", full...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		b.log.Info("memories pruned", "reason", reason, "count", n)
+	}
+	return int(n), nil
 }

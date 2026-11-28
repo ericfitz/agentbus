@@ -717,3 +717,288 @@ func TestLeaseAllowsOneProcess(t *testing.T) {
 		t.Fatal("expired lease must be takeable")
 	}
 }
+
+// hygieneTick moves the clock to t0+d, keeps Sam's session alive past the
+// jump and runs one maintenance tick.
+func hygieneTick(t *testing.T, b *Bus, t0 time.Time, d time.Duration) {
+	t.Helper()
+	clockAt(b, t0, d)
+	if err := b.Heartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	b.Tick(context.Background())
+}
+
+// isPruned reports whether memory id's row is soft-pruned, with its reason.
+func isPruned(t *testing.T, b *Bus, id int64) (bool, string) {
+	t.Helper()
+	s := stats(t, b, id)
+	if s.PrunedAt == nil {
+		if s.PrunedReason != nil {
+			t.Fatalf("memory %d: pruned_reason set without pruned_at: %+v", id, s)
+		}
+		return false, ""
+	}
+	if s.PrunedReason == nil {
+		t.Fatalf("memory %d: pruned_at set without pruned_reason: %+v", id, s)
+	}
+	return true, *s.PrunedReason
+}
+
+const hygH = time.Hour
+
+// TestNoisePrune (#53, defaults): a never-used memory served 20 times is
+// soft-pruned once its 720 h grace is strictly over, and stays searchable
+// to the TUI.
+func TestNoisePrune(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "noisecorn fact")
+	setAccess(t, b, id, "served_count=20, used_count=0")
+	before := stats(t, b, id)
+
+	hygieneTick(t, b, t0, 720*hygH)
+	if p, _ := isPruned(t, b, id); p {
+		t.Fatal("grace_from < now-720h is strict: must not prune at exactly 720 h")
+	}
+	hygieneTick(t, b, t0, 721*hygH)
+	s := stats(t, b, id)
+	if s.PrunedAt == nil || *s.PrunedAt != t0.Add(721*hygH).UnixMilli() || s.PrunedReason == nil || *s.PrunedReason != "noise" {
+		t.Fatalf("want pruned now with reason noise: %+v", s)
+	}
+	if s.AccessedAt != before.AccessedAt {
+		t.Fatalf("pruning must not touch accessed_at: %d -> %d", before.AccessedAt, s.AccessedAt)
+	}
+	if _, err := b.GetMemory(sam, id); err == nil || !strings.Contains(err.Error(), "not_found") {
+		t.Fatalf("GetMemory of a pruned memory must be not_found, got %v", err)
+	}
+	r, err := b.SearchAll(sam, SearchInput{Query: "noisecorn"})
+	if err != nil || !hasHit(r.Hits, id) {
+		t.Fatalf("SearchAll must still find a pruned memory (FTS row kept): %+v %v", r.Hits, err)
+	}
+	var live int
+	if err := b.db.QueryRow("SELECT count(*) FROM messages WHERE memory_id=? AND tombstone=0", id).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("the message row must stay live: %d %v", live, err)
+	}
+}
+
+// TestNoiseNeedsServesAndZeroUsed: too few serves, or any USED report,
+// protects a memory.
+func TestNoiseNeedsServesAndZeroUsed(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	few := remember(t, b, sam, "few serves")
+	used := remember(t, b, sam, "used once")
+	setAccess(t, b, few, "served_count=19, used_count=0")
+	setAccess(t, b, used, "served_count=500, used_count=1")
+	hygieneTick(t, b, t0, 721*hygH)
+	for name, id := range map[string]int64{"19 serves": few, "used once": used} {
+		if p, _ := isPruned(t, b, id); p {
+			t.Errorf("%s must not be pruned", name)
+		}
+	}
+}
+
+// TestNoiseCountsServesSinceGraceStart: serves before grace_served_base do
+// not count.
+func TestNoiseCountsServesSinceGraceStart(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	nineteen := remember(t, b, sam, "nineteen since")
+	twenty := remember(t, b, sam, "twenty since")
+	setAccess(t, b, nineteen, "served_count=34, grace_served_base=15")
+	setAccess(t, b, twenty, "served_count=35, grace_served_base=15")
+	hygieneTick(t, b, t0, 721*hygH)
+	if p, _ := isPruned(t, b, nineteen); p {
+		t.Error("19 serves since the grace start must not prune")
+	}
+	if p, r := isPruned(t, b, twenty); !p || r != "noise" {
+		t.Errorf("20 serves since the grace start must prune as noise: %v %q", p, r)
+	}
+}
+
+// TestIncorrectPrune: the boundaries of the incorrect rule.
+func TestIncorrectPrune(t *testing.T) {
+	t0 := time.Unix(1_800_000_000, 0)
+	f := t0.Add(hygH).UnixMilli() // flag time F
+	cases := []struct {
+		name   string
+		served int
+		usedAt any // nil or ms
+		now    time.Duration
+		want   bool
+	}{
+		{"16 serves 337h", 16, nil, 338 * hygH, true},
+		{"15 serves is not more than 5", 15, nil, 338 * hygH, false},
+		{"336h exactly", 16, nil, 337 * hygH, false},
+		{"used_at == F", 16, f, 338 * hygH, false},
+		{"used_at == F-1", 16, f - 1, 338 * hygH, true},
+		{"used_at == F+1", 16, f + 1, 338 * hygH, false},
+		{"no serve since the flag", 10, nil, 5001 * hygH, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, sam, _ := memBus(t)
+			clockAt(b, t0, 0)
+			id := remember(t, b, sam, "flagged fact")
+			// Keep the noise rule out of the way: it is tested on its own.
+			setAccess(t, b, id, "served_count=?, used_count=1, used_at=?, incorrect_at=?, incorrect_by='Kim', incorrect_served_base=10", c.served, c.usedAt, f)
+			hygieneTick(t, b, t0, c.now)
+			p, r := isPruned(t, b, id)
+			if p != c.want || (p && r != "incorrect") {
+				t.Fatalf("pruned=%v reason=%q, want pruned=%v (reason incorrect)", p, r, c.want)
+			}
+		})
+	}
+}
+
+// TestBothRulesMatchReasonIncorrect: a row eligible for both rules is
+// attributed to the incorrect rule, which runs first.
+func TestBothRulesMatchReasonIncorrect(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "both rules")
+	f := t0.Add(hygH).UnixMilli()
+	setAccess(t, b, id, "served_count=30, used_count=0, incorrect_at=?, incorrect_by='Kim', incorrect_served_base=10", f)
+	hygieneTick(t, b, t0, 1000*hygH)
+	if p, r := isPruned(t, b, id); !p || r != "incorrect" {
+		t.Fatalf("want pruned as incorrect, got %v %q", p, r)
+	}
+}
+
+// TestHygieneZeroDisables: either key of a rule at 0 turns that rule off and
+// leaves the other running.
+func TestHygieneZeroDisables(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		set          func(*Bus)
+		noiseSurvive bool
+	}{
+		{"noise grace 0", func(b *Bus) { b.cfg.MemoryNoiseGraceHours = 0 }, true},
+		{"noise serves 0", func(b *Bus) { b.cfg.MemoryNoiseServes = 0 }, true},
+		{"incorrect hours 0", func(b *Bus) { b.cfg.MemoryIncorrectPruneHours = 0 }, false},
+		{"incorrect serves 0", func(b *Bus) { b.cfg.MemoryIncorrectPruneServes = 0 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, sam, _ := memBus(t)
+			t0 := time.Unix(1_800_000_000, 0)
+			clockAt(b, t0, 0)
+			noise := remember(t, b, sam, "noise row")
+			incorrect := remember(t, b, sam, "incorrect row")
+			setAccess(t, b, noise, "served_count=20, used_count=0")
+			f := t0.Add(hygH).UnixMilli()
+			setAccess(t, b, incorrect, "served_count=16, used_count=1, incorrect_at=?, incorrect_by='Kim', incorrect_served_base=10", f)
+			tc.set(b)
+			hygieneTick(t, b, t0, 721*hygH)
+			np, _ := isPruned(t, b, noise)
+			ip, _ := isPruned(t, b, incorrect)
+			if np == tc.noiseSurvive || ip != tc.noiseSurvive {
+				t.Fatalf("noise pruned=%v incorrect pruned=%v with %s", np, ip, tc.name)
+			}
+		})
+	}
+}
+
+// TestHygieneSecondTickIsNoop: a pruned row is never re-pruned, so its
+// timestamp and reason stay.
+func TestHygieneSecondTickIsNoop(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "prune once")
+	setAccess(t, b, id, "served_count=20")
+	hygieneTick(t, b, t0, 721*hygH)
+	first := stats(t, b, id)
+	if first.PrunedAt == nil {
+		t.Fatal("setup: not pruned")
+	}
+	hygieneTick(t, b, t0, 722*hygH)
+	second := stats(t, b, id)
+	if *second.PrunedAt != *first.PrunedAt || *second.PrunedReason != *first.PrunedReason {
+		t.Fatalf("second tick changed the prune: %+v -> %+v", first, second)
+	}
+}
+
+// TestHygienePrunesMoreThanOneChunk: more than cleanupChunk eligible rows
+// are all pruned in a single tick.
+func TestHygienePrunesMoreThanOneChunk(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	remember(t, b, sam, "anchor")
+	tx, err := b.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 1001; i++ {
+		if _, err := tx.Exec("INSERT INTO memory_access (memory_id, accessed_at, served_count, grace_from) VALUES (?, ?, 20, 1)", 100000+i, t0.UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	hygieneTick(t, b, t0, 721*hygH)
+	var left int
+	if err := b.db.QueryRow("SELECT count(*) FROM memory_access WHERE pruned_at IS NULL AND memory_id>100000").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("unpruned eligible rows left: %d %v", left, err)
+	}
+}
+
+// TestPrunedMemoryStillExpiresAtOneYear: pruning does not exempt a memory
+// from ADR 0013's expiry.
+func TestPrunedMemoryStillExpiresAtOneYear(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "expire after prune")
+	setAccess(t, b, id, "served_count=20")
+	hygieneTick(t, b, t0, 721*hygH)
+	if p, _ := isPruned(t, b, id); !p {
+		t.Fatal("setup: not pruned")
+	}
+	hygieneTick(t, b, t0, 8761*hygH)
+	var n, tomb int
+	if err := b.db.QueryRow("SELECT count(*) FROM memory_access WHERE memory_id=?", id).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("memory_access row must be gone: %d %v", n, err)
+	}
+	if err := b.db.QueryRow("SELECT tombstone FROM messages WHERE memory_id=?", id).Scan(&tomb); err != nil || tomb != 1 {
+		t.Fatalf("message must be tombstoned: %d %v", tomb, err)
+	}
+}
+
+// TestEditRestartsNoiseGrace: an edit restarts both the grace clock and the
+// serve baseline.
+func TestEditRestartsNoiseGrace(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "edit me")
+	setAccess(t, b, id, "served_count=20")
+	e := 719 * hygH
+	clockAt(b, t0, e)
+	if _, err := b.EditMemory(sam, EditInput{ID: id, Content: "edited"}); err != nil {
+		t.Fatal(err)
+	}
+	hygieneTick(t, b, t0, 721*hygH)
+	if p, _ := isPruned(t, b, id); p {
+		t.Fatal("grace restarts at the edit: not prunable at t0+721h")
+	}
+	hygieneTick(t, b, t0, e+721*hygH)
+	if p, _ := isPruned(t, b, id); p {
+		t.Fatal("the edit reset grace_served_base: no new serves, so not prunable")
+	}
+	for i := 0; i < 20; i++ {
+		if err := b.TouchMemoryAccess([]int64{id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hygieneTick(t, b, t0, e+722*hygH)
+	if p, r := isPruned(t, b, id); !p || r != "noise" {
+		t.Fatalf("20 serves since the edit must prune as noise: %v %q", p, r)
+	}
+}

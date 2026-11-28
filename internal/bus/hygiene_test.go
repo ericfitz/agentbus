@@ -764,3 +764,66 @@ func TestDeleteMemoryAny(t *testing.T) {
 		t.Fatalf("memory refused by the hook is gone: %v", err)
 	}
 }
+
+// TestExportMemories (#53): live memories with an access row, pruned ones
+// included, no tasks, deleted memories or chat; read-only.
+func TestExportMemories(t *testing.T) {
+	b, sam, _ := memBus(t)
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.CreateChannel(sam, "chat", "ordinary"); err != nil {
+		t.Fatal(err)
+	}
+	a := *sendTagged(t, b, sam, "mem", "alpha", "kind:gotcha").MemoryID
+	if _, err := b.db.Exec("UPDATE messages SET subject='S' WHERE memory_id=?", a); err != nil {
+		t.Fatal(err)
+	}
+	bb := remember(t, b, sam, "beta")
+	if _, err := b.EditMemory(sam, EditInput{ID: bb, Content: "beta2"}); err != nil {
+		t.Fatal(err)
+	}
+	c := remember(t, b, sam, "gamma")
+	if err := b.DeleteMemory(sam, c, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "job"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "chat", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	pruneRaw(t, b, bb, "noise")
+	sa, sb := stats(t, b, a), stats(t, b, bb)
+
+	ids := func(l []MemoryExport) []int64 {
+		out := []int64{}
+		for _, e := range l {
+			out = append(out, e.MemoryID)
+		}
+		return out
+	}
+	all, err := b.ExportMemories(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(all); !reflect.DeepEqual(got, []int64{a, bb}) {
+		t.Fatalf("ids %v, want [%d %d]", got, a, bb)
+	}
+	if !reflect.DeepEqual(all[0].Tags, []string{"kind:gotcha"}) || all[0].Subject != "S" || all[0].Channel != "mem" || all[0].Content != "alpha" {
+		t.Fatalf("a = %+v", all[0])
+	}
+	if all[1].Revision != 2 || all[1].Tags == nil || len(all[1].Tags) != 0 || all[1].PrunedReason == nil || *all[1].PrunedReason != "noise" {
+		t.Fatalf("b = %+v", all[1])
+	}
+	only, err := b.ExportMemories(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(only); !reflect.DeepEqual(got, []int64{bb}) {
+		t.Fatalf("pruned ids %v, want [%d]", got, bb)
+	}
+	if !reflect.DeepEqual(stats(t, b, a), sa) || !reflect.DeepEqual(stats(t, b, bb), sb) {
+		t.Fatal("export changed the access rows")
+	}
+}

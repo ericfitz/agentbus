@@ -298,3 +298,51 @@ func (b *Bus) DeleteMemoryAny(as string, id int64) error {
 	}
 	return internal(tx.Commit())
 }
+
+// MemoryExport is one memory's live revision with its access row, as
+// `agentbus export-memories` writes it.
+type MemoryExport struct {
+	Channel   string   `json:"channel"`
+	Revision  int64    `json:"revision"`
+	Sender    string   `json:"sender"`
+	CreatedAt int64    `json:"created_at"`
+	Subject   string   `json:"subject"`
+	Content   string   `json:"content"`
+	Tags      []string `json:"tags"` // never nil: [] when the memory has none
+	MemoryStats
+}
+
+// ExportMemories returns every live memory that has a memory_access row (so
+// no task rows), ordered by memory id, pruned ones included; prunedOnly
+// keeps only pruned ones. Read-only: no auth, no counter or timestamp
+// changes (like Board, which agentbus statuses calls).
+func (b *Bus) ExportMemories(prunedOnly bool) ([]MemoryExport, error) {
+	q := `SELECT m.channel, m.revision, m.sender, m.created_at, m.subject, m.content,
+  (SELECT group_concat(tag, ' ') FROM (SELECT tag FROM message_tags WHERE seq=m.seq ORDER BY tag)), ` + memoryStatsCols + `
+  FROM messages m JOIN memory_access a ON a.memory_id=m.memory_id WHERE m.tombstone=0`
+	if prunedOnly {
+		q += " AND a.pruned_at IS NOT NULL"
+	}
+	rows, err := b.db.Query(q + " ORDER BY a.memory_id")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []MemoryExport{}
+	for rows.Next() {
+		var e MemoryExport
+		var tags *string
+		s := &e.MemoryStats
+		if err := rows.Scan(&e.Channel, &e.Revision, &e.Sender, &e.CreatedAt, &e.Subject, &e.Content, &tags,
+			&s.MemoryID, &s.AccessedAt, &s.ServedCount, &s.UsedCount, &s.UsedAt, &s.GraceFrom, &s.GraceServedBase,
+			&s.IncorrectAt, &s.IncorrectBy, &s.IncorrectServedBase, &s.PrunedAt, &s.PrunedReason); err != nil {
+			return nil, err
+		}
+		e.Tags = []string{}
+		if tags != nil {
+			e.Tags = strings.Fields(*tags)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

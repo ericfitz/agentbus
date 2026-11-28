@@ -323,3 +323,11 @@ func TestConfigOutsideRepoChecksRepoFirst(t *testing.T) {
 		}
 	}
 }
+
+// TestExportMemoriesRejectsPositional (#53): export-memories takes flags
+// only.
+func TestExportMemoriesRejectsPositional(t *testing.T) {
+	if r := execBin(t, "export-memories", "extra"); r.code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %q", r.code, r.stderr)
+	}
+}

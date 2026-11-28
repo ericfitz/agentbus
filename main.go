@@ -31,7 +31,7 @@ func splitTags(v string) []string {
 
 // usage is the top-level usage line, printed to stdout for help and when no
 // command is given.
-const usage = "usage: agentbus <install|config|uninstall|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|stop-hook|subagent-hook|version> [flags]"
+const usage = "usage: agentbus <install|config|uninstall|mcp|tui|status|reset|delete-channel|identity|subscribe|unsubscribe|wait|watch (deprecated)|park|unpark|set-status|statuses|export-memories|stop-hook|subagent-hook|version> [flags]"
 
 func main() {
 	// Bare agentbus is help: winget validation runs the executable with no
@@ -398,6 +398,28 @@ func run(cmd string, args []string) int {
 			return 2
 		}
 		if err := cli.Statuses(cfg, fs.Arg(0), *sortBy, *asJSON, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		return 0
+	case "export-memories":
+		// agentbus export-memories [-pruned]
+		fs := flag.NewFlagSet("agentbus export-memories", flag.ContinueOnError)
+		path := fs.String("config", "", "configuration file")
+		pruned := fs.Bool("pruned", false, "only memories the pruner hid")
+		if err := fs.Parse(args); err != nil {
+			return parseExit(err)
+		}
+		if fs.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "agentbus export-memories: unexpected argument %q; it takes flags only\n", fs.Arg(0))
+			return 2
+		}
+		cfg, _, err := config.Load(*path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agentbus:", err)
+			return 2
+		}
+		if err := cli.ExportMemories(cfg, *pruned, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "agentbus:", err)
 			return 2
 		}

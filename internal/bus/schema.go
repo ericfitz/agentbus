@@ -1,6 +1,6 @@
 package bus
 
-const schemaVersion = 14
+const schemaVersion = 15
 
 // tagSubscriptionTagsDDL is shared by schema.go (fresh databases) and
 // migrate.go's splitTagSets step (v4 -> v5, #13): one row per tag of each
@@ -76,11 +76,23 @@ END;
 // addMemoryAccess step (v6 -> v7, ADR 0013): one row per live memory,
 // updated on create, edit, get, and search hit, apart from messages so
 // revisions need not carry it. Task rows never get one; the task-channel
-// expiry rule governs them instead.
+// expiry rule governs them instead. Schema 15 (#53) adds the serve and use
+// counters, the INCORRECT flag and the soft-prune marker; addMemoryHygiene
+// adds them to an older file.
 const memoryAccessDDL = `
 CREATE TABLE IF NOT EXISTS memory_access (
   memory_id INTEGER PRIMARY KEY,
-  accessed_at INTEGER NOT NULL
+  accessed_at INTEGER NOT NULL,
+  served_count INTEGER NOT NULL DEFAULT 0,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  used_at INTEGER,
+  grace_from INTEGER NOT NULL DEFAULT 0,
+  grace_served_base INTEGER NOT NULL DEFAULT 0,
+  incorrect_at INTEGER,
+  incorrect_by TEXT,
+  incorrect_served_base INTEGER NOT NULL DEFAULT 0,
+  pruned_at INTEGER,
+  pruned_reason TEXT
 );
 `
 

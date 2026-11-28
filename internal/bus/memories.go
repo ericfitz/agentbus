@@ -275,7 +275,8 @@ func (b *Bus) EditMemory(as string, in EditInput) (EditResult, error) {
 	}
 	// EditMemory already refused a task channel above (IsTaskChannel), so
 	// this is always a genuine memory (ADR 0013).
-	if _, err := tx.Exec("INSERT INTO memory_access(memory_id, accessed_at) VALUES(?,?) ON CONFLICT(memory_id) DO UPDATE SET accessed_at=excluded.accessed_at", in.ID, b.nowMs()); err != nil {
+	now := b.nowMs()
+	if _, err := tx.Exec(memoryAccessUpsertSQL, in.ID, now, now); err != nil {
 		return EditResult{}, internal(err)
 	}
 	res := EditResult{Seq: seq, MemoryID: in.ID, Revision: curRev + 1, Replaced: curSeq}

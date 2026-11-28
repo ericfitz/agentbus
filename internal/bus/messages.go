@@ -230,7 +230,8 @@ func (b *Bus) insertMessage(tx *sql.Tx, as, context string, in SendInput, kind s
 		// governs it instead (ADR 0013). TaskCreate is insertMessage's only
 		// caller with a task channel; Send refuses one before this runs.
 		if !IsTaskChannel(in.Channel) {
-			if _, err := tx.Exec("INSERT INTO memory_access(memory_id, accessed_at) VALUES(?,?) ON CONFLICT(memory_id) DO UPDATE SET accessed_at=excluded.accessed_at", seq, b.nowMs()); err != nil {
+			now := b.nowMs()
+			if _, err := tx.Exec(memoryAccessUpsertSQL, seq, now, now); err != nil {
 				return 0, err
 			}
 		}

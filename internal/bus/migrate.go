@@ -34,6 +34,7 @@ var migrations = map[int]func(tx *sql.Tx) error{
 	11: addTables,                               // meta (reset generation, ADR 0022)
 	12: addTables,                               // statuses (issue #43)
 	13: reindexTaskText,                         // FTS indexes task rows by subject and description (#52)
+	14: addMemoryHygiene,                        // memory_access serve, use, flag and prune columns (#53)
 }
 
 // addTables is the step for a version that only adds tables: the schema DDL
@@ -222,6 +223,49 @@ func addMemoryAccessAndDropTaskSubscriptions(tx *sql.Tx) error {
 		}
 	}
 	_, err := tx.Exec(`DELETE FROM subscriptions WHERE channel='tasks' OR channel LIKE 'tasks/%'`)
+	return err
+}
+
+// addMemoryHygiene (schema 14 -> 15, #53) adds the memory_access columns
+// that hold the serve and use counters, the INCORRECT flag and the soft-prune
+// marker. Like addTagRanges it does nothing when the table is absent (the
+// schema DDL creates it in full), and like addSessionHarness it skips a column
+// the file already has. grace_from is the migration time for every row still
+// at 0, and grace_served_base takes the row's served_count in the same
+// statement, so a second run (or a failed run's leftovers) changes nothing
+// that was already set. time.Now, not the bus clock: migrate runs before the
+// Bus exists, as in addMemoryAccessAndDropTaskSubscriptions.
+func addMemoryHygiene(tx *sql.Tx) error {
+	var exists int
+	if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='memory_access'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return nil
+	}
+	for _, c := range []struct{ name, decl string }{
+		{"served_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"used_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"used_at", "INTEGER"},
+		{"grace_from", "INTEGER NOT NULL DEFAULT 0"},
+		{"grace_served_base", "INTEGER NOT NULL DEFAULT 0"},
+		{"incorrect_at", "INTEGER"},
+		{"incorrect_by", "TEXT"},
+		{"incorrect_served_base", "INTEGER NOT NULL DEFAULT 0"},
+		{"pruned_at", "INTEGER"},
+		{"pruned_reason", "TEXT"},
+	} {
+		var has int
+		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('memory_access') WHERE name=?", c.name).Scan(&has); err != nil {
+			return err
+		}
+		if has == 0 {
+			if _, err := tx.Exec("ALTER TABLE memory_access ADD COLUMN " + c.name + " " + c.decl); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := tx.Exec("UPDATE memory_access SET grace_from=?, grace_served_base=served_count WHERE grace_from=0", time.Now().UnixMilli())
 	return err
 }
 

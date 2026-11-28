@@ -510,6 +510,10 @@ func TestMigrateV6AddsMemoryAccessAndDropsTaskSubscriptions(t *testing.T) {
 	if got[0].at < before || got[0].at > after {
 		t.Fatalf("accessed_at = %d, want between %d and %d (migration time)", got[0].at, before, after)
 	}
+	var gf int64
+	if err := b.db.QueryRow("SELECT grace_from FROM memory_access").Scan(&gf); err != nil || gf < before || gf > after {
+		t.Fatalf("grace_from = %d, %v, want between %d and %d (migration time)", gf, err, before, after)
+	}
 	var subs []string
 	rows, err = b.db.Query("SELECT sender || ' ' || channel FROM subscriptions ORDER BY 1")
 	if err != nil {
@@ -1244,7 +1248,7 @@ func TestMigrate12To13(t *testing.T) {
 			t.Fatalf("Open %d: %v", i, err)
 		}
 		var uv, n int
-		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
 			t.Fatalf("user_version = %d, %v", uv, err)
 		}
 		if err := b.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='statuses'").Scan(&n); err != nil || n != 1 {
@@ -1287,7 +1291,7 @@ func TestMigrate12To13Leftovers(t *testing.T) {
 	}
 	defer func() { _ = b.Close() }()
 	var uv, n int
-	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
 		t.Fatalf("user_version = %d, %v", uv, err)
 	}
 	if err := b.db.QueryRow("SELECT count(*) FROM statuses").Scan(&n); err != nil || n != 1 {
@@ -1337,7 +1341,7 @@ func checkV14FTS(t *testing.T, cfg config.Config, opens int) {
 			t.Fatalf("Open %d: %v", i, err)
 		}
 		var uv int
-		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 14 {
+		if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
 			t.Fatalf("user_version = %d, %v", uv, err)
 		}
 		for q, want := range map[string]int{"status": 0, "pending": 0, "retry": 1, "rotation": 1} {
@@ -1383,4 +1387,182 @@ func TestMigrate13To14Leftovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkV14FTS(t, cfg, 2)
+}
+
+// memoryAccessDDLv14 is memory_access as shipped through schema 14: two
+// columns, before #53 adds the serve, use, flag and prune columns.
+const memoryAccessDDLv14 = `CREATE TABLE memory_access (memory_id INTEGER PRIMARY KEY, accessed_at INTEGER NOT NULL)`
+
+// memAccessRows reads every memory_access row, every column as text so NULL is
+// distinguishable and two reads compare byte for byte.
+func memAccessRows(t *testing.T, b *Bus) []string {
+	t.Helper()
+	rows, err := b.db.Query(`SELECT memory_id || '|' || accessed_at || '|' || served_count || '|' || used_count || '|' ||
+	  ifnull(used_at,'NULL') || '|' || grace_from || '|' || grace_served_base || '|' || ifnull(incorrect_at,'NULL') || '|' ||
+	  ifnull(incorrect_by,'NULL') || '|' || incorrect_served_base || '|' || ifnull(pruned_at,'NULL') || '|' ||
+	  ifnull(pruned_reason,'NULL') FROM memory_access ORDER BY memory_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func memAccessCols(t *testing.T, b *Bus) int {
+	t.Helper()
+	var n int
+	if err := b.db.QueryRow("SELECT count(*) FROM pragma_table_info('memory_access')").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// shapeV14 opens a fresh database, applies stmts, stamps it 14 and closes.
+func shapeV14(t *testing.T, stmts ...string) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	cfg.Path = filepath.Join(cfg.DataDirectory, "config.json")
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range append(stmts, "PRAGMA user_version = 14") {
+		if _, err := b.db.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func reopenQuiet(t *testing.T, cfg config.Config) *Bus {
+	t.Helper()
+	b, err := Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	return b
+}
+
+// TestMigrate14To15 (#53): a version-14 memory_access gains the ten hygiene
+// columns; existing rows keep accessed_at, start with zero counters and no
+// flag, and get the migration time as grace_from.
+func TestMigrate14To15(t *testing.T) {
+	cfg := shapeV14(t, "DROP TABLE memory_access", memoryAccessDDLv14,
+		"INSERT INTO memory_access(memory_id, accessed_at) VALUES(1,111)",
+		"INSERT INTO memory_access(memory_id, accessed_at) VALUES(2,222)")
+	before := time.Now().UnixMilli()
+	b := reopenQuiet(t, cfg)
+	defer func() { _ = b.Close() }()
+	after := time.Now().UnixMilli()
+	var uv int
+	if err := b.db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 15 {
+		t.Fatalf("user_version = %d, %v, want 15", uv, err)
+	}
+	if n := memAccessCols(t, b); n != 12 {
+		t.Fatalf("memory_access has %d columns, want 12", n)
+	}
+	rows, err := b.db.Query("SELECT memory_id, accessed_at, served_count, used_count, grace_served_base, incorrect_served_base, grace_from FROM memory_access ORDER BY memory_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	want := map[int64]int64{1: 111, 2: 222}
+	seen := 0
+	for rows.Next() {
+		var id, at, served, used, gsb, isb, gf int64
+		if err := rows.Scan(&id, &at, &served, &used, &gsb, &isb, &gf); err != nil {
+			t.Fatal(err)
+		}
+		seen++
+		if at != want[id] || served != 0 || used != 0 || gsb != 0 || isb != 0 {
+			t.Fatalf("row %d: accessed_at=%d served=%d used=%d gsb=%d isb=%d", id, at, served, used, gsb, isb)
+		}
+		if gf < before || gf > after {
+			t.Fatalf("row %d: grace_from=%d, want between %d and %d", id, gf, before, after)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("saw %d rows, want 2", seen)
+	}
+	var nulls int
+	if err := b.db.QueryRow(`SELECT count(*) FROM memory_access WHERE used_at IS NULL AND incorrect_at IS NULL
+	  AND incorrect_by IS NULL AND pruned_at IS NULL AND pruned_reason IS NULL`).Scan(&nulls); err != nil || nulls != 2 {
+		t.Fatalf("rows with all nullable columns NULL = %d, %v, want 2", nulls, err)
+	}
+}
+
+// TestMigrate14To15SecondOpenIsNoop (#53, second run): reopening a migrated
+// file changes no column of any row.
+func TestMigrate14To15SecondOpenIsNoop(t *testing.T) {
+	cfg := shapeV14(t, "DROP TABLE memory_access", memoryAccessDDLv14,
+		"INSERT INTO memory_access(memory_id, accessed_at) VALUES(1,111)",
+		"INSERT INTO memory_access(memory_id, accessed_at) VALUES(2,222)")
+	b := reopenQuiet(t, cfg)
+	first := memAccessRows(t, b)
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Millisecond)
+	b = reopenQuiet(t, cfg)
+	defer func() { _ = b.Close() }()
+	if second := memAccessRows(t, b); strings.Join(first, "\n") != strings.Join(second, "\n") {
+		t.Fatalf("second open changed rows:\n%v\nvs\n%v", first, second)
+	}
+	if len(first) != 2 {
+		t.Fatalf("rows = %v, want 2", first)
+	}
+}
+
+// TestMigrate14To15Leftovers (#53, failed-run leftovers): a file that already
+// has all twelve columns but is stamped 14 (a run that added them and died
+// before stamping) migrates cleanly. A row whose grace_from was set keeps it;
+// a zero row gets the migration time and a grace_served_base of its served
+// count.
+func TestMigrate14To15Leftovers(t *testing.T) {
+	cfg := shapeV14(t,
+		"INSERT INTO memory_access(memory_id, accessed_at, grace_from, served_count) VALUES(1,10,777,9)",
+		"INSERT INTO memory_access(memory_id, accessed_at, grace_from, served_count) VALUES(2,20,0,4)")
+	before := time.Now().UnixMilli()
+	b := reopenQuiet(t, cfg)
+	defer func() { _ = b.Close() }()
+	after := time.Now().UnixMilli()
+	var gf1, gsb1, gf2, gsb2 int64
+	if err := b.db.QueryRow("SELECT grace_from, grace_served_base FROM memory_access WHERE memory_id=1").Scan(&gf1, &gsb1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.db.QueryRow("SELECT grace_from, grace_served_base FROM memory_access WHERE memory_id=2").Scan(&gf2, &gsb2); err != nil {
+		t.Fatal(err)
+	}
+	if gf1 != 777 || gsb1 != 0 {
+		t.Fatalf("row 1: grace_from=%d grace_served_base=%d, want 777 and 0", gf1, gsb1)
+	}
+	if gf2 < before || gf2 > after || gsb2 != 4 {
+		t.Fatalf("row 2: grace_from=%d (want %d..%d) grace_served_base=%d (want 4)", gf2, before, after, gsb2)
+	}
+}
+
+// TestMigrate14To15WithoutTable (#53): a file with no memory_access at all
+// (a test shaping an odd version) opens; the schema DDL creates the table.
+func TestMigrate14To15WithoutTable(t *testing.T) {
+	cfg := shapeV14(t, "DROP TABLE memory_access")
+	b := reopenQuiet(t, cfg)
+	defer func() { _ = b.Close() }()
+	if n := memAccessCols(t, b); n != 12 {
+		t.Fatalf("memory_access has %d columns, want 12", n)
+	}
 }

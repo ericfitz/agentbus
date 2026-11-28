@@ -346,8 +346,8 @@ back to text results and set `semantic_unavailable`.
 inactivity periods: the TUI marks a task channel idle in its rail after
 `task_idle_hours` with no task activity; the maintenance tick deletes a
 task channel, with all its tasks, after `task_expiry_hours` with none; and
-it tombstones a memory that no `get_memory` call or `search` hit has
-touched for `memory_expiry_hours`. 0 disables the corresponding rule;
+it tombstones a memory that no `get_memory` call, `search` hit or `USED`
+report has touched for `memory_expiry_hours`. 0 disables the corresponding rule;
 negative values are rejected.
 
 Two more rules (#53, ADR 0033) soft-prune a memory: the maintenance tick marks
@@ -357,7 +357,8 @@ pruned memory is still hard-deleted by the `memory_expiry_hours` rule.
 `memory_noise_grace_hours` (default 720, 30 days) and `memory_noise_serves`
 (default 20) are the noise rule: a memory that has never been reported `USED`,
 is older than the grace period (counted from its creation, last edit or last
-restore) and has been served at least `memory_noise_serves` times since then
+restore; for memories that existed before the schema 15 upgrade, from the
+upgrade) and has been served at least `memory_noise_serves` times since then
 is pruned with reason `noise`. `memory_incorrect_prune_hours` (default 336, 14
 days) and `memory_incorrect_prune_serves` (default 5) are the incorrect rule:
 a memory flagged `INCORRECT` for more than that many hours, served more than

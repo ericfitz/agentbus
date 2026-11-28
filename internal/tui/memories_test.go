@@ -3,8 +3,10 @@ package tui
 import (
 	"context"
 	"database/sql"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -221,5 +223,43 @@ func TestTUIReadsDoNotCountServes(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("TUI reads counted %d serves, want 0", n)
+	}
+}
+
+// TestTUIShowsPrunedMemoryInChannelAndSearch (#53): pruning hides a memory
+// from agents only; the human TUI still lists it in its channel and finds it
+// in search.
+func TestTUIShowsPrunedMemoryInChannelAndSearch(t *testing.T) {
+	f, id := onMemory(t)
+	if _, err := rawDB(t, f.c.cfg).Exec("UPDATE memory_access SET pruned_at=?, pruned_reason='noise' WHERE memory_id=?", time.Now().UnixMilli(), id); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh model, so the stream cannot be satisfied by rows loaded before
+	// the prune.
+	g := &fixture{c: f.c, ab: f.ab, sam: f.sam}
+	g.m = New(f.c, LoadTheme(f.c.cfg, io.Discard))
+	g.m.width, g.m.height = 100, 32
+	g.run(g.m.Init())
+	g.key("i")
+	g.key("esc")
+	for i, c := range g.m.channels {
+		if c.Name == "dev-notes" {
+			g.run(g.m.selectChannel(i))
+		}
+	}
+	g.run(g.m.loadHistory("dev-notes", nil))
+	g.streamHas(t, "Release v3")
+
+	g.key("/")
+	g.key("Release")
+	g.key("enter")
+	found := false
+	for _, h := range g.m.search.hits {
+		if h.MemoryID != nil && *h.MemoryID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("search lost the pruned memory: hits=%d err=%v", len(g.m.search.hits), g.m.search.err)
 	}
 }

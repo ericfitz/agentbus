@@ -2,6 +2,13 @@ package bus
 
 import "database/sql"
 
+// notPruned is the AND clause that hides pruned memories from agents; alias
+// names the messages row ("m" in search, "messages" elsewhere). A pruned
+// memory answers agents exactly as a deleted one.
+func notPruned(alias string) string {
+	return " AND NOT EXISTS (SELECT 1 FROM memory_access pa WHERE pa.memory_id=" + alias + ".memory_id AND pa.pruned_at IS NOT NULL)"
+}
+
 // MemoryStats is one memory_access row. Nullable columns are pointers
 // without omitempty, so JSON carries an explicit null.
 type MemoryStats struct {

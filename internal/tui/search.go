@@ -138,7 +138,7 @@ func (m *Model) runSearch() tea.Cmd {
 	c := m.c
 	in := bus.SearchInput{Query: spec.Query, Tags: spec.Tags, Kinds: spec.Kinds, Channel: spec.Channel, Mode: m.search.mode, Count: searchCount}
 	return func() tea.Msg {
-		res, err := c.b.Search(c.as, in)
+		res, err := c.b.SearchAll(c.as, in)
 		return searchMsg{query: q, noTerms: noTerms, res: res, err: err}
 	}
 }

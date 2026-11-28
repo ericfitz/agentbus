@@ -1,7 +1,10 @@
 package bus
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,5 +141,168 @@ func TestTouchSkipsPrunedMemory(t *testing.T) {
 	}
 	if s := stats(t, b, id); s.ServedCount != 3 || s.AccessedAt != 50 {
 		t.Fatalf("a pruned memory must not be touched: %+v", s)
+	}
+}
+
+// pruneRaw marks memory id pruned now with reason.
+func pruneRaw(t *testing.T, b *Bus, id int64, reason string) {
+	t.Helper()
+	setAccess(t, b, id, "pruned_at=?, pruned_reason=?", b.nowMs(), reason)
+}
+
+// prunedAndDeleted returns a pruned memory p and a deleted control d, both
+// holding "zebracorn" and tag kind:gotcha.
+func prunedAndDeleted(t *testing.T, b *Bus, sam string) (p, d int64) {
+	t.Helper()
+	p = *sendTagged(t, b, sam, "mem", "zebracorn pruned", "kind:gotcha").MemoryID
+	d = *sendTagged(t, b, sam, "mem", "zebracorn deleted", "kind:gotcha").MemoryID
+	if err := b.DeleteMemory(sam, d, ""); err != nil {
+		t.Fatal(err)
+	}
+	pruneRaw(t, b, p, "noise")
+	return p, d
+}
+
+func hasHit(hits []SearchHit, id int64) bool {
+	for _, h := range hits {
+		if h.MemoryID != nil && *h.MemoryID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRow(ms []Message, id int64) bool {
+	for _, m := range ms {
+		if m.MemoryID != nil && *m.MemoryID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// sameErr fails unless a and b carry the same code and message once each
+// call's own id is replaced by N.
+func sameErr(t *testing.T, name string, a, b error, ida, idb int64) {
+	t.Helper()
+	if a == nil || b == nil {
+		t.Fatalf("%s: errors a=%v b=%v, want both set", name, a, b)
+	}
+	norm := func(e error, id int64) string {
+		var be *Error
+		if !errors.As(e, &be) {
+			t.Fatalf("%s: %v is not a bus error", name, e)
+		}
+		return strings.ReplaceAll(be.Code+"|"+be.Message, fmt.Sprint(id), "N")
+	}
+	if na, nb := norm(a, ida), norm(b, idb); na != nb {
+		t.Fatalf("%s: pruned %q differs from deleted %q", name, na, nb)
+	}
+}
+
+// TestPrunedHiddenFromAgentReads (#53): a pruned memory answers agent reads
+// as a deleted one; the human variants still return it.
+func TestPrunedHiddenFromAgentReads(t *testing.T) {
+	b, sam, _ := memBus(t)
+	p, d := prunedAndDeleted(t, b, sam)
+
+	_, errP := b.GetMemory(sam, p)
+	_, errD := b.GetMemory(sam, d)
+	sameErr(t, "GetMemory", errP, errD, p, d)
+	wantCode(t, errP, "not_found")
+	var be *Error
+	if want := fmt.Sprintf("memory %d has no live revision", p); !errors.As(errP, &be) || be.Message != want {
+		t.Fatalf("GetMemory(p) = %v, want message %q", errP, want)
+	}
+
+	inputs := map[string]SearchInput{
+		"text":    {Query: "zebracorn"},
+		"tags":    {Tags: []string{"kind:gotcha"}},
+		"channel": {Query: "zebracorn", Channel: "mem"},
+	}
+	for name, in := range inputs {
+		r, err := b.Search(sam, in)
+		if err != nil || hasHit(r.Hits, p) {
+			t.Fatalf("Search %s: p leaked or failed: %+v %v", name, r.Hits, err)
+		}
+		r, err = b.SearchAll(sam, in)
+		if err != nil || !hasHit(r.Hits, p) {
+			t.Fatalf("SearchAll %s: p missing: %+v %v", name, r.Hits, err)
+		}
+	}
+	ms, err := b.History(sam, "mem", nil, nil, 0)
+	if err != nil || hasRow(ms, p) {
+		t.Fatalf("History leaked p: %+v %v", ms, err)
+	}
+	ms, err = b.HistoryAll(sam, "mem", nil, nil, 0)
+	if err != nil || !hasRow(ms, p) {
+		t.Fatalf("HistoryAll lost p: %+v %v", ms, err)
+	}
+	revs, err := b.MemoryRevisions(sam, p)
+	if err != nil || len(revs) != 1 {
+		t.Fatalf("MemoryRevisions(p) = %d revisions, %v; want 1", len(revs), err)
+	}
+	if _, _, _, err := liveRevision(b.db, p); err == nil {
+		t.Fatal("liveRevision found a pruned memory")
+	} else {
+		wantCode(t, err, "not_found")
+	}
+	seq, rev, ch, err := liveRevisionAny(b.db, p)
+	if err != nil || seq != p || rev != 1 || ch != "mem" {
+		t.Fatalf("liveRevisionAny(p) = %d,%d,%q,%v; want %d,1,mem", seq, rev, ch, err, p)
+	}
+}
+
+// TestPrunedSemanticSearchExcluded (#53): both ranked queries drop a pruned
+// memory for agents and keep it for SearchAll.
+func TestPrunedSemanticSearchExcluded(t *testing.T) {
+	srv := fakeEmbeddings(t)
+	defer srv.Close()
+	b := newEmbedBus(t, srv.URL)
+	sam := reg(t, b, "Sam")
+	if _, err := b.CreateChannel(sam, "mem", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := prunedAndDeleted(t, b, sam)
+	drainEmbed(t, b)
+	for _, mode := range []string{"semantic", "both"} {
+		in := SearchInput{Query: "zebracorn", Mode: mode}
+		r, err := b.Search(sam, in)
+		if err != nil || hasHit(r.Hits, p) {
+			t.Fatalf("Search %s leaked p: %+v %v", mode, r.Hits, err)
+		}
+		r, err = b.SearchAll(sam, in)
+		if err != nil || !hasHit(r.Hits, p) {
+			t.Fatalf("SearchAll %s lost p: %+v %v", mode, r.Hits, err)
+		}
+	}
+}
+
+// TestPrunedRefusedLikeDeleted (#53): every id-taking operation refuses a
+// pruned memory exactly as it refuses a deleted one, and changes nothing.
+func TestPrunedRefusedLikeDeleted(t *testing.T) {
+	b, sam, _ := memBus(t)
+	p, d := prunedAndDeleted(t, b, sam)
+	before := stats(t, b, p)
+	status := "completed"
+	calls := map[string]func(id int64) error{
+		"EditMemory":   func(id int64) error { _, err := b.EditMemory(sam, EditInput{ID: id, Content: "x"}); return err },
+		"DeleteMemory": func(id int64) error { return b.DeleteMemory(sam, id, "") },
+		"TaskGet":      func(id int64) error { _, err := b.TaskGet(sam, id); return err },
+		"TaskUpdate": func(id int64) error {
+			_, err := b.TaskUpdate(sam, TaskPatch{ID: id, Status: &status})
+			return err
+		},
+		"TaskClaim":   func(id int64) error { _, err := b.TaskClaim(sam, id, 0, ""); return err },
+		"TaskRelease": func(id int64) error { _, err := b.TaskRelease(sam, id, ""); return err },
+	}
+	for name, call := range calls {
+		sameErr(t, name, call(p), call(d), p, d)
+	}
+	if got := stats(t, b, p); !reflect.DeepEqual(got, before) {
+		t.Fatalf("stats changed: %+v -> %+v", before, got)
+	}
+	if _, _, _, err := liveRevisionAny(b.db, p); err != nil {
+		t.Fatalf("p lost its live revision: %v", err)
 	}
 }

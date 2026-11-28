@@ -21,6 +21,10 @@ type SearchInput struct {
 	Count   int      `json:"count,omitempty"`
 	Cursor  string   `json:"cursor,omitempty"`
 	Kinds   []string `json:"kinds,omitempty" jsonschema:"narrow to these kinds: memories, chat, tasks; default all; ignored when channel is set, but an unknown kind is still an error"`
+
+	// includePruned is set only by SearchAll (the human TUI); Search forces
+	// it false. It has no tag, so no JSON input can reach it.
+	includePruned bool
 }
 
 // SearchKinds lists the values SearchInput.Kinds accepts.
@@ -189,6 +193,9 @@ func (b *Bus) searchFilters(as string, in SearchInput) (string, []any) {
 		sb.WriteString(f)
 		args = append(args, a...)
 	}
+	if !in.includePruned {
+		sb.WriteString(notPruned("m"))
+	}
 	return sb.String(), args
 }
 
@@ -258,7 +265,19 @@ func (b *Bus) tagsOnlySearch(as string, in SearchInput, limit int) ([]SearchHit,
 	return hits, nil
 }
 
+// Search is the agent search: pruned memories are excluded.
 func (b *Bus) Search(as string, in SearchInput) (SearchResult, error) {
+	in.includePruned = false
+	return b.search(as, in)
+}
+
+// SearchAll is Search including pruned memories; the human TUI only.
+func (b *Bus) SearchAll(as string, in SearchInput) (SearchResult, error) {
+	in.includePruned = true
+	return b.search(as, in)
+}
+
+func (b *Bus) search(as string, in SearchInput) (SearchResult, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return SearchResult{}, err
 	}

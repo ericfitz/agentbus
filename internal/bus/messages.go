@@ -417,7 +417,17 @@ func (b *Bus) Send(as string, in SendInput) (SendResult, error) {
 	return res, nil
 }
 
+// History is the agent read of a channel: pruned memories are excluded.
 func (b *Bus) History(as, channel string, before, after *int64, count int, tags ...string) ([]Message, error) {
+	return b.history(as, channel, before, after, count, false, tags)
+}
+
+// HistoryAll is History including pruned memories; the human TUI only.
+func (b *Bus) HistoryAll(as, channel string, before, after *int64, count int, tags ...string) ([]Message, error) {
+	return b.history(as, channel, before, after, count, true, tags)
+}
+
+func (b *Bus) history(as, channel string, before, after *int64, count int, includePruned bool, tags []string) ([]Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return nil, err
 	}
@@ -439,6 +449,9 @@ func (b *Bus) History(as, channel string, before, after *int64, count int, tags 
 		return nil, err
 	}
 	q := "SELECT " + messageCols("messages") + " FROM messages WHERE channel=? AND tombstone=0"
+	if !includePruned {
+		q += notPruned("messages")
+	}
 	args := []any{channel}
 	if f, a := tagsFilter("messages", tags); f != "" {
 		q += f

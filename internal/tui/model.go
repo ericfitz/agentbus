@@ -1468,7 +1468,7 @@ func (m *Model) loadHistory(ch string, before *int64) tea.Cmd {
 			top := int64(math.MaxInt64)
 			b = &top
 		}
-		ms, err := c.b.History(c.as, ch, b, nil, historyPage)
+		ms, err := c.b.HistoryAll(c.as, ch, b, nil, historyPage)
 		return historyMsg{channel: ch, msgs: ms, prepend: before != nil, err: err}
 	}
 }

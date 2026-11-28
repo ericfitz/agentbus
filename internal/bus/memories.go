@@ -32,7 +32,7 @@ func (b *Bus) GetMemory(as string, id int64) (Message, error) {
 	if err := b.auth(b.db, as); err != nil {
 		return Message{}, err
 	}
-	rows, err := b.db.Query("SELECT "+messageCols("messages")+" FROM messages WHERE memory_id=? AND tombstone=0 ORDER BY revision DESC LIMIT 1", id)
+	rows, err := b.db.Query("SELECT "+messageCols("messages")+" FROM messages WHERE memory_id=? AND tombstone=0"+notPruned("messages")+" ORDER BY revision DESC LIMIT 1", id)
 	if err != nil {
 		return Message{}, internal(err)
 	}
@@ -73,8 +73,19 @@ func (b *Bus) MemoryRevisions(as string, id int64) ([]Message, error) {
 // liveRevision reads a memory's current live revision (seq, revision, channel).
 // It runs against either b.db or a *sql.Tx so callers can read outside a
 // transaction first and repeat the read inside one before committing writes.
+// It treats a pruned memory as absent, like a deleted one.
 func liveRevision(q queryRower, id int64) (seq, revision int64, channel string, err error) {
-	err = q.QueryRow("SELECT seq, revision, channel FROM messages WHERE memory_id=? AND tombstone=0", id).Scan(&seq, &revision, &channel)
+	return liveRevisionWhere(q, id, notPruned("messages"))
+}
+
+// liveRevisionAny is liveRevision including pruned memories, for the
+// human-facing paths that act on them.
+func liveRevisionAny(q queryRower, id int64) (seq, revision int64, channel string, err error) {
+	return liveRevisionWhere(q, id, "")
+}
+
+func liveRevisionWhere(q queryRower, id int64, extra string) (seq, revision int64, channel string, err error) {
+	err = q.QueryRow("SELECT seq, revision, channel FROM messages WHERE memory_id=? AND tombstone=0"+extra, id).Scan(&seq, &revision, &channel)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, "", errf("not_found", false, "memory %d has no live revision", id)
 	}

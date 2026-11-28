@@ -594,3 +594,26 @@ func TestSearchTaskInvalidJSONRow(t *testing.T) {
 		t.Fatalf("after delete: %d hits, %v", len(r.Hits), err)
 	}
 }
+
+// kinds combines with until and thread (spec acceptance): the kind narrows
+// the same candidate set the other filters do.
+func TestSearchKindsWithUntilAndThread(t *testing.T) {
+	b, ann, sam, _ := searchKindsFixture(t)
+	root, err := b.Send(ann, SendInput{Channel: "general", Content: "widget thread root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Send(sam, SendInput{Channel: "general", Content: "widget thread reply", ReplyTo: &root.Seq}); err != nil {
+		t.Fatal(err)
+	}
+	// Thread: only the chat replies in the thread, whatever the kinds.
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Thread: &root.Seq, Kinds: []string{"chat"}}), "general", "general")
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Thread: &root.Seq, Kinds: []string{"memories", "tasks"}}))
+	// Until: a cutoff before every row matches nothing; one after all keeps
+	// exactly the rows of the chosen kinds.
+	past := int64(1)
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Until: &past, Kinds: []string{"chat"}}))
+	future := time.Now().Add(time.Hour).UnixMilli()
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Until: &future, Kinds: []string{"memories"}}), "mem")
+	wantChannels(t, searchChannels(t, b, sam, SearchInput{Until: &future, Kinds: []string{"tasks"}}), "tasks/w")
+}

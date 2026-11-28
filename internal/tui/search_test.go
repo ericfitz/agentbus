@@ -588,3 +588,56 @@ func TestSearchInTasksOpensTheTaskInTheTree(t *testing.T) {
 		t.Fatalf("a task hit must not load message rows: %+v", f.m.msgs["tasks/work"])
 	}
 }
+
+// A line of scope tokens with no word and no tag has nothing to match: it
+// shows an error through the parse-error path and clears the old hits.
+func TestSearchScopeOnlyLineShowsErrorAndClearsHits(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "release alpha")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("release")
+	f.key("enter")
+	if len(f.m.search.hits) != 1 {
+		t.Fatalf("setup: hits=%+v err=%v", f.m.search.hits, f.m.search.err)
+	}
+	for _, line := range []string{"in:tasks", "channel:dev", "in:chat channel:dev"} {
+		f.key("ctrl+u")
+		f.key(line)
+		f.key("enter")
+		if f.m.search.err == nil || !f.m.search.ran || len(f.m.search.hits) != 0 {
+			t.Fatalf("%q: err=%v ran=%v hits=%+v", line, f.m.search.err, f.m.search.ran, f.m.search.hits)
+		}
+		if v := f.m.View(); !strings.Contains(v, "add a word or tag:") {
+			t.Fatalf("%q: view must show the error:\n%s", line, v)
+		}
+		// Editing the line to add a word searches again.
+		f.key("ctrl+u")
+		f.key("release")
+		f.key("enter")
+		if f.m.search.err != nil || len(f.m.search.hits) != 1 {
+			t.Fatalf("%q: rerun err=%v hits=%+v", line, f.m.search.err, f.m.search.hits)
+		}
+	}
+}
+
+// A session's DM inbox is a valid channel: scope.
+func TestSearchChannelTokenAcceptsASessionInbox(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // populates sessionNames()
+	f.agentSend(t, "dev", "release in the channel")
+	f.patSend(t, "dm/Sam", "note about the release")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("channel:dm/Sam release")
+	f.key("enter")
+	h := f.m.search.hits
+	if f.m.search.err != nil || len(h) != 1 || h[0].Channel != "dm/Sam" {
+		t.Fatalf("hits=%+v err=%v", h, f.m.search.err)
+	}
+	if v := f.m.View(); !strings.Contains(v, "in dm/Sam") {
+		t.Fatalf("title must show the inbox scope:\n%s", v)
+	}
+}

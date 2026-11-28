@@ -904,3 +904,36 @@ func TestSemanticFallbackForChatKind(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
+
+// Semantic search narrowed to chat, run as a non-participant, returns the
+// ordinary-channel hit and never the DM between two other sessions.
+func TestSemanticKindsChatAsNonParticipant(t *testing.T) {
+	srv, _ := recordEmbeddings(t, nil) // every text gets one vector: all rows tie
+	b := newEmbedBus(t, srv.URL)
+	ann := reg(t, b, "Ann")
+	sam := reg(t, b, "Sam")
+	bob := reg(t, b, "Bob")
+	_, _ = b.CreateChannel(ann, "dev", "ordinary")
+	_, _ = b.CreateChannel(ann, "mem", "memory")
+	list := taskList(t, b)
+	for _, in := range []SendInput{
+		{Channel: "dev", Content: "widget chat"},
+		{Channel: "mem", Content: "widget memory"},
+		{Channel: DMChannel(sam), Content: "widget secret"},
+	} {
+		if _, err := b.Send(ann, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustCreate(t, b, TaskCreateInput{Channel: list, Subject: "widget task"})
+	drainEmbed(t, b)
+	for _, mode := range []string{"semantic", "both"} {
+		r, err := b.Search(bob, SearchInput{Query: "widget", Mode: mode, Kinds: []string{"chat"}})
+		if err != nil || r.SemanticUnavailable {
+			t.Fatalf("%s: %+v %v", mode, r, err)
+		}
+		if len(r.Hits) != 1 || r.Hits[0].Channel != "dev" {
+			t.Fatalf("%s: Bob must see only the dev chat row, got %+v", mode, r.Hits)
+		}
+	}
+}

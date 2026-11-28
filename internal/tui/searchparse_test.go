@@ -45,3 +45,44 @@ func TestParseSearchInput(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSearchInputScopeTokens(t *testing.T) {
+	tests := []struct {
+		in      string
+		query   string
+		kinds   []string
+		channel string
+		tags    []string
+		errPart string
+	}{
+		{in: "in:chat foo", query: "foo", kinds: []string{"chat"}},
+		{in: "IN:Tasks in:chat", kinds: []string{"tasks", "chat"}},
+		{in: "in:chat in:chat x", query: "x", kinds: []string{"chat"}},
+		{in: "channel:general x", query: "x", channel: "general"},
+		{in: "CHANNEL:general x", query: "x", channel: "general"},
+		{in: `"in:chat" x`, query: "in:chat x"},
+		{in: `"channel:general" x`, query: "channel:general x"},
+		{in: "in:memories tag:deployment x", query: "x", kinds: []string{"memories"}, tags: []string{"deployment"}},
+		{in: "in: x", errPart: "in:"},
+		{in: "in:chats x", errPart: "chats"},
+		{in: "in:memory x", errPart: "memory"},
+		{in: "channel: x", errPart: "channel:"},
+		{in: "channel:a channel:b x", errPart: "more than once"},
+	}
+	for _, tc := range tests {
+		got, err := parseSearchInput(tc.in)
+		if tc.errPart != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.errPart) {
+				t.Errorf("%q: err=%v, want containing %q", tc.in, err, tc.errPart)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%q: unexpected error %v", tc.in, err)
+			continue
+		}
+		if got.Query != tc.query || got.Channel != tc.channel || !slices.Equal(got.Kinds, tc.kinds) || !slices.Equal(got.Tags, tc.tags) {
+			t.Errorf("%q: got %+v", tc.in, got)
+		}
+	}
+}

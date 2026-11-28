@@ -18,6 +18,7 @@ type searchState struct {
 	input        textinput.Model
 	mode         string
 	tags         []string // the tag filters of the current hits, for the title
+	scope        string   // the in:/channel: scope of the current hits, for the title
 	query        string   // the query the current hits answer; typing past it makes enter re-run
 	hits         []bus.SearchHit
 	cursor       int
@@ -91,21 +92,52 @@ func (m *Model) runSearch() tea.Cmd {
 		m.search.hits = nil
 		m.search.cursor = 0
 		m.search.tags = nil
+		m.search.scope = ""
 		m.search.textOnly = false
 		return nil
 	}
 	if spec.Query == "" && len(spec.Tags) == 0 {
 		return nil
 	}
+	if spec.Channel != "" && !m.searchableChannel(spec.Channel) {
+		m.search.query = q
+		m.search.err = fmt.Errorf("channel: %q is not a channel you can open", spec.Channel)
+		m.search.ran = true
+		m.search.hits = nil
+		m.search.cursor = 0
+		m.search.tags = nil
+		m.search.scope = ""
+		m.search.textOnly = false
+		return nil
+	}
 	m.search.query = q
 	m.search.tags = spec.Tags
+	switch {
+	case spec.Channel != "":
+		m.search.scope = "in " + spec.Channel
+	case len(spec.Kinds) > 0:
+		m.search.scope = "in " + strings.Join(spec.Kinds, ", ")
+	default:
+		m.search.scope = ""
+	}
 	noTerms := !bus.HasSearchTerms(spec.Query)
 	c := m.c
-	in := bus.SearchInput{Query: spec.Query, Tags: spec.Tags, Mode: m.search.mode, Count: searchCount}
+	in := bus.SearchInput{Query: spec.Query, Tags: spec.Tags, Kinds: spec.Kinds, Channel: spec.Channel, Mode: m.search.mode, Count: searchCount}
 	return func() tea.Msg {
 		res, err := c.b.Search(c.as, in)
 		return searchMsg{query: q, noTerms: noTerms, res: res, err: err}
 	}
+}
+
+// searchableChannel reports whether jumpTo can open a hit in name: a rail
+// channel or the DM inbox of a session in the sessions pane.
+func (m *Model) searchableChannel(name string) bool {
+	for _, c := range m.channels {
+		if c.Name == name {
+			return true
+		}
+	}
+	return slices.ContainsFunc(m.sessionNames(), func(n string) bool { return bus.DMChannel(n) == name })
 }
 
 // jumpTo selects the hit's channel (loading its latest page on a first
@@ -134,6 +166,12 @@ func (m *Model) jumpTo(hit bus.Message) tea.Cmd {
 	}
 	if len(cmds) == 0 {
 		return m.showToast("channel " + hit.Channel + " not in the rail yet")
+	}
+	if bus.IsTaskChannel(hit.Channel) && hit.MemoryID != nil {
+		// A task hit opens the task in the tree; the tree's own load
+		// (selectChannel's cmd) resolves it via the pending cursor.
+		m.placeTaskCursorOn(hit.Channel, *hit.MemoryID)
+		return tea.Batch(cmds...)
 	}
 	m.addMessages(hit.Channel, []bus.Message{hit})
 	m.markSeen(hit.Channel)
@@ -200,6 +238,10 @@ func (m Model) viewSearch() string {
 	if len(m.search.tags) > 0 {
 		tagsPart = " · tags " + strings.Join(m.search.tags, " ")
 	}
-	title := "search  " + dim.Render("mode "+m.search.mode+tagsPart+" · tab to switch")
+	scopePart := ""
+	if m.search.scope != "" {
+		scopePart = " · " + m.search.scope
+	}
+	title := "search  " + dim.Render("mode "+m.search.mode+tagsPart+scopePart+" · tab to switch")
 	return m.overlay(title, th.Agent, b.String(), m.hints("enter", "search / open", "tab", "mode", "↑↓", "move", "esc", "close"))
 }

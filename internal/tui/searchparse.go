@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ericfitz/agentbus/internal/bus"
@@ -9,12 +11,14 @@ import (
 
 // searchSpec is a parsed search line: free text plus filters.
 type searchSpec struct {
-	Query string
-	Tags  []string
+	Query   string
+	Tags    []string
+	Kinds   []string // in: values, lowercased, in typed order
+	Channel string   // channel: value, as typed
 }
 
 // searchPrefixes maps a case-insensitive word prefix to the function that
-// folds the word's remainder into the spec. New filters (in:, channel:) add rows.
+// folds the word's remainder into the spec. New filters add rows.
 var searchPrefixes = []struct {
 	prefix string
 	apply  func(*searchSpec, string) error
@@ -24,6 +28,26 @@ var searchPrefixes = []struct {
 			return errors.New("tag: needs a tag, e.g. tag:deployment")
 		}
 		s.Tags = append(s.Tags, v)
+		return nil
+	}},
+	{"in:", func(s *searchSpec, v string) error {
+		k := strings.ToLower(v)
+		if !slices.Contains(bus.SearchKinds, k) {
+			return fmt.Errorf("in: needs one of %s, got %q", strings.Join(bus.SearchKinds, ", "), v)
+		}
+		if !slices.Contains(s.Kinds, k) {
+			s.Kinds = append(s.Kinds, k)
+		}
+		return nil
+	}},
+	{"channel:", func(s *searchSpec, v string) error {
+		if v == "" {
+			return errors.New("channel: needs a channel name, e.g. channel:general")
+		}
+		if s.Channel != "" {
+			return errors.New("channel: given more than once")
+		}
+		s.Channel = v
 		return nil
 	}},
 }

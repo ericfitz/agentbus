@@ -494,3 +494,97 @@ func TestSearchEmptyQuotesDoNotArmStaleHit(t *testing.T) {
 		t.Fatalf("enter on an empty-quotes line must not jump; mode=%v", f.m.mode)
 	}
 }
+
+func TestSearchChannelTokenRejectsUnopenableChannels(t *testing.T) {
+	f := newFixture(t)
+	f.run(f.m.statusCmd()) // populates sessionNames()
+	f.agentSend(t, "dev", "release note")
+	f.receive(t)
+	f.key("esc")
+	for _, line := range []string{"channel:nope release", "channel:dm/NoSuchSession release"} {
+		f.key("/")
+		f.key(line)
+		cmd := f.m.runSearch()
+		if cmd != nil {
+			t.Fatalf("%q: an unopenable channel must not run a search", line)
+		}
+		if f.m.search.err == nil || !f.m.search.ran || len(f.m.search.hits) != 0 {
+			t.Fatalf("%q: err=%v ran=%v hits=%+v", line, f.m.search.err, f.m.search.ran, f.m.search.hits)
+		}
+		if v := f.m.View(); !strings.Contains(v, "not a channel you can open") {
+			t.Fatalf("%q: view must show the error:\n%s", line, v)
+		}
+		f.key("esc")
+	}
+}
+
+func TestSearchChannelTokenScopesHitsAndTitle(t *testing.T) {
+	f := newFixture(t)
+	f.agentSend(t, "dev", "release alpha")
+	f.agentSend(t, "dev-notes", "release beta")
+	f.receive(t)
+	f.key("esc")
+	f.key("/")
+	f.key("channel:dev release")
+	f.key("enter")
+	h := f.m.search.hits
+	if f.m.search.err != nil || len(h) != 1 || h[0].Channel != "dev" {
+		t.Fatalf("hits=%+v err=%v", h, f.m.search.err)
+	}
+	if v := f.m.View(); !strings.Contains(v, "in dev") {
+		t.Fatalf("title must show the channel scope:\n%s", v)
+	}
+	f.key("ctrl+u")
+	f.key("in:chat release")
+	f.key("enter")
+	if v := f.m.View(); !strings.Contains(v, "in chat") || strings.Contains(v, "in dev") {
+		t.Fatalf("title must show the kinds scope:\n%s", v)
+	}
+	f.key("ctrl+u")
+	f.key("in:chat in:tasks release")
+	f.key("enter")
+	if v := f.m.View(); !strings.Contains(v, "in chat, tasks") {
+		t.Fatalf("title must list the kinds:\n%s", v)
+	}
+	f.key("ctrl+u")
+	f.key("release")
+	f.key("enter")
+	if v := f.m.View(); strings.Contains(v, " · in ") {
+		t.Fatalf("default scope must add nothing to the title:\n%s", v)
+	}
+}
+
+func TestSearchInTasksOpensTheTaskInTheTree(t *testing.T) {
+	f := newFixture(t)
+	f.key("esc")
+	if _, err := f.ab.CreateChannel(f.sam, "tasks/work", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "parent thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.ab.TaskCreate(f.sam, bus.TaskCreateInput{Channel: "tasks/work", Subject: "zzyzx deep child", Parent: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run(f.m.statusCmd())
+	f.key("/")
+	f.key("in:tasks zzyzx")
+	f.key("enter")
+	h := f.m.search.hits
+	if f.m.search.err != nil || len(h) != 1 || h[0].MemoryID == nil || *h[0].MemoryID != target.ID {
+		t.Fatalf("hits=%+v err=%v", h, f.m.search.err)
+	}
+	f.key("enter")
+	if f.m.mode != modeNormal || f.m.selName() != "tasks/work" {
+		t.Fatalf("mode=%v sel=%q", f.m.mode, f.m.selName())
+	}
+	got, ok := f.m.cursorTask()
+	if !ok || got.ID != target.ID {
+		t.Fatalf("task tree cursor must land on the hit task, got %+v ok=%v", got, ok)
+	}
+	if len(f.m.msgs["tasks/work"]) != 0 {
+		t.Fatalf("a task hit must not load message rows: %+v", f.m.msgs["tasks/work"])
+	}
+}

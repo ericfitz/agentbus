@@ -984,6 +984,12 @@ func (m *Model) placeTaskCursor(ch string, seq int64) {
 			break
 		}
 	}
+	m.placeTaskCursorOn(ch, id)
+}
+
+// placeTaskCursorOn puts the cursor on task id's row in ch's tree, or
+// remembers it for the tasksMsg that loads the tree.
+func (m *Model) placeTaskCursorOn(ch string, id int64) {
 	m.cursor = -1
 	if id != 0 {
 		m.revealTask(ch, id)

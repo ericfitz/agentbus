@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -97,6 +98,19 @@ func (m *Model) runSearch() tea.Cmd {
 		return nil
 	}
 	if spec.Query == "" && len(spec.Tags) == 0 {
+		if len(spec.Kinds) == 0 && spec.Channel == "" {
+			return nil
+		}
+		// A scope alone has nothing to match: say so and drop the old hits
+		// rather than leaving them under a line that no longer produced them.
+		m.search.query = q
+		m.search.err = errors.New("add a word or tag: to search")
+		m.search.ran = true
+		m.search.hits = nil
+		m.search.cursor = 0
+		m.search.tags = nil
+		m.search.scope = ""
+		m.search.textOnly = false
 		return nil
 	}
 	if spec.Channel != "" && !m.searchableChannel(spec.Channel) {

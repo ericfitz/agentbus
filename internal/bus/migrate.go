@@ -129,7 +129,10 @@ func splitTagSets(tx *sql.Tx) error {
 
 // reindexTaskText (schema 13 -> 14, #52) replaces the FTS triggers and table
 // with the task-aware form (messagesFTSDDL) and repopulates it from every
-// live row, unconditionally: it drops whatever the older steps or a failed
+// row, tombstoned ones too: the purge deletes tombstoned rows, the delete
+// trigger removes the index entry it computes from the row, and a row that
+// was never indexed would corrupt the external-content index. Do not add
+// WHERE tombstone=0. It runs unconditionally: it drops whatever the older steps or a failed
 // earlier run left (old or new form), so a second run, or a run over
 // leftovers, ends in the same state. The repopulation is an explicit INSERT
 // because 'rebuild' would index raw task JSON.

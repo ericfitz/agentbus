@@ -14,7 +14,7 @@ type Status struct {
 	BudgetBytes      int64     `json:"budget_bytes"`
 	Notice           string    `json:"notice,omitempty"`
 	EmbeddingBacklog int64     `json:"embedding_backlog"`
-	// EmbeddingRejected counts memories the endpoint rejected on their own
+	// EmbeddingRejected counts rows the endpoint rejected on their own
 	// under the current model; they are not in the backlog (ADR 0018).
 	EmbeddingRejected int64 `json:"embedding_rejected"`
 	// EmbeddingRejectedLast is the endpoint's reason for the most recent

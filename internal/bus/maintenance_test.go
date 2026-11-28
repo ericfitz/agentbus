@@ -379,27 +379,38 @@ func TestTickDoesNotReapSubscriptionsBeforeReceiveReportsExpiry(t *testing.T) {
 	}
 }
 
-// Minor: Close must wait for an in-flight background embedSoon pass, so
-// shutdown does not race the goroutine into a closed DB.
-func TestCloseWaitsForBackgroundEmbedding(t *testing.T) {
+// Close must cancel an in-flight background embedSoon pass instead of waiting
+// out the request timeout, and must not return while that goroutine can still
+// touch the database.
+func TestCloseCancelsBackgroundEmbedding(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-release
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
 		w.WriteHeader(500)
 	}))
+	// Deferred LIFO: the handler is released before srv.Close waits on it.
 	defer srv.Close()
-	// Guarantee the handler unblocks even if an assertion below fails
-	// (t.Fatal) before the normal release point: deferred LIFO, this runs
-	// BEFORE srv.Close (which waits for in-flight requests), so a failure
-	// path cannot hang the test forever.
 	defer releaseHandler()
 	b := newEmbedBus(t, srv.URL)
 	sam := reg(t, b, "Sam")
 	_, _ = b.CreateChannel(sam, "mem", "memory")
 	if _, err := b.Send(sam, SendInput{Channel: "mem", Content: "hello"}); err != nil {
 		t.Fatal(err)
+	}
+	// The pass is in flight once the endpoint holds a request; without this
+	// wait Close could win the race and the test would prove nothing.
+	deadline := time.Now().Add(2 * time.Second)
+	for b.embedMu.TryLock() {
+		b.embedMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("no embedding pass started")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -408,14 +419,8 @@ func TestCloseWaitsForBackgroundEmbedding(t *testing.T) {
 	}()
 	select {
 	case <-done:
-		t.Fatal("Close returned before the background embedding pass finished")
-	case <-time.After(50 * time.Millisecond):
-	}
-	releaseHandler()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Close did not return after the background pass finished")
+	case <-time.After(5 * time.Second): // the request timeout is 30 s
+		t.Fatal("Close did not cancel the in-flight embedding pass")
 	}
 }
 

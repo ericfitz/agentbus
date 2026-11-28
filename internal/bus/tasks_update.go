@@ -288,7 +288,9 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 		return Task{}, internal(err)
 	}
 	var oldSubject, oldContent string
-	if err := tx.QueryRow("SELECT subject, content FROM messages WHERE seq=?", t.seq).Scan(&oldSubject, &oldContent); err != nil {
+	// sql.ErrNoRows leaves both empty, which reads as "changed": the new
+	// revision is then embedded afresh instead of the write failing.
+	if err := tx.QueryRow("SELECT subject, content FROM messages WHERE seq=?", t.seq).Scan(&oldSubject, &oldContent); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Task{}, internal(err)
 	}
 	if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), t.seq); err != nil {
@@ -299,13 +301,25 @@ func (b *Bus) writeTaskRevision(tx *sql.Tx, as, context string, t Task, typ stri
 		return Task{}, internal(err)
 	}
 	// A revision with the same subject and description as the previous one
-	// reuses its vectors, so a claim, release or status change costs no
-	// endpoint call (ADR 0032). Unparseable old content counts as changed.
+	// takes over its vectors and rejection records, so a claim, release or
+	// status change costs no endpoint call (ADR 0032) and rejected text is
+	// not sent again. Unparseable old content counts as changed. Either way
+	// the tombstoned revision keeps no vector (embeddings hold live rows).
 	var old struct {
 		Description string `json:"description"`
 	}
 	if oldSubject == t.Subject && json.Unmarshal([]byte(oldContent), &old) == nil && old.Description == t.Description {
-		if _, err := tx.Exec("INSERT INTO embeddings(seq,model,vector) SELECT ?,model,vector FROM embeddings WHERE seq=?", seq, t.seq); err != nil {
+		for _, q := range []string{
+			"INSERT INTO embeddings(seq,model,vector) SELECT ?,model,vector FROM embeddings WHERE seq=?",
+			"INSERT INTO embed_failures(seq,model,error,failed_at) SELECT ?,model,error,failed_at FROM embed_failures WHERE seq=?",
+		} {
+			if _, err := tx.Exec(q, seq, t.seq); err != nil {
+				return Task{}, internal(err)
+			}
+		}
+	}
+	for _, q := range []string{"DELETE FROM embeddings WHERE seq=?", "DELETE FROM embed_failures WHERE seq=?"} {
+		if _, err := tx.Exec(q, t.seq); err != nil {
 			return Task{}, internal(err)
 		}
 	}
@@ -488,16 +502,22 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 			if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), marker.seq); err != nil {
 				return TaskUpdateResult{}, internal(err)
 			}
-			// writeTaskRevision copied the vector onto the marker; a
-			// tombstoned row must not carry one.
-			if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", marker.seq); err != nil {
-				return TaskUpdateResult{}, internal(err)
+			// writeTaskRevision moved the vector onto the marker; a
+			// tombstoned row must not carry one. The marker's carried
+			// failure record goes too: it is dead weight on a tombstone.
+			for _, q := range []string{"DELETE FROM embeddings WHERE seq=?", "DELETE FROM embed_failures WHERE seq=?"} {
+				if _, err := tx.Exec(q, marker.seq); err != nil {
+					return TaskUpdateResult{}, internal(err)
+				}
 			}
 		} else {
 			if !b.limits.allow(as, 0, b.Now()) {
 				return TaskUpdateResult{}, errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
 			}
 			if _, err := tx.Exec("UPDATE messages SET tombstone=1, tombstone_at=? WHERE seq=?", b.nowMs(), cur.seq); err != nil {
+				return TaskUpdateResult{}, internal(err)
+			}
+			if _, err := tx.Exec("DELETE FROM embeddings WHERE seq=?", cur.seq); err != nil {
 				return TaskUpdateResult{}, internal(err)
 			}
 		}

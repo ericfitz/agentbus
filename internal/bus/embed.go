@@ -367,14 +367,14 @@ func (b *Bus) noteEmbed(ctx context.Context, err error) {
 	}
 }
 
-// embedBatch embeds up to embedBatchSize live memory revisions lacking a row for
+// embedBatch embeds up to embedBatchSize live rows (any kind) lacking a row for
 // the configured model, after deleting rows from other models. The HTTP call
 // can outlive an edit/delete of the memory it's embedding, so each insert is
-// conditioned on the seq still being a live memory revision at commit time
+// conditioned on the seq still being a live row at commit time
 // (R6b); the returned count is the number of rows embedded or rejected,
 // which can be less than the number requested. When the endpoint rejects
 // the batch's input (rowRejected), each row is retried alone and the ones
-// it rejects alone are recorded in embed_failures, so one bad memory never
+// it rejects alone are recorded in embed_failures, so one bad row never
 // blocks the rest (ADR 0018).
 func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 	if b.embedder == nil {
@@ -462,7 +462,7 @@ func (b *Bus) embedBatch(ctx context.Context) (n int, err error) {
 			}
 		}
 		if !proven {
-			return 0, fmt.Errorf("the endpoint rejected every input, so this is likely its configuration (embedding_endpoint, embedding_model), not the memories: %w", firstReject)
+			return 0, fmt.Errorf("the endpoint rejected every input, so this is likely its configuration (embedding_endpoint, embedding_model), not the rows: %w", firstReject)
 		}
 	} else if err != nil {
 		return 0, err

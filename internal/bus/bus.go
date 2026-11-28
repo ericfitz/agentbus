@@ -3,6 +3,7 @@
 package bus
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -65,6 +66,10 @@ type Bus struct {
 	limits   *limiter
 	embedder *embedder
 	embedMu  sync.Mutex
+	// embedCtx is canceled by Close so an in-flight embedSoon pass stops
+	// instead of holding Close for up to a request timeout.
+	embedCtx    context.Context
+	embedCancel context.CancelFunc
 
 	// hookMu serializes inspection hook runs within this process (spec:
 	// "serial within a process, concurrent across processes"). Held only
@@ -216,6 +221,7 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 	}
 	b := &Bus{db: db, cfg: cfg, log: log, owner: owner, Now: time.Now, Mono: monotonicSinceStart}
 	b.limits = newLimiter(cfg)
+	b.embedCtx, b.embedCancel = context.WithCancel(context.Background())
 	if cfg.EmbeddingEndpoint != "" {
 		e, err := newEmbedder(cfg)
 		if err != nil {
@@ -235,6 +241,7 @@ func Open(cfg config.Config, log *slog.Logger) (*Bus, error) {
 // closing the database, so that goroutine never runs its final query against
 // an already-closed *sql.DB.
 func (b *Bus) Close() error {
+	b.embedCancel() // an in-flight pass ends promptly; its inserts are skipped
 	b.embedMu.Lock()
 	defer b.embedMu.Unlock()
 	b.flushFailLog() // after in-flight embeds have stopped

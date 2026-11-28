@@ -425,7 +425,7 @@ func (b *Bus) embedSoon() {
 		defer b.embedMu.Unlock()
 		// Each request has its own embedRequestTimeout; the pass as a whole
 		// may make one per row when a batch is rejected (ADR 0018).
-		ctx, cancel := context.WithTimeout(context.Background(), (embedBatchSize+1)*embedRequestTimeout)
+		ctx, cancel := context.WithTimeout(b.embedCtx, (embedBatchSize+1)*embedRequestTimeout)
 		defer cancel()
 		// A failure is logged, with diagnostics, inside embedBatch.
 		_, _ = b.embedBatch(ctx)

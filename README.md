@@ -132,7 +132,9 @@ From inside a session, `/agentbus:config` in Claude Code,
 same. Restart the harness after
 `agentbus install`. Configuration, including semantic search through a local
 Ollama or a remote embedding provider, is optional; see the
-[install guide](docs/install.md).
+[install guide](docs/install.md). With an embedding endpoint configured, the
+text of memories, chat messages, direct messages and tasks (subject and
+description) is sent to that endpoint.
 
 ## Operating it
 
@@ -154,8 +156,10 @@ one when you start an effort. After that, most work uses five tools:
   `.local/agentbus.json` `tags`, which `register` returns as `repo_tags`.
 - `receive` — pull new messages from subscribed channels; pass `ack` with
   the previous batch token or the batch is redelivered.
-- `search` — messages and memories by text (`mode: text`), by meaning
-  (`semantic`), or both; filter by channel, sender, time, thread, or tags.
+- `search` — messages, memories and tasks by text (`mode: text`), by meaning
+  (`semantic`, over every kind), or both; filter by channel (one channel of
+  any kind), `kinds` (`memories`, `chat`, `tasks`; default all; ignored when
+  `channel` is set), sender, time, thread, or tags.
   A word ending in `*` matches by prefix (`e159e8c*` finds a full hash).
   Every tag given must match, and `tags` alone works without a `query`
   (newest first).

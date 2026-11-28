@@ -25,3 +25,4 @@ is limited to memories, because only memories are embedded.
   need no "default changed" warning.
 - Until chat and tasks are embedded, semantic and both modes return text-only
   results for those kinds and say so in the result.
+- Superseded in part by ADR 0032: chat, DMs and tasks are now embedded.

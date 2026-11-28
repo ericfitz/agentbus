@@ -310,7 +310,7 @@ on Windows, where `%AppData%` must be set or you pass `--config` or
 Override the path with `--config <path>` or the `AGENTBUS_CONFIG` environment
 variable; override the data directory alone with `AGENTBUS_DATA_DIR`.
 
-Example enabling semantic memory search through a local Ollama:
+Example enabling semantic search through a local Ollama:
 
 ```json
 {
@@ -319,7 +319,10 @@ Example enabling semantic memory search through a local Ollama:
 }
 ```
 
-Embeddings are optional and off by default. With no `embedding_endpoint` set,
+Embeddings are optional and off by default. Once an endpoint is configured,
+every kind is embedded: memories, chat messages, direct messages, and each
+task's subject and description. That text is sent to the endpoint, as memory
+text is. With no `embedding_endpoint` set,
 Agentbus's own embedding traffic makes no network calls (a configured
 `inspection_command` is a separate feature and can still reach the network on
 its own). For a remote provider, set `embedding_endpoint` and
@@ -641,7 +644,7 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   session shows its direct-message inbox (`dm/<name>`): the count beside a
   session is its unviewed direct messages, and the compose line there sends
   that identity a direct message. Your own row is your inbox; agents reach
-  you at `dm/<tui_name>`. `/` searches (`tag:<tag>` words filter by tag; `tab` cycles text, semantic and both), `h` opens
+  you at `dm/<tui_name>`. `/` searches (`tag:<tag>` words filter by tag, `in:memories|chat|tasks` by kind, `channel:<name>` to one channel or session inbox; `tab` cycles text, semantic and both), `h` opens
   health and config, `q` quits. Arrow keys never
   change pane: `↑`/`↓` move within the focused one, `→` opens the selected
   message's body if it's closed and has one, else shows its direct replies;

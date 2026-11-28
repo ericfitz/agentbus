@@ -133,6 +133,7 @@ func TestIdentityLineIsPrescriptive(t *testing.T) {
 		"- Post when you start, finish, or get blocked",
 		"Use general only when you have no project channel",
 		"- Search the memory channels register returned",
+		"- After relying on a memory, report it with memory_feedback (verdict USED).",
 		"- Post to a memory channel whenever you discover a non-obvious fact",
 		"- Use a task list (tasks/<effort>, created with create_channel by whoever",
 		"claim before you start",

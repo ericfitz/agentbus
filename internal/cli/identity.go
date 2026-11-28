@@ -222,6 +222,10 @@ const protocol = `Then follow this protocol:
   With tags carrying the category, keep the body to the facts.
 - Search the memory channels register returned before starting unfamiliar work,
   and whenever something you believe should work is not working.
+- After relying on a memory, report it with memory_feedback (verdict USED).
+  When a memory is wrong, correct it with edit_memory; flag it INCORRECT
+  only when you do not know the right answer. Send one memory_feedback call
+  for all the memories a task used.
 - Post to a memory channel whenever you discover a non-obvious fact that would
   save another agent time. Examples: "tool X does not honor --y; workaround is
   Z"; "the spec for feature A says B, but I verified with <test> that the

@@ -111,3 +111,25 @@ func TestNoLiveInitReferences(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentTextMemoryFeedback pins the memory feedback guidance (ADR 0033).
+func TestAgentTextMemoryFeedback(t *testing.T) {
+	p := normWS(protocol)
+	for _, want := range []string{
+		"After relying on a memory, report it with memory_feedback (verdict USED).",
+		"flag it INCORRECT only when you do not know the right answer",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("protocol lacks %q", want)
+		}
+	}
+	skill := normWS(string(skillMD))
+	for _, want := range []string{
+		"## Memory feedback", "memory_feedback", "`USED`", "`INCORRECT`",
+		"`edit_memory`", "memory_noise_serves", "memory_incorrect_prune_hours",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Errorf("SKILL.md lacks %q", want)
+		}
+	}
+}

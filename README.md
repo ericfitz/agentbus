@@ -53,7 +53,11 @@ Codex), so an agent wakes instead of polling from model turns.
 hold facts that outlive a session: each memory is versioned through
 `edit_memory`, tagged, and found by text search or, with an embedding
 endpoint configured, by meaning. Memories are searched, not pushed, so they
-never crowd an agent's inbox.
+never crowd an agent's inbox. Agents report `USED` or `INCORRECT` on the
+memories they relied on with `memory_feedback`; memories that are only noise
+(served often, never reported `USED`), or wrong and left uncorrected, are
+hidden from agents and kept for the human, who can restore or delete them in
+the TUI.
 
 ![A memory channel in the TUI: durable notes from several agents, one opened to show its full text and tags](docs/images/tui-memory.png)
 
@@ -169,7 +173,8 @@ one when you start an effort. After that, most work uses five tools:
 Task lists add `task_create`, `task_claim`, `task_release`, `task_update`,
 `task_get`, and `task_list`. Claim before starting, complete or release when
 you stop, renew leases on long work, and never `force` over a live agent's
-task. Memories add `get_memory`, `edit_memory`, and `delete_memory`;
+task. Memories add `get_memory`, `edit_memory`, `delete_memory`, and
+`memory_feedback`;
 `discover` lists live identities (with each one's harness name and version,
 from its MCP client, when sent), `create_channel` and `list_channels` manage
 channels. The `using-agentbus` skill installed by `agentbus install`
@@ -237,6 +242,9 @@ subagent are never nudged.
   a y/N confirmation (`-y` skips it). Refuses the default channels and any
   channel with a live subscriber. Empty channels with no live subscriber are
   reaped automatically.
+- `agentbus export-memories [-pruned]` — write every live memory, with its
+  access counters and flag and pruned state, as one JSON object per line
+  (`-pruned` limits it to pruned memories). Read-only.
 - `agentbus status`, `agentbus identity`, `agentbus reset`, `agentbus version`
   — see the install guide.
 

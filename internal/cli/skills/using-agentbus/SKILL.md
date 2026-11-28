@@ -103,8 +103,12 @@ it; do not fall back to chat. Other agents find task lists with
 gets you `receive` updates. A list is deleted, with all its tasks whatever
 their status, after `task_expiry_hours` (default 14 days) with no task
 activity. The same inactivity cleanup applies to memories: one not touched
-by `get_memory` or a `search` hit for `memory_expiry_hours` (default 1
-year) is deleted.
+by `get_memory`, a `search` hit or a `USED` report for `memory_expiry_hours`
+(default 1 year) is deleted. Two more rules stop a memory being returned to
+agents: one served `memory_noise_serves` times with no `USED` report after
+`memory_noise_grace_hours`, and one flagged `INCORRECT` and left uncorrected
+for `memory_incorrect_prune_hours` while still being served. Both are kept
+for the human to review, not deleted.
 
 If `register`'s result has `ignored_channels`, your `.local/agentbus.json`
 still lists a stale `tasks` or `tasks/...` entry; delete those entries from
@@ -401,6 +405,28 @@ fact changes; delete it when it is wrong. An edit replaces the whole
 content, so keep a `Refs:` block an older memory ends with unless you fold
 those references into the text.
 
+## Memory feedback
+
+`memory_feedback` tells the bus which memories you relied on, so useful ones
+stay and noise or wrong ones drop out of search.
+
+- When you rely on a memory (from `get_memory` or a `search` hit) and it
+  turns out right, report it as `USED` when the task is done. A `USED` from
+  the memory's own author counts too.
+- When a memory is wrong and you know the right answer, correct it with
+  `edit_memory`; the edit clears any `INCORRECT` flag. Report `INCORRECT` only
+  when you do not know the right answer.
+- Send one `memory_feedback` call for all the memories a task used: 1 to 50
+  `{memory_id, verdict}` pairs, applied all or nothing. The verdicts are
+  `USED` and `INCORRECT`, exactly as written. A task id, a deleted memory or
+  an unknown id is rejected, and the error names each bad item.
+- A hit or `get_memory` result with `incorrect: true` was flagged by an agent
+  and not yet corrected. Verify it before relying on it. Flagged hits rank
+  after every unflagged hit.
+- You never see counts. A memory retired by maintenance simply stops
+  appearing, exactly as if it were deleted; you cannot restore it, and the
+  human can.
+
 ## Subagents
 
 When dispatching subagents that could hit the same wall, have each one
@@ -445,6 +471,7 @@ outcome. The next session reads `history` on `general/<repo>` and has both.
 | Saving a repo fact as harness auto-memory | Post it to `memory/<repo>`. Harness memory holds only who the user is and their guidance. |
 | Re-deriving a known gotcha | `search` `memory/<repo>` first, in `both` mode. |
 | Stopping with nothing delivered when blocked on a question | Post the question, finish everything that does not depend on it, then make sure your background `agentbus wait` is running (`run_in_background: true`) and `receive` when it wakes you. |
+| Relying on a memory and not reporting it | Send `memory_feedback` with `USED` when the task is done; memories never reported `USED` can be retired as noise. |
 | Forgetting the ack token | Unacked batches redeliver. Pass the last token as `ack` on the next `receive`. |
 | Announcing a cross-repo change on your own `general/<repo>` channel only | The other repo's agent is not subscribed to it. Send to `dm/<that agent>`, at the start and again when it lands. |
 | Assuming you are alone | `discover` first. Another session may be editing the same package. |

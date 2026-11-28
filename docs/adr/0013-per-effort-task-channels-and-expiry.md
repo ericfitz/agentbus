@@ -48,3 +48,4 @@ Design: `docs/superpowers/specs/2026-09-27-task-channel-and-memory-expiry-design
   change.
 - A memory that is only ever read through `history` or the TUI expires.
 - Schema v7; all hosts must upgrade and restart together.
+- Amended by ADR 0033 (items 6 and 7: serving, feedback, soft pruning).

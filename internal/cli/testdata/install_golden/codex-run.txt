@@ -12,9 +12,9 @@ done: restart the harness, then run agentbus config inside each repository
 codex mcp remove agentbus
 codex mcp add agentbus -- agentbus mcp
 --- files
-.agents/skills/using-agentbus/SKILL.md f807fea1f9fa
+.agents/skills/using-agentbus/SKILL.md 6f9ac6782e6d
 .codex/config.toml dbc67e010973
 .codex/config.toml.bak 97d1bb60bb7a
 .codex/hooks.json 62f84ff43b6a
 .codex/hooks.json.bak 8f0cae331357
-.codex/prompts/agentbus.md 74b38ef44419
+.codex/prompts/agentbus.md 23341c819fb6

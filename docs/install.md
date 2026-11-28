@@ -350,6 +350,21 @@ it tombstones a memory that no `get_memory` call or `search` hit has
 touched for `memory_expiry_hours`. 0 disables the corresponding rule;
 negative values are rejected.
 
+Two more rules (#53, ADR 0033) soft-prune a memory: the maintenance tick marks
+it pruned, agents then get `not_found` for it exactly as for a deleted one,
+and the TUI still shows it, dimmed, with `R` to restore and `x` to delete. A
+pruned memory is still hard-deleted by the `memory_expiry_hours` rule.
+`memory_noise_grace_hours` (default 720, 30 days) and `memory_noise_serves`
+(default 20) are the noise rule: a memory that has never been reported `USED`,
+is older than the grace period (counted from its creation, last edit or last
+restore) and has been served at least `memory_noise_serves` times since then
+is pruned with reason `noise`. `memory_incorrect_prune_hours` (default 336, 14
+days) and `memory_incorrect_prune_serves` (default 5) are the incorrect rule:
+a memory flagged `INCORRECT` for more than that many hours, served more than
+that many times since the flag, with no `USED` since, is pruned with reason
+`incorrect`; an `edit_memory` clears the flag. Hours range 0-87600 and serves
+0-1000000. Either key of a rule at 0 disables that rule.
+
 `status_history_count` (default 20, range 1-200) is how many statuses
 `set_status` keeps per identity; older ones are dropped, and the TUI's status
 history view (`enter` on a board row) and `status_history` show what is kept.
@@ -555,6 +570,14 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   harnesses on this machine (see above).
 - `agentbus version` prints the version. Release builds set it with
   `-ldflags "-X github.com/ericfitz/agentbus/internal/mcpserver.Version=<v>"`.
+- `agentbus export-memories [-config <path>] [-pruned]` writes every live
+  memory as one JSON object per line, pruned ones included (`-pruned` keeps
+  only those), ordered by memory id, for analysis. Each object has 19 keys:
+  `channel`, `revision`, `sender`, `created_at`, `subject`, `content`, `tags`,
+  and the `memory_access` columns `memory_id`, `accessed_at`, `served_count`,
+  `used_count`, `used_at`, `grace_from`, `grace_served_base`, `incorrect_at`,
+  `incorrect_by`, `incorrect_served_base`, `pruned_at` and `pruned_reason`.
+  Read-only: it changes no counter. Task rows are not included.
 - `agentbus stop-hook` is the Stop hook `agentbus install` installs. It reads
   the hook's JSON from stdin (`cwd`, `stop_hook_active`/`stopHookActive`)
   and prints `{"decision":"block","reason":...}` when unseen messages are
@@ -653,7 +676,16 @@ The skill goes to `~/.grok/skills/using-agentbus/SKILL.md`. Inside a session,
   next newer one, labeled `r<revision> · <n> kept`; any other key returns
   it to the latest. A memory past its first revision shows `r<revision>` the
   same way. The label sits on the message's header line, after the sender
-  (and the `→` recipient, when shown) and before any tag chips. `<` and `>` narrow and widen the
+  (and the `→` recipient, when shown) and before any tag chips. On a memory in a memory channel the header also
+  shows, in this order: `<icon>pruned (<reason>)` when pruned,
+  `<icon>incorrect by <who> <when>` when flagged, then `served N` and
+  `used N` (serves through MCP `search` and `get_memory`, and `USED`
+  reports); the state markers come first so a narrow pane keeps them. A
+  pruned memory's row is dimmed. `R` restores a pruned memory (clears the
+  pruned state and any incorrect flag and restarts its noise grace), `f`
+  clears an incorrect flag, and `x` deletes the memory, pruned or not, after
+  a `y` confirmation. `R` on a memory that is not pruned and `f` on one that
+  is not flagged show the bus error as a toast. `<` and `>` narrow and widen the
   channel rail two columns at a time; the width is saved as `tui_rail_width`
   in the config file (0 or absent is a fifth of the screen), stepping from the
   saved width; the width drawn is clamped to the terminal, keeping the rail at least 16 columns and the messages

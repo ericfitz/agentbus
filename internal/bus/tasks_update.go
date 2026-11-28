@@ -520,6 +520,8 @@ func (b *Bus) TaskUpdate(as string, p TaskPatch) (TaskUpdateResult, error) {
 		if err := tx.Commit(); err != nil {
 			return TaskUpdateResult{}, internal(err)
 		}
+		// reclaimAbandoned above may have written "reclaimed" revisions.
+		b.embedSoon()
 		return res, nil
 	}
 

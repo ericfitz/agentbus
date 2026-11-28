@@ -978,6 +978,63 @@ func TestSearchToolOverTaskRowDoesNotCreateAccessRow(t *testing.T) {
 	}
 }
 
+// TestSearchTaskHitNotTouched: a task hit must not bump memory_access even
+// if a row exists for its id (TouchMemoryAccess is an UPDATE, so without a
+// row the call is a no-op either way; the row makes the filter observable).
+func TestSearchTaskHitNotTouched(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDirectory = t.TempDir()
+	b, err := bus.Open(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	srv := NewServer(b, cfg)
+	st, ct := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	dsn, err := bus.SQLiteDSN(cfg.DataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+
+	call(t, cs, "register", map[string]any{"name": "Sam"})
+	call(t, cs, "create_channel", map[string]any{"as": "Sam", "name": "tasks/work", "kind": "memory"})
+	created, _ := call(t, cs, "task_create", map[string]any{"as": "Sam", "channel": "tasks/work", "subject": "ship the widget"})
+	id := int64(created["id"].(float64))
+	const known = 12345
+	if _, err := raw.Exec("INSERT OR REPLACE INTO memory_access(memory_id, accessed_at) VALUES(?,?)", id, known); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	out, res := call(t, cs, "search", map[string]any{"as": "Sam", "query": "widget"})
+	if res.IsError {
+		t.Fatalf("search failed: %+v", res)
+	}
+	if hits, _ := out["hits"].([]any); len(hits) == 0 {
+		t.Fatalf("the task hit must be returned: %+v", out)
+	}
+	var at int64
+	if err := raw.QueryRow("SELECT accessed_at FROM memory_access WHERE memory_id=?", id).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	if at != known {
+		t.Fatalf("a task hit touched memory_access: accessed_at=%d, want %d", at, known)
+	}
+}
+
 func TestRegisterReturnsRepoTags(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)

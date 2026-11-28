@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -531,5 +532,223 @@ func TestGetMemoryFlagged(t *testing.T) {
 	var be *Error
 	if !errors.As(err, &be) || be.Code != "not_found" || be.Message != fmt.Sprintf("memory %d has no live revision", id) {
 		t.Fatalf("pruned: %v", err)
+	}
+}
+
+// TestChannelMemoryStatsIncludesPruned (#53): the map holds every live
+// memory of the channel, pruned ones included, and nothing else.
+func TestChannelMemoryStatsIncludesPruned(t *testing.T) {
+	b, sam, _ := memBus(t)
+	if _, err := b.CreateChannel(sam, "other", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	live := remember(t, b, sam, "live")
+	pruned := remember(t, b, sam, "pruned")
+	deleted := remember(t, b, sam, "deleted")
+	pruneRaw(t, b, pruned, "noise")
+	if err := b.DeleteMemory(sam, deleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "job"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := b.Send(sam, SendInput{Channel: "other", Content: "elsewhere"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.ChannelMemoryStats(sam, "mem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("stats = %v, want exactly ids %d and %d", got, live, pruned)
+	}
+	if s, ok := got[live]; !ok || s.PrunedAt != nil {
+		t.Fatalf("live memory: %+v, %v", s, ok)
+	}
+	if s, ok := got[pruned]; !ok || s.PrunedAt == nil {
+		t.Fatalf("pruned memory: %+v, %v", s, ok)
+	}
+	if _, ok := got[*r.MemoryID]; ok {
+		t.Fatal("a memory on another channel is in the map")
+	}
+}
+
+// TestRestoreMemory (#53): restore clears the pruned and flag state, restarts
+// grace, keeps counters, and survives the next ticks.
+func TestRestoreMemory(t *testing.T) {
+	for _, reason := range []string{"noise", "incorrect"} {
+		t.Run(reason, func(t *testing.T) {
+			b, sam, _ := memBus(t)
+			t0 := time.Unix(1_800_000_000, 0)
+			clockAt(b, t0, 0)
+			id := remember(t, b, sam, "fact")
+			setAccess(t, b, id, "served_count=30, used_count=0, pruned_at=?, pruned_reason=?", t0.UnixMilli(), reason)
+			if reason == "incorrect" {
+				setAccess(t, b, id, "incorrect_at=?, incorrect_by='Kim', incorrect_served_base=2", t0.UnixMilli())
+			}
+			now := t0.Add(1000 * time.Hour)
+			clockAt(b, t0, 1000*time.Hour)
+			if err := b.RestoreMemory(sam, id); err != nil {
+				t.Fatal(err)
+			}
+			s := stats(t, b, id)
+			if s.PrunedAt != nil || s.PrunedReason != nil || s.IncorrectAt != nil || s.IncorrectBy != nil ||
+				s.IncorrectServedBase != 0 || s.GraceFrom != now.UnixMilli() || s.ServedCount != 30 || s.GraceServedBase != 30 {
+				t.Fatalf("after restore: %+v", s)
+			}
+			if _, err := b.GetMemory(sam, id); err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range []time.Duration{0, time.Hour} {
+				clockAt(b, t0, 1000*time.Hour+d)
+				if err := b.Heartbeat(); err != nil {
+					t.Fatal(err)
+				}
+				b.Tick(context.Background())
+				if s := stats(t, b, id); s.PrunedAt != nil {
+					t.Fatalf("pruned again at +%v: %+v", d, s)
+				}
+			}
+			before := stats(t, b, id)
+			err := b.RestoreMemory(sam, id)
+			wantCode(t, err, "validation")
+			var be *Error
+			if !errors.As(err, &be) || be.Message != fmt.Sprintf("memory %d is not pruned", id) {
+				t.Fatalf("err = %v", err)
+			}
+			if !reflect.DeepEqual(before, stats(t, b, id)) {
+				t.Fatal("a refused restore changed the row")
+			}
+		})
+	}
+}
+
+// TestRestoredMemoryNeedsNewServes (#53, spec item 15): after a restore the
+// noise rule counts only serves since the restore.
+func TestRestoredMemoryNeedsNewServes(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	id := remember(t, b, sam, "fact")
+	setAccess(t, b, id, "served_count=30, used_count=0, pruned_at=?, pruned_reason='noise'", t0.UnixMilli())
+	const r = 1000 * time.Hour
+	clockAt(b, t0, r)
+	if err := b.RestoreMemory(sam, id); err != nil {
+		t.Fatal(err)
+	}
+	tickAt := func(d time.Duration) MemoryStats {
+		clockAt(b, t0, r+d)
+		if err := b.Heartbeat(); err != nil {
+			t.Fatal(err)
+		}
+		b.Tick(context.Background())
+		return stats(t, b, id)
+	}
+	if s := tickAt(721 * time.Hour); s.PrunedAt != nil {
+		t.Fatalf("pruned with no new serve: %+v", s)
+	}
+	for i := 0; i < 19; i++ {
+		if err := b.TouchMemoryAccess([]int64{id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s := tickAt(722 * time.Hour); s.PrunedAt != nil {
+		t.Fatalf("pruned after 19 serves: %+v", s)
+	}
+	if err := b.TouchMemoryAccess([]int64{id}); err != nil {
+		t.Fatal(err)
+	}
+	s := tickAt(723 * time.Hour)
+	if s.PrunedAt == nil || s.PrunedReason == nil || *s.PrunedReason != "noise" {
+		t.Fatalf("not pruned after 20 serves: %+v", s)
+	}
+}
+
+// TestClearMemoryIncorrect (#53): clears only the flag columns, on a pruned
+// memory too, and refuses an unflagged memory.
+func TestClearMemoryIncorrect(t *testing.T) {
+	b, sam, _ := memBus(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	clockAt(b, t0, 0)
+	flag := "served_count=9, used_count=3, grace_served_base=4, incorrect_at=7, incorrect_by='Kim', incorrect_served_base=6"
+	id := remember(t, b, sam, "flagged")
+	setAccess(t, b, id, flag)
+	before := stats(t, b, id)
+	if err := b.ClearMemoryIncorrect(sam, id); err != nil {
+		t.Fatal(err)
+	}
+	want := before
+	want.IncorrectAt, want.IncorrectBy, want.IncorrectServedBase = nil, nil, 0
+	if got := stats(t, b, id); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+
+	pid := remember(t, b, sam, "flagged and pruned")
+	setAccess(t, b, pid, flag+", pruned_at=5, pruned_reason='incorrect'")
+	if err := b.ClearMemoryIncorrect(sam, pid); err != nil {
+		t.Fatal(err)
+	}
+	if s := stats(t, b, pid); s.IncorrectAt != nil || s.IncorrectBy != nil || s.PrunedAt == nil || s.PrunedReason == nil {
+		t.Fatalf("pruned memory: %+v", s)
+	}
+
+	err := b.ClearMemoryIncorrect(sam, id)
+	wantCode(t, err, "validation")
+	var be *Error
+	if !errors.As(err, &be) || be.Message != fmt.Sprintf("memory %d is not flagged incorrect", id) {
+		t.Fatalf("err = %v", err)
+	}
+	gone := remember(t, b, sam, "gone")
+	if err := b.DeleteMemory(sam, gone, ""); err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, b.ClearMemoryIncorrect(sam, gone), "not_found")
+	wantCode(t, b.RestoreMemory(sam, gone), "not_found")
+}
+
+// TestDeleteMemoryAny (#53): deletes pruned and unpruned memories through the
+// hook, refuses tasks, replays as not_found, and honors a refusing hook.
+func TestDeleteMemoryAny(t *testing.T) {
+	b, sam, _ := memBus(t)
+	pruned := remember(t, b, sam, "pruned")
+	pruneRaw(t, b, pruned, "noise")
+	plain := remember(t, b, sam, "plain")
+	for _, id := range []int64{pruned, plain} {
+		calls := b.inspectCalls.Load()
+		if err := b.DeleteMemoryAny(sam, id); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.inspectCalls.Load(); got != calls+1 {
+			t.Fatalf("inspectCalls = %d, want %d", got, calls+1)
+		}
+		var tomb, rows int
+		if err := b.db.QueryRow("SELECT tombstone FROM messages WHERE memory_id=?", id).Scan(&tomb); err != nil || tomb != 1 {
+			t.Fatalf("tombstone = %d, %v", tomb, err)
+		}
+		if err := b.db.QueryRow("SELECT COUNT(*) FROM memory_access WHERE memory_id=?", id).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("memory_access rows = %d, %v", rows, err)
+		}
+		wantCode(t, b.DeleteMemoryAny(sam, id), "not_found")
+	}
+
+	if _, err := b.CreateChannel(sam, "tasks/w", "memory"); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := b.TaskCreate(sam, TaskCreateInput{Channel: "tasks/w", Subject: "job"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, b.DeleteMemoryAny(sam, tk.ID), "validation")
+
+	keep := remember(t, b, sam, "keep")
+	b.cfg.InspectionCommand = []string{hookScript(t, `cat >/dev/null; echo '{"allow": false, "reason": "no"}'`)}
+	b.cfg.InspectionTimeoutSeconds = 5
+	wantCode(t, b.DeleteMemoryAny(sam, keep), "inspection_rejected")
+	if _, err := b.GetMemory(sam, keep); err != nil {
+		t.Fatalf("memory refused by the hook is gone: %v", err)
 	}
 }

@@ -180,3 +180,117 @@ func (b *Bus) GetMemoryFlagged(as string, id int64) (FlaggedMemory, error) {
 	}
 	return FlaggedMemory{Message: m, Incorrect: flagged}, nil
 }
+
+// ChannelMemoryStats returns the memory_access row of every live memory on
+// channel, pruned ones included, keyed by memory id. A memory with no live
+// revision (deleted) or no row (a task) is absent. Human-facing only (TUI
+// and CLI): never registered as an MCP tool, so agents never see counts.
+func (b *Bus) ChannelMemoryStats(as, channel string) (map[int64]MemoryStats, error) {
+	if err := b.auth(b.db, as); err != nil {
+		return nil, err
+	}
+	rows, err := b.db.Query("SELECT "+memoryStatsCols+` FROM memory_access a
+  JOIN messages m ON m.memory_id=a.memory_id AND m.tombstone=0 WHERE m.channel=?`, channel)
+	if err != nil {
+		return nil, internal(err)
+	}
+	list, err := scanMemoryStats(rows)
+	if err != nil {
+		return nil, internal(err)
+	}
+	out := make(map[int64]MemoryStats, len(list))
+	for _, s := range list {
+		out[s.MemoryID] = s
+	}
+	return out, nil
+}
+
+// RestoreMemory clears pruned_at, pruned_reason and the INCORRECT flag (all
+// three columns), and restarts the grace period: grace_from=now and
+// grace_served_base=served_count. The counters stay. Human-facing only: never
+// registered as an MCP tool.
+func (b *Bus) RestoreMemory(as string, id int64) error {
+	return b.memoryAccessWrite(as, id, `UPDATE memory_access SET pruned_at=NULL, pruned_reason=NULL,
+  incorrect_at=NULL, incorrect_by=NULL, incorrect_served_base=0, grace_from=?, grace_served_base=served_count
+  WHERE memory_id=? AND pruned_at IS NOT NULL`, []any{b.nowMs(), id},
+		fmt.Sprintf("memory %d is not pruned", id))
+}
+
+// ClearMemoryIncorrect clears incorrect_at, incorrect_by and
+// incorrect_served_base on any live memory, pruned or not; the pruned state
+// stays. Human-facing only: never registered as an MCP tool.
+func (b *Bus) ClearMemoryIncorrect(as string, id int64) error {
+	return b.memoryAccessWrite(as, id, `UPDATE memory_access SET incorrect_at=NULL, incorrect_by=NULL,
+  incorrect_served_base=0 WHERE memory_id=? AND incorrect_at IS NOT NULL`, []any{id},
+		fmt.Sprintf("memory %d is not flagged incorrect", id))
+}
+
+// memoryAccessWrite runs one guarded memory_access UPDATE for a live memory,
+// pruned or not, in one transaction. A guard that matches no row means the
+// memory is not in the required state: a validation error with notState.
+func (b *Bus) memoryAccessWrite(as string, id int64, update string, args []any, notState string) error {
+	if err := b.auth(b.db, as); err != nil {
+		return err
+	}
+	tx, err := b.db.Begin()
+	if err != nil {
+		return internal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := b.auth(tx, as); err != nil {
+		return err
+	}
+	if _, _, _, err := liveRevisionAny(tx, id); err != nil {
+		return err
+	}
+	r, err := tx.Exec(update, args...)
+	if err != nil {
+		return internal(err)
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return internal(err)
+	}
+	if n == 0 {
+		return errf("validation", false, "%s", notState)
+	}
+	return internal(tx.Commit())
+}
+
+// DeleteMemoryAny deletes a live memory, pruned or not: DeleteMemory's write
+// with no idempotency receipt. Human-facing only: never registered as an MCP
+// tool.
+func (b *Bus) DeleteMemoryAny(as string, id int64) error {
+	if err := b.auth(b.db, as); err != nil {
+		return err
+	}
+	if err := b.inspect("delete_memory", as, map[string]any{"delete": id}); err != nil {
+		return err
+	}
+	tx, err := b.db.Begin()
+	if err != nil {
+		return internal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := b.auth(tx, as); err != nil {
+		return err
+	}
+	seq, _, channel, err := liveRevisionAny(tx, id)
+	if err != nil {
+		return err
+	}
+	if IsTaskChannel(channel) {
+		return errf("validation", false, "%s is a task list; use task_create, task_update, task_claim, task_release", channel)
+	}
+	if !b.limits.allow(as, 0, b.Now()) {
+		return errf("rate_limited", true, "send_messages_per_second rate limit exceeded for %s", as)
+	}
+	ok, err := b.tombstoneMemoryRow(tx, id, seq)
+	if err != nil {
+		return internal(err)
+	}
+	if !ok {
+		return errf("not_found", false, "memory %d has no live revision", id)
+	}
+	return internal(tx.Commit())
+}

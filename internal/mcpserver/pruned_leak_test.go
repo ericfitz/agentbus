@@ -46,7 +46,7 @@ func TestPrunedMemoryNeverLeaksThroughAnyTool(t *testing.T) {
 		out, _ := call(t, cs, "send", map[string]any{"as": "Sam", "channel": "mem", "content": content, "tags": []string{"kind:gotcha"}})
 		return int64(out["memory_id"].(float64))
 	}
-	p, d := send("zebracorn pruned"), send("zebracorn deleted")
+	p, d, live := send("zebracorn pruned"), send("zebracorn deleted"), send("zebracorn live")
 	if _, res := call(t, cs, "delete_memory", map[string]any{"as": "Sam", "id": d}); res.IsError {
 		t.Fatalf("delete d: %+v", res)
 	}
@@ -80,13 +80,21 @@ func TestPrunedMemoryNeverLeaksThroughAnyTool(t *testing.T) {
 			}
 		}
 	}
-	// hidesContent calls tool and requires no trace of the pruned memory.
-	hidesContent := func(tool string, args map[string]any) func(t *testing.T) {
+	// hidesContent calls tool, requires success and no trace of the pruned
+	// or deleted memory. With wantLive it also requires the live control
+	// memory, so the hide assertions cannot pass on an empty result.
+	hidesContent := func(tool string, args map[string]any, wantLive bool) func(t *testing.T) {
 		return func(t *testing.T) {
 			_, res := call(t, cs, tool, args)
 			s := text(res)
-			if strings.Contains(s, "zebracorn") || strings.Contains(s, fmt.Sprintf(`"memory_id":%d`, p)) {
+			if res.IsError {
+				t.Fatalf("%s: unexpected error: %s", tool, s)
+			}
+			if strings.Contains(s, "zebracorn pruned") || strings.Contains(s, "zebracorn deleted") || strings.Contains(s, fmt.Sprintf(`"memory_id":%d`, p)) {
 				t.Fatalf("%s leaked the pruned memory: %s", tool, s)
+			}
+			if wantLive && !strings.Contains(s, fmt.Sprintf(`"memory_id":%d`, live)) {
+				t.Fatalf("%s lost the live control memory %d: %s", tool, live, s)
 			}
 		}
 	}
@@ -115,8 +123,11 @@ func TestPrunedMemoryNeverLeaksThroughAnyTool(t *testing.T) {
 		"task_claim":   sameAsDeleted("task_claim", func(id int64) map[string]any { return as(map[string]any{"task_id": id}) }),
 		"task_release": sameAsDeleted("task_release", func(id int64) map[string]any { return as(map[string]any{"task_id": id}) }),
 
-		"history": hidesContent("history", as(map[string]any{"channel": "mem"})),
-		"receive": hidesContent("receive", as(map[string]any{})),
+		"history": hidesContent("history", as(map[string]any{"channel": "mem"}), true),
+		// Sam holds no memory-channel subscription and memory channels are
+		// never pushed to receive, so a pruned memory is unreachable here by
+		// design; the call must still succeed and show nothing of it.
+		"receive": hidesContent("receive", as(map[string]any{}), false),
 
 		"register":       clean("register", map[string]any{"name": "Sam"}),
 		"create_channel": clean("create_channel", as(map[string]any{"name": "chat", "kind": "ordinary"})),
@@ -138,7 +149,7 @@ func TestPrunedMemoryNeverLeaksThroughAnyTool(t *testing.T) {
 	}
 	cases["search"] = func(t *testing.T) {
 		for name, args := range searches {
-			t.Run(name, hidesContent("search", args))
+			t.Run(name, hidesContent("search", args, true))
 		}
 	}
 
